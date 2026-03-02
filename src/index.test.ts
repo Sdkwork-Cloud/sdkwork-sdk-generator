@@ -447,6 +447,7 @@ describe('SDK Generators', () => {
         );
         expect(readmeFiles.length).toBeGreaterThan(0);
         expect(readmeFiles[0].content).toContain('TestSDK');
+        expect(readmeFiles[0].content).toContain('## Publishing');
       });
 
       it('should generate publish bin scripts', async () => {

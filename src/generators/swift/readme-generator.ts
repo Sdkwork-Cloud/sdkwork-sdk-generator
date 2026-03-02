@@ -5,6 +5,7 @@ import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
+  buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName, resolveSdkLibraryName } from '../../framework/sdk-identity.js';
@@ -61,6 +62,7 @@ client.setAccessToken("your-access-token")
       authTokenCall: 'setAuthToken(...)',
       accessTokenCall: 'setAccessToken(...)',
     });
+    const publishSection = buildPublishSection('swift');
 
     const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
 
@@ -124,6 +126,8 @@ do {
     print("Error: \\(error)")
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

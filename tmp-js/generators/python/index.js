@@ -5,7 +5,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
-import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { generatePublishBinScripts } from '../../framework/publish.js';
 export class PythonGenerator extends BaseGenerator {
@@ -73,6 +73,7 @@ client.set_access_token("your-access-token")
             authTokenCall: 'set_auth_token(...)',
             accessTokenCall: 'set_access_token(...)',
         });
+        const publishSection = buildPublishSection('python');
         return {
             path: 'README.md',
             content: this.format(`# ${readmeTitle}
@@ -106,6 +107,8 @@ ${authSection}
 ## API Modules
 
 ${modules}
+
+${publishSection}
 
 ## License
 

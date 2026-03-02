@@ -5,6 +5,7 @@ import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
+  buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -59,6 +60,7 @@ client.setAccessToken('your-access-token');
       authTokenCall: 'setAuthToken(...)',
       accessTokenCall: 'setAccessToken(...)',
     });
+    const publishSection = buildPublishSection('flutter');
 
     const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
 
@@ -123,6 +125,8 @@ try {
   print('Error: $e');
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

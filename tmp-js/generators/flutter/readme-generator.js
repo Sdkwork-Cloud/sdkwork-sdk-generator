@@ -1,6 +1,6 @@
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
-import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { FLUTTER_CONFIG } from './config.js';
 export class ReadmeGenerator {
@@ -45,6 +45,7 @@ client.setAccessToken('your-access-token');
             authTokenCall: 'setAuthToken(...)',
             accessTokenCall: 'setAccessToken(...)',
         });
+        const publishSection = buildPublishSection('flutter');
         const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
         return {
             path: 'README.md',
@@ -107,6 +108,8 @@ try {
   print('Error: $e');
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

@@ -1,6 +1,6 @@
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
-import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { CSHARP_CONFIG } from './config.js';
 export class ReadmeGenerator {
@@ -47,6 +47,7 @@ client.SetAccessToken("your-access-token");
             authTokenCall: 'SetAuthToken(...)',
             accessTokenCall: 'SetAccessToken(...)',
         });
+        const publishSection = buildPublishSection('csharp');
         const examples = this.generateExamples(ctx, config, clientName, namespace, resolvedTagNames);
         return {
             path: 'README.md',
@@ -113,6 +114,8 @@ catch (HttpRequestException ex)
     Console.WriteLine($"Error: {ex.Message}");
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

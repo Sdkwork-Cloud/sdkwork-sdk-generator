@@ -1,6 +1,6 @@
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
-import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName, resolveSdkLibraryName } from '../../framework/sdk-identity.js';
 import { SWIFT_CONFIG } from './config.js';
 export class ReadmeGenerator {
@@ -47,6 +47,7 @@ client.setAccessToken("your-access-token")
             authTokenCall: 'setAuthToken(...)',
             accessTokenCall: 'setAccessToken(...)',
         });
+        const publishSection = buildPublishSection('swift');
         const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
         return {
             path: 'README.md',
@@ -108,6 +109,8 @@ do {
     print("Error: \\(error)")
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

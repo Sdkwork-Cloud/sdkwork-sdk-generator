@@ -1,6 +1,6 @@
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
-import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JAVA_CONFIG } from './config.js';
 export class ReadmeGenerator {
@@ -46,6 +46,7 @@ client.setAccessToken("your-access-token");
             authTokenCall: 'setAuthToken(...)',
             accessTokenCall: 'setAccessToken(...)',
         });
+        const publishSection = buildPublishSection('java');
         const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
         return {
             path: 'README.md',
@@ -119,6 +120,8 @@ try {
     System.err.println("Error: " + e.getMessage());
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

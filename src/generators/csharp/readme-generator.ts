@@ -5,6 +5,7 @@ import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
+  buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -61,6 +62,7 @@ client.SetAccessToken("your-access-token");
       authTokenCall: 'SetAuthToken(...)',
       accessTokenCall: 'SetAccessToken(...)',
     });
+    const publishSection = buildPublishSection('csharp');
 
     const examples = this.generateExamples(ctx, config, clientName, namespace, resolvedTagNames);
 
@@ -129,6 +131,8 @@ catch (HttpRequestException ex)
     Console.WriteLine($"Error: {ex.Message}");
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

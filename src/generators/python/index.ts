@@ -9,6 +9,7 @@ import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOper
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
+  buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -97,6 +98,7 @@ client.set_access_token("your-access-token")
       authTokenCall: 'set_auth_token(...)',
       accessTokenCall: 'set_access_token(...)',
     });
+    const publishSection = buildPublishSection('python');
 
     return {
       path: 'README.md',
@@ -131,6 +133,8 @@ ${authSection}
 ## API Modules
 
 ${modules}
+
+${publishSection}
 
 ## License
 

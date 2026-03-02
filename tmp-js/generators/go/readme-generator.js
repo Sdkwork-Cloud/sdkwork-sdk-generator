@@ -1,5 +1,5 @@
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
-import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GO_CONFIG } from './config.js';
 export class ReadmeGenerator {
@@ -45,6 +45,7 @@ client.SetAccessToken("your-access-token")
             authTokenCall: 'SetAuthToken(...)',
             accessTokenCall: 'SetAccessToken(...)',
         });
+        const publishSection = buildPublishSection('go');
         const examples = this.generateExamples(ctx, config, clientName, moduleName, resolvedTagNames);
         return {
             path: 'README.md',
@@ -113,6 +114,8 @@ if err != nil {
     return
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

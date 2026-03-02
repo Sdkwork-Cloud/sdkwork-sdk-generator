@@ -4,6 +4,7 @@ import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOper
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
+  buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -61,6 +62,7 @@ client.SetAccessToken("your-access-token")
       authTokenCall: 'SetAuthToken(...)',
       accessTokenCall: 'SetAccessToken(...)',
     });
+    const publishSection = buildPublishSection('go');
 
     const examples = this.generateExamples(ctx, config, clientName, moduleName, resolvedTagNames);
 
@@ -131,6 +133,8 @@ if err != nil {
     return
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 

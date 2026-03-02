@@ -1,5 +1,5 @@
 import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
-import { buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview } from '../../framework/readme.js';
+import { buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { TYPESCRIPT_CONFIG } from './config.js';
 import { buildTypeScriptTagMetadataMap } from './tag-metadata.js';
@@ -47,6 +47,7 @@ client.setAccessToken('your-access-token');
             authTokenCall: 'setAuthToken(...)',
             accessTokenCall: 'setAccessToken(...)',
         });
+        const publishSection = buildPublishSection('typescript');
         const examples = this.generateExamples(ctx, tagMetadataMap);
         return {
             path: 'README.md',
@@ -124,6 +125,8 @@ ${quickStartSnippetInTry}
   }
 }
 \`\`\`
+
+${publishSection}
 
 ## License
 
