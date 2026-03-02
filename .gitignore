@@ -1,23 +1,63 @@
-# Dependencies
-node_modules/
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
 
-# Build outputs
-dist/
-coverage/
-*.tsbuildinfo
-
-# Local temp/debug artifacts
-tmp-*.json
-tmp-*.mjs
-test-openapi.json
+# Logs / temp
 *.log
+*.tmp
+*.temp
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# OS/editor files
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
+# Local env
+.env
+.env.*
+!.env.example
+
+# Recovery backups
+*.__backup_*/
+*.__gitseed_*/
+
+# Node / TypeScript
+**/node_modules/
+**/.pnpm-store/
+**/dist/
+**/coverage/
+**/*.tsbuildinfo
+
+# Local temp/debug artifacts
+tmp-*.json
+tmp-*.mjs
+test-openapi.json
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.venv/
+**/venv/
+
+# Java / Kotlin / Maven / Gradle
+**/.gradle/
+**/build/
+**/out/
+**/target/
+**/*.class
+
+# .NET
+**/obj/
+**/bin/Debug/
+**/bin/Release/
+
+# Dart / Flutter
+**/.dart_tool/
+**/.packages
+**/pubspec.lock
+
+# Local artifacts at repo root
+/bin/
