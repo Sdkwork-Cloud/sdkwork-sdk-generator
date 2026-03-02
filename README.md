@@ -10,6 +10,7 @@ Professional SDK code generator for multiple programming languages. Generate typ
 - **README System**: Every generated SDK always includes a top-level `README.md`
 - **Unified Client Naming**: `Sdkwork{SdkType}Client` across all languages (for example `SdkworkAiClient`)
 - **Auth Clarity**: README examples document API key mode and dual-token mode as mutually exclusive
+- **Unified Publish Bin**: Every generated language SDK includes `bin/publish-core.mjs`, `bin/publish.sh`, and `bin/publish.ps1`
 - **Unified Imports**: All imports use the main package entry (no sub-path imports)
 - **Async/Await**: Modern async patterns for all languages
 - **Strict Spec Validation**: Generation fails fast if input is not OpenAPI 3.x, has no `paths`, or is an upstream error payload (`code/msg` wrapper)
@@ -140,6 +141,7 @@ generators/
 | `api-generator.ts` | Generates API endpoint classes with methods |
 | `http-generator.ts` | Generates HTTP client with auth support |
 | `build-config-generator.ts` | Generates package config (package.json, pom.xml, etc.) |
+| `bin/publish*.{mjs,sh,ps1}` | Generates cross-platform publish scripts for each language package |
 | `readme-generator.ts` | Generates README with usage examples |
 
 ## SDK Types
@@ -378,20 +380,41 @@ These common packages provide:
 
 ## Scripts
 
-### Windows
+### Generated Package Publish Scripts
 
-```batch
-bin\sdk-gen.bat generate --type backend --lang typescript
-bin\sdk-gen.bat build --type app
-bin\sdk-gen.bat all
-```
+Every generated language package includes:
 
-### Linux/macOS
+- `bin/publish-core.mjs`
+- `bin/publish.sh`
+- `bin/publish.ps1`
+
+Use from package root:
 
 ```bash
-./bin/sdk-gen.sh generate --type backend --lang typescript
-./bin/sdk-gen.sh build --type app
-./bin/sdk-gen.sh all
+./bin/publish.sh --action check
+./bin/publish.sh --action publish --channel release
+```
+
+```powershell
+.\bin\publish.ps1 --action publish --channel test --dry-run
+```
+
+Supported actions:
+
+- `check`
+- `build`
+- `publish`
+
+### TypeScript Additional Build Helpers
+
+TypeScript packages also include legacy build helpers:
+
+```batch
+bin\sdk-gen.bat build
+```
+
+```bash
+./bin/sdk-gen.sh build
 ```
 
 ## Development

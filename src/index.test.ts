@@ -448,6 +448,20 @@ describe('SDK Generators', () => {
         expect(readmeFiles.length).toBeGreaterThan(0);
         expect(readmeFiles[0].content).toContain('TestSDK');
       });
+
+      it('should generate publish bin scripts', async () => {
+        const generator = new Generator();
+        const result = await generator.generate(baseConfig, mockSpec);
+        const paths = result.files.map((file) => file.path);
+        expect(paths).toContain('bin/publish-core.mjs');
+        expect(paths).toContain('bin/publish.sh');
+        expect(paths).toContain('bin/publish.ps1');
+
+        if (name === 'TypeScript') {
+          expect(paths).toContain('bin/sdk-gen.bat');
+          expect(paths).toContain('bin/sdk-gen.sh');
+        }
+      });
     });
   });
 });

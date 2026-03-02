@@ -5,6 +5,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { ReadmeGenerator } from './readme-generator.js';
+import { generatePublishBinScripts } from '../../framework/publish.js';
 export class SwiftGenerator extends BaseGenerator {
     constructor() {
         super(SWIFT_CONFIG);
@@ -26,8 +27,8 @@ export class SwiftGenerator extends BaseGenerator {
     generateBuildConfig(config) {
         return this.buildConfigGenerator.generate(config);
     }
-    generateBinScripts(config) {
-        return [];
+    generateBinScripts(_config) {
+        return generatePublishBinScripts('swift');
     }
     generateReadme(ctx, config) {
         return this.readmeGenerator.generate(ctx, config);

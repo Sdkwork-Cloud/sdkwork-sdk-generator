@@ -6,6 +6,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { ReadmeGenerator } from './readme-generator.js';
+import { generatePublishBinScripts, generateTypeScriptBuildBinScripts } from '../../framework/publish.js';
 
 export class TypeScriptGenerator extends BaseGenerator {
   private modelGenerator: ModelGenerator;
@@ -40,40 +41,9 @@ export class TypeScriptGenerator extends BaseGenerator {
   }
 
   generateBinScripts(config: GeneratorConfig): GeneratedFile[] {
-    const name = this.toPascalCase(config.sdkType);
-    
     return [
-      {
-        path: 'bin/sdk-gen.bat',
-        content: `@echo off
-echo SDKWork ${name} SDK
-if "%1"=="" goto help
-if "%1"=="build" goto build
-:help
-echo Usage: sdk-gen.bat build
-:build
-cd /d "%~dp0.."
-npm install && npm run build
-`,
-        language: 'typescript',
-        description: 'Windows build script',
-      },
-      {
-        path: 'bin/sdk-gen.sh',
-        content: `#!/bin/bash
-echo "SDKWork ${name} SDK"
-case "$1" in
-  build)
-    cd "$(dirname "$0")/.." && npm install && npm run build
-    ;;
-  *)
-    echo "Usage: $0 build"
-    ;;
-esac
-`,
-        language: 'typescript',
-        description: 'Unix build script',
-      },
+      ...generateTypeScriptBuildBinScripts(config),
+      ...generatePublishBinScripts('typescript'),
     ];
   }
 

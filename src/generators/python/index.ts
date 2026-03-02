@@ -12,6 +12,7 @@ import {
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { generatePublishBinScripts } from '../../framework/publish.js';
 
 export class PythonGenerator extends BaseGenerator {
   private modelGenerator: ModelGenerator;
@@ -44,7 +45,7 @@ export class PythonGenerator extends BaseGenerator {
   }
 
   generateBinScripts(_config: GeneratorConfig): GeneratedFile[] {
-    return [];
+    return generatePublishBinScripts('python');
   }
 
   generateReadme(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {

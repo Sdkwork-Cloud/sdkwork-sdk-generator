@@ -7,6 +7,7 @@ import { BuildConfigGenerator } from './build-config-generator.js';
 import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { generatePublishBinScripts } from '../../framework/publish.js';
 export class PythonGenerator extends BaseGenerator {
     constructor() {
         super(PYTHON_CONFIG);
@@ -28,7 +29,7 @@ export class PythonGenerator extends BaseGenerator {
         return this.buildConfigGenerator.generate(config);
     }
     generateBinScripts(_config) {
-        return [];
+        return generatePublishBinScripts('python');
     }
     generateReadme(ctx, config) {
         const clientName = resolveSdkClientName(config);
