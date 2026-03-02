@@ -1,0 +1,241 @@
+import { buildTypeScriptTagMetadata } from './tag-metadata.js';
+import { resolveTypeScriptCommonPackage } from '../../framework/common-package.js';
+import { resolveSdkClientName, resolveTypeScriptConfigTypeName } from '../../framework/sdk-identity.js';
+export class HttpClientGenerator {
+    generate(ctx, config) {
+        const configType = resolveTypeScriptConfigTypeName(config);
+        const clientName = resolveSdkClientName(config);
+        const tags = Object.keys(ctx.apiGroups);
+        const tagMetadata = buildTypeScriptTagMetadata(tags);
+        const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
+        const commonPkg = resolveTypeScriptCommonPackage(config);
+        return [
+            this.generateHttpClient(configType, apiKeyHeader, apiKeyUseBearer, commonPkg.importPath),
+            this.generateHttpIndex(),
+            this.generateAuthIndex(commonPkg.importPath),
+            this.generateSdkClass(clientName, configType, tagMetadata, config, commonPkg.importPath),
+            this.generateMainIndex(clientName),
+        ];
+    }
+    generateHttpClient(configType, apiKeyHeader, apiKeyUseBearer, commonImportPath) {
+        return {
+            path: 'src/http/client.ts',
+            content: this.format(`import type { ${configType} } from '../types/common';
+import type { RequestOptions, QueryParams } from '${commonImportPath}';
+import type { AuthTokenManager } from '${commonImportPath}';
+import { BaseHttpClient, withRetry } from '${commonImportPath}';
+
+export class HttpClient extends BaseHttpClient {
+  private static readonly API_KEY_HEADER = '${apiKeyHeader}';
+  private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
+
+  constructor(config: ${configType}) {
+    super(config as any);
+  }
+
+  private getInternalAuthConfig(): any {
+    const self = this as any;
+    self.authConfig = self.authConfig || {};
+    return self.authConfig;
+  }
+
+  private getInternalHeaders(): Record<string, string> {
+    const self = this as any;
+    self.config = self.config || {};
+    self.config.headers = self.config.headers || {};
+    return self.config.headers;
+  }
+
+  setApiKey(apiKey: string): void {
+    const authConfig = this.getInternalAuthConfig();
+    const headers = this.getInternalHeaders();
+    authConfig.apiKey = apiKey;
+    authConfig.tokenManager?.clearTokens?.();
+
+    if (HttpClient.API_KEY_HEADER === 'Authorization' && HttpClient.API_KEY_USE_BEARER) {
+      authConfig.authMode = 'apikey';
+      delete headers['Access-Token'];
+      return;
+    }
+
+    authConfig.authMode = 'dual-token';
+    headers[HttpClient.API_KEY_HEADER] = HttpClient.API_KEY_USE_BEARER
+      ? \`Bearer \${apiKey}\`
+      : apiKey;
+
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
+      delete headers['Authorization'];
+    }
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'access-token') {
+      delete headers['Access-Token'];
+    }
+  }
+
+  setAuthToken(token: string): void {
+    const headers = this.getInternalHeaders();
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
+      delete headers[HttpClient.API_KEY_HEADER];
+    }
+    super.setAuthToken(token);
+  }
+
+  setAccessToken(token: string): void {
+    const headers = this.getInternalHeaders();
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'access-token') {
+      delete headers[HttpClient.API_KEY_HEADER];
+    }
+    super.setAccessToken(token);
+  }
+
+  setTokenManager(manager: AuthTokenManager): void {
+    const baseProto = Object.getPrototypeOf(HttpClient.prototype) as { setTokenManager?: (this: HttpClient, m: AuthTokenManager) => void };
+    if (typeof baseProto.setTokenManager === 'function') {
+      baseProto.setTokenManager.call(this, manager);
+      return;
+    }
+    this.getInternalAuthConfig().tokenManager = manager;
+  }
+
+  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+    const execute = (this as any).execute;
+    if (typeof execute !== 'function') {
+      throw new Error('BaseHttpClient execute method is not available');
+    }
+    return withRetry(
+      () => execute.call(this, { 
+        url: path, 
+        method: options.method ?? 'GET', 
+        ...options 
+      }),
+      { maxRetries: 3 }
+    );
+  }
+
+  async get<T>(path: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>(path, { method: 'GET', params, headers });
+  }
+
+  async post<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>(path, { method: 'POST', body, params, headers });
+  }
+
+  async put<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>(path, { method: 'PUT', body, params, headers });
+  }
+
+  async delete<T>(path: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>(path, { method: 'DELETE', params, headers });
+  }
+
+  async patch<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
+    return this.request<T>(path, { method: 'PATCH', body, params, headers });
+  }
+}
+
+export function createHttpClient(config: ${configType}): HttpClient {
+  return new HttpClient(config);
+}
+`),
+            language: 'typescript',
+            description: 'HTTP client implementation',
+        };
+    }
+    generateHttpIndex() {
+        return {
+            path: 'src/http/index.ts',
+            content: this.format(`export { HttpClient, createHttpClient } from './client';
+`),
+            language: 'typescript',
+            description: 'HTTP module exports',
+        };
+    }
+    generateAuthIndex(commonImportPath) {
+        return {
+            path: 'src/auth/index.ts',
+            content: this.format(`export { DefaultAuthTokenManager, createTokenManager } from '${commonImportPath}';
+export type { AuthTokenManager, AuthTokens, AuthMode } from '${commonImportPath}';
+`),
+            language: 'typescript',
+            description: 'Auth module exports',
+        };
+    }
+    generateSdkClass(clientName, configType, tagMetadata, config, commonImportPath) {
+        const imports = tagMetadata.map((meta) => {
+            return `import { ${meta.className}, create${meta.className} } from './api/${meta.fileName}';`;
+        }).join('\n');
+        const properties = tagMetadata.map((meta) => {
+            return `  public readonly ${meta.clientPropertyName}: ${meta.className};`;
+        }).join('\n');
+        const inits = tagMetadata.map((meta) => {
+            return `    this.${meta.clientPropertyName} = create${meta.className}(this.httpClient);`;
+        }).join('\n\n');
+        return {
+            path: 'src/sdk.ts',
+            content: this.format(`import { HttpClient, createHttpClient } from './http/client';
+import type { ${configType} } from './types/common';
+import type { AuthTokenManager } from '${commonImportPath}';
+
+${imports}
+
+export class ${clientName} {
+  private httpClient: HttpClient;
+${properties ? `\n${properties}` : ''}
+
+  constructor(config: ${configType}) {
+    this.httpClient = createHttpClient(config);
+${inits}
+  }
+
+  setApiKey(apiKey: string): this {
+    this.httpClient.setApiKey(apiKey);
+    return this;
+  }
+
+  setAuthToken(token: string): this {
+    this.httpClient.setAuthToken(token);
+    return this;
+  }
+
+  setAccessToken(token: string): this {
+    this.httpClient.setAccessToken(token);
+    return this;
+  }
+
+  setTokenManager(manager: AuthTokenManager): this {
+    this.httpClient.setTokenManager(manager);
+    return this;
+  }
+
+  get http(): HttpClient {
+    return this.httpClient;
+  }
+}
+
+export function createClient(config: ${configType}): ${clientName} {
+  return new ${clientName}(config);
+}
+
+export default ${clientName};
+`),
+            language: 'typescript',
+            description: 'Main SDK class',
+        };
+    }
+    generateMainIndex(clientName) {
+        return {
+            path: 'src/index.ts',
+            content: this.format(`export { ${clientName}, createClient } from './sdk';
+export * from './types';
+export * from './api';
+export * from './http';
+export * from './auth';
+`),
+            language: 'typescript',
+            description: 'Main module exports',
+        };
+    }
+    format(content) {
+        return content.trim() + '\n';
+    }
+}
