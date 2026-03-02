@@ -1,4 +1,4 @@
-﻿# SDKWork SDK Generator
+# SDKWork SDK Generator
 
 Professional SDK code generator for multiple programming languages. Generate type-safe, well-structured SDKs from OpenAPI specifications.
 
@@ -114,21 +114,21 @@ Each language generator follows a consistent modular architecture:
 
 ```
 generators/
-鈹溾攢鈹€ typescript/
-鈹?  鈹溾攢鈹€ index.ts              # Main generator class
-鈹?  鈹溾攢鈹€ config.ts             # Language config & type mapping
-鈹?  鈹溾攢鈹€ model-generator.ts    # Model generation
-鈹?  鈹溾攢鈹€ api-generator.ts      # API endpoints generation
-鈹?  鈹溾攢鈹€ http-generator.ts     # HTTP client generation
-鈹?  鈹溾攢鈹€ build-config-generator.ts  # Build configuration
-鈹?  鈹斺攢鈹€ readme-generator.ts   # Documentation generation
-鈹溾攢鈹€ python/
-鈹溾攢鈹€ go/
-鈹溾攢鈹€ java/
-鈹溾攢鈹€ swift/
-鈹溾攢鈹€ kotlin/
-鈹溾攢鈹€ flutter/
-鈹斺攢鈹€ csharp/
+|-- typescript/
+|   |-- index.ts              # Main generator class
+|   |-- config.ts             # Language config & type mapping
+|   |-- model-generator.ts    # Model generation
+|   |-- api-generator.ts      # API endpoints generation
+|   |-- http-generator.ts     # HTTP client generation
+|   |-- build-config-generator.ts  # Build configuration
+|   -- readme-generator.ts   # Documentation generation
+|-- python/
+|-- go/
+|-- java/
+|-- swift/
+|-- kotlin/
+|-- flutter/
+-- csharp/
 ```
 
 ### Generator Components
@@ -174,157 +174,157 @@ For server-side applications. Includes:
 
 ```
 sdk/
-鈹溾攢鈹€ src/
-鈹?  鈹溾攢鈹€ api/
-鈹?  鈹?  鈹溾攢鈹€ base.ts           # Base API class
-鈹?  鈹?  鈹溾攢鈹€ paths.ts          # API path utilities
-鈹?  鈹?  鈹溾攢鈹€ user.ts           # User API module
-鈹?  鈹?  鈹斺攢鈹€ index.ts          # API exports
-鈹?  鈹溾攢鈹€ http/
-鈹?  鈹?  鈹溾攢鈹€ client.ts         # HTTP client
-鈹?  鈹?  鈹斺攢鈹€ index.ts          # HTTP exports
-鈹?  鈹溾攢鈹€ auth/
-鈹?  鈹?  鈹斺攢鈹€ index.ts          # Auth exports
-鈹?  鈹溾攢鈹€ types/
-鈹?  鈹?  鈹溾攢鈹€ common.ts         # Common types
-鈹?  鈹?  鈹溾攢鈹€ user.ts           # Model types
-鈹?  鈹?  鈹斺攢鈹€ index.ts          # Type exports
-鈹?  鈹溾攢鈹€ sdk.ts                # Main SDK class
-鈹?  鈹斺攢鈹€ index.ts              # Main exports
-鈹溾攢鈹€ package.json
-鈹溾攢鈹€ tsconfig.json
-鈹溾攢鈹€ vite.config.ts
-鈹斺攢鈹€ README.md
+|-- src/
+|   |-- api/
+|   |   |-- base.ts           # Base API class
+|   |   |-- paths.ts          # API path utilities
+|   |   |-- user.ts           # User API module
+|   |   -- index.ts          # API exports
+|   |-- http/
+|   |   |-- client.ts         # HTTP client
+|   |   -- index.ts          # HTTP exports
+|   |-- auth/
+|   |   -- index.ts          # Auth exports
+|   |-- types/
+|   |   |-- common.ts         # Common types
+|   |   |-- user.ts           # Model types
+|   |   -- index.ts          # Type exports
+|   |-- sdk.ts                # Main SDK class
+|   -- index.ts              # Main exports
+|-- package.json
+|-- tsconfig.json
+|-- vite.config.ts
+-- README.md
 ```
 
 ### Python
 
 ```
 sdk/
-鈹溾攢鈹€ <python_package_root>/
-鈹?  鈹溾攢鈹€ __init__.py
-鈹?  鈹溾攢鈹€ client.py             # Main SDK client
-鈹?  鈹溾攢鈹€ api/
-鈹?  鈹?  鈹溾攢鈹€ __init__.py
-鈹?  鈹?  鈹斺攢鈹€ user.py           # User API module
-鈹?  鈹溾攢鈹€ http_client.py        # HTTP client wrapper
-鈹?  鈹溾攢鈹€ models/
-鈹?  鈹?  鈹溾攢鈹€ __init__.py
-鈹?  鈹?  鈹斺攢鈹€ user.py           # Model classes
-鈹溾攢鈹€ setup.py
-鈹溾攢鈹€ pyproject.toml
-鈹溾攢鈹€ requirements.txt
-鈹斺攢鈹€ README.md
+|-- <python_package_root>/
+|   |-- __init__.py
+|   |-- client.py             # Main SDK client
+|   |-- api/
+|   |   |-- __init__.py
+|   |   -- user.py           # User API module
+|   |-- http_client.py        # HTTP client wrapper
+|   |-- models/
+|   |   |-- __init__.py
+|   |   -- user.py           # Model classes
+|-- setup.py
+|-- pyproject.toml
+|-- requirements.txt
+-- README.md
 ```
 
 ### Go
 
 ```
 sdk/
-鈹溾攢鈹€ types/
-鈹?  鈹溾攢鈹€ common.go             # Common types
-鈹?  鈹溾攢鈹€ user.go               # Model structs
-鈹?  鈹斺攢鈹€ doc.go                # Package docs
-鈹溾攢鈹€ api/
-鈹?  鈹溾攢鈹€ base.go               # Base API struct
-鈹?  鈹溾攢鈹€ paths.go              # API path utilities
-鈹?  鈹溾攢鈹€ user.go               # User API module
-鈹?  鈹斺攢鈹€ doc.go                # Package docs
-鈹溾攢鈹€ http/
-鈹?  鈹溾攢鈹€ client.go             # HTTP client
-鈹?  鈹斺攢鈹€ doc.go                # Package docs
-鈹溾攢鈹€ sdk.go                    # Main SDK struct
-鈹溾攢鈹€ doc.go                    # Package docs
-鈹溾攢鈹€ go.mod
-鈹溾攢鈹€ go.sum
-鈹斺攢鈹€ README.md
+|-- types/
+|   |-- common.go             # Common types
+|   |-- user.go               # Model structs
+|   -- doc.go                # Package docs
+|-- api/
+|   |-- base.go               # Base API struct
+|   |-- paths.go              # API path utilities
+|   |-- user.go               # User API module
+|   -- doc.go                # Package docs
+|-- http/
+|   |-- client.go             # HTTP client
+|   -- doc.go                # Package docs
+|-- sdk.go                    # Main SDK struct
+|-- doc.go                    # Package docs
+|-- go.mod
+|-- go.sum
+-- README.md
 ```
 
 ### Java
 
 ```
 sdk/
-鈹溾攢鈹€ src/main/java/com/sdkwork/backend/
-鈹?  鈹溾攢鈹€ SdkworkBackendClient.java    # Main SDK client
-鈹?  鈹溾攢鈹€ api/
-鈹?  鈹?  鈹溾攢鈹€ ApiPaths.java     # API path utilities
-鈹?  鈹?  鈹溾攢鈹€ UserApi.java      # User API class
-鈹?  鈹?  鈹斺攢鈹€ package-info.java # Package info
-鈹?  鈹溾攢鈹€ http/
-鈹?  鈹?  鈹斺攢鈹€ HttpClient.java   # HTTP client
-鈹?  鈹斺攢鈹€ model/
-鈹?      鈹斺攢鈹€ User.java         # Model class
-鈹溾攢鈹€ pom.xml
-鈹斺攢鈹€ README.md
+|-- src/main/java/com/sdkwork/backend/
+|   |-- SdkworkBackendClient.java    # Main SDK client
+|   |-- api/
+|   |   |-- ApiPaths.java     # API path utilities
+|   |   |-- UserApi.java      # User API class
+|   |   -- package-info.java # Package info
+|   |-- http/
+|   |   -- HttpClient.java   # HTTP client
+|   -- model/
+|       -- User.java         # Model class
+|-- pom.xml
+-- README.md
 ```
 
 ### Swift
 
 ```
 sdk/
-鈹溾攢鈹€ Sources/
-鈹?  鈹溾攢鈹€ SdkworkBackendClient.swift   # Main SDK client
-鈹?  鈹溾攢鈹€ API/
-鈹?  鈹?  鈹溾攢鈹€ ApiPaths.swift    # API path utilities
-鈹?  鈹?  鈹溾攢鈹€ UserApi.swift     # User API class
-鈹?  鈹?  鈹斺攢鈹€ API.swift         # API exports
-鈹?  鈹溾攢鈹€ HTTP/
-鈹?  鈹?  鈹斺攢鈹€ HttpClient.swift  # HTTP client
-鈹?  鈹斺攢鈹€ Models.swift          # Model structs
-鈹溾攢鈹€ Package.swift
-鈹斺攢鈹€ README.md
+|-- Sources/
+|   |-- SdkworkBackendClient.swift   # Main SDK client
+|   |-- API/
+|   |   |-- ApiPaths.swift    # API path utilities
+|   |   |-- UserApi.swift     # User API class
+|   |   -- API.swift         # API exports
+|   |-- HTTP/
+|   |   -- HttpClient.swift  # HTTP client
+|   -- Models.swift          # Model structs
+|-- Package.swift
+-- README.md
 ```
 
 ### Kotlin
 
 ```
 sdk/
-鈹溾攢鈹€ src/main/kotlin/com/sdkwork/backend/
-鈹?  鈹溾攢鈹€ SdkworkBackendClient.kt      # Main SDK client
-鈹?  鈹溾攢鈹€ api/
-鈹?  鈹?  鈹溾攢鈹€ ApiPaths.kt       # API path utilities
-鈹?  鈹?  鈹溾攢鈹€ UserApi.kt        # User API class
-鈹?  鈹?  鈹斺攢鈹€ Api.kt            # API exports
-鈹?  鈹溾攢鈹€ http/
-鈹?  鈹?  鈹斺攢鈹€ HttpClient.kt     # HTTP client
-鈹?  鈹斺攢鈹€ User.kt               # Model class
-鈹溾攢鈹€ build.gradle.kts
-鈹斺攢鈹€ README.md
+|-- src/main/kotlin/com/sdkwork/backend/
+|   |-- SdkworkBackendClient.kt      # Main SDK client
+|   |-- api/
+|   |   |-- ApiPaths.kt       # API path utilities
+|   |   |-- UserApi.kt        # User API class
+|   |   -- Api.kt            # API exports
+|   |-- http/
+|   |   -- HttpClient.kt     # HTTP client
+|   -- User.kt               # Model class
+|-- build.gradle.kts
+-- README.md
 ```
 
 ### Flutter/Dart
 
 ```
 sdk/
-鈹溾攢鈹€ lib/
-鈹?  鈹溾攢鈹€ backend_client.dart   # Main SDK client
-鈹?  鈹溾攢鈹€ src/
-鈹?  鈹?  鈹溾攢鈹€ api/
-鈹?  鈹?  鈹?  鈹溾攢鈹€ paths.dart    # API path utilities
-鈹?  鈹?  鈹?  鈹溾攢鈹€ user.dart     # User API class
-鈹?  鈹?  鈹?  鈹斺攢鈹€ api.dart      # API exports
-鈹?  鈹?  鈹溾攢鈹€ http/
-鈹?  鈹?  鈹?  鈹斺攢鈹€ client.dart   # HTTP client
-鈹?  鈹?  鈹斺攢鈹€ models.dart       # Model classes
-鈹溾攢鈹€ pubspec.yaml
-鈹斺攢鈹€ README.md
+|-- lib/
+|   |-- backend_client.dart   # Main SDK client
+|   |-- src/
+|   |   |-- api/
+|   |   |   |-- paths.dart    # API path utilities
+|   |   |   |-- user.dart     # User API class
+|   |   |   -- api.dart      # API exports
+|   |   |-- http/
+|   |   |   -- client.dart   # HTTP client
+|   |   -- models.dart       # Model classes
+|-- pubspec.yaml
+-- README.md
 ```
 
 ### C# (.NET)
 
 ```
 sdk/
-鈹溾攢鈹€ SdkworkBackendClient.cs          # Main SDK client
-鈹溾攢鈹€ Api/
-鈹?  鈹溾攢鈹€ ApiPaths.cs           # API path utilities
-鈹?  鈹溾攢鈹€ UserApi.cs            # User API class
-鈹?  鈹斺攢鈹€ Api.cs                # API exports
-鈹溾攢鈹€ Http/
-鈹?  鈹斺攢鈹€ HttpClient.cs         # HTTP client
-鈹溾攢鈹€ Models/
-鈹?  鈹斺攢鈹€ User.cs               # Model class
-鈹溾攢鈹€ Backend.csproj
-鈹斺攢鈹€ README.md
+|-- SdkworkBackendClient.cs          # Main SDK client
+|-- Api/
+|   |-- ApiPaths.cs           # API path utilities
+|   |-- UserApi.cs            # User API class
+|   -- Api.cs                # API exports
+|-- Http/
+|   -- HttpClient.cs         # HTTP client
+|-- Models/
+|   -- User.cs               # Model class
+|-- Backend.csproj
+-- README.md
 ```
 
 ## Import Standards
@@ -332,10 +332,10 @@ sdk/
 All generated SDKs follow a unified import pattern:
 
 ```typescript
-// 鉁?Correct - Import from main package
+// Correct - Import from main package
 import { SdkError, Page, HttpClient } from '@sdkwork/sdk-common';
 
-// 鉂?Incorrect - No sub-path imports
+// Incorrect - No sub-path imports
 import { SdkError } from '@sdkwork/sdk-common/errors';
 import { Page } from '@sdkwork/sdk-common/core';
 ```
@@ -463,5 +463,3 @@ interface LanguageConfig {
 MIT
 
 
-# sdkwork-sdk-generator
-# sdkwork-sdk-generator
