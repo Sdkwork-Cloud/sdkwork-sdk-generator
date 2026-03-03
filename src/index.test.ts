@@ -522,6 +522,27 @@ describe('OpenAPI Security And Compliance', () => {
     expect(Array.isArray(result.warnings)).toBe(true);
   });
 
+  it('should force root import for typescript common package overrides', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        language: 'typescript',
+        commonPackage: '@sdkwork/sdk-common@^1.0.1|@sdkwork/sdk-common/http',
+      },
+      securitySpec
+    );
+
+    expect(result.errors.length).toBe(0);
+    const joined = result.files.map((f) => f.content).join('\n');
+    expect(joined).not.toContain('@sdkwork/sdk-common/');
+    expect(joined).toContain("from '@sdkwork/sdk-common';");
+
+    const packageJsonFile = result.files.find((f) => f.path === 'package.json');
+    expect(packageJsonFile).toBeDefined();
+    expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.1"');
+  });
+
   it('should hoist inline request and response schemas into explicit operation types across languages', async () => {
     const typeScriptGenerator = new TypeScriptGenerator();
     const tsResult = await typeScriptGenerator.generate(baseConfig, inlineIoSpec);

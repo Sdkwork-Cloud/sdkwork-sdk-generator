@@ -88,10 +88,31 @@ function toPascalCase(value) {
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join('');
 }
+function normalizeTypeScriptImportPath(codeImport, fallbackName) {
+    const raw = (codeImport || '').trim();
+    if (!raw) {
+        return fallbackName;
+    }
+    if (raw.startsWith('.') || raw.startsWith('/') || raw.startsWith('file:')) {
+        return fallbackName;
+    }
+    if (raw.startsWith('@')) {
+        const parts = raw.split('/').filter(Boolean);
+        if (parts.length >= 2) {
+            return `@${parts[0].replace(/^@/, '')}/${parts[1]}`;
+        }
+        return fallbackName;
+    }
+    const slashIndex = raw.indexOf('/');
+    if (slashIndex > 0) {
+        return raw.slice(0, slashIndex);
+    }
+    return raw;
+}
 export function resolveTypeScriptCommonPackage(config) {
     const { dependencySpec, codeImport } = splitSpec(config.commonPackage);
     const { name, version } = splitPackageAndVersion(dependencySpec || '@sdkwork/sdk-common', '@sdkwork/sdk-common', '^1.0.0');
-    const importPath = codeImport || name;
+    const importPath = normalizeTypeScriptImportPath(codeImport, name);
     return {
         dependencyName: name,
         dependencyVersion: version,

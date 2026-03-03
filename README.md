@@ -331,16 +331,13 @@ sdk/
 
 ## Import Standards
 
-All generated SDKs follow a unified import pattern:
+All generated TypeScript SDKs import from the package root:
 
 ```typescript
-// Correct - Import from main package
-import { SdkError, Page, HttpClient } from '@sdkwork/sdk-common';
-
-// Incorrect - No sub-path imports
-import { SdkError } from '@sdkwork/sdk-common/errors';
-import { Page } from '@sdkwork/sdk-common/core';
+import { SdkError, Page, BaseHttpClient } from '@sdkwork/sdk-common';
 ```
+
+Sub-path imports are not generated.
 
 ## Common Package
 
@@ -362,7 +359,7 @@ sdkgen generate ... --common-package "<language-specific-spec>"
 
 `--common-package` accepts language-specific formats:
 
-- TypeScript: `@scope/pkg@^1.2.3` or `@scope/pkg@^1.2.3|@scope/pkg`
+- TypeScript: `@scope/pkg@^1.2.3` or `@scope/pkg@^1.2.3|@scope/pkg` (root import only; sub-path values are normalized to package root)
 - Python: `sdkwork-common>=1.0.0` or `sdkwork-common>=1.0.0|sdkwork.common`
 - Java/Kotlin: `group:artifact:version` or `group:artifact:version|com.example.common.core`
 - Go: `github.com/org/common-go@v1.2.3` or `github.com/org/common-go@v1.2.3|github.com/org/common-go/common`
