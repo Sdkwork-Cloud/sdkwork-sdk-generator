@@ -46,7 +46,7 @@ program
     .option('-t, --type <type>', 'SDK type (app, backend, ai)', 'backend')
     .option('-l, --language <lang>', 'Language', 'typescript')
     .option('--base-url <url>', 'Base URL')
-    .option('--api-prefix <prefix>', 'API prefix', '/api/v1')
+    .option('--api-prefix <prefix>', 'API prefix', '')
     .option('--package-name <name>', 'Package name')
     .option('--common-package <spec>', 'Common package spec (language-specific, optional)')
     .option('--sdk-version <ver>', 'SDK version', '1.0.0')
