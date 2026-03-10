@@ -298,6 +298,47 @@ const nonAsciiTagSpec: ApiSpec = {
   },
 };
 
+const equivalentTagSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Equivalent Tag API', version: '1.0.0' },
+  paths: {
+    '/app/v3/api/drive/items': {
+      get: {
+        summary: 'List drive items',
+        operationId: 'listDriveItems',
+        tags: ['drive'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/app/v3/api/drive/items/upload': {
+      post: {
+        summary: 'Upload drive item',
+        operationId: 'uploadDriveItem',
+        tags: ['Drive'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/app/v3/api/voice-speakers': {
+      get: {
+        summary: 'List voice speakers',
+        operationId: 'listVoiceSpeakers',
+        tags: ['voice_speaker'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/app/v3/api/voice-speakers/market': {
+      get: {
+        summary: 'List market voices',
+        operationId: 'listMarketVoices',
+        tags: ['VoiceSpeaker'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
 const inlineIoSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Inline IO API', version: '1.0.0' },
@@ -543,6 +584,22 @@ describe('OpenAPI Security And Compliance', () => {
     expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.1"');
   });
 
+  it('should default generated typescript common package dependency to the published npm baseline', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        language: 'typescript',
+      },
+      securitySpec
+    );
+
+    expect(result.errors.length).toBe(0);
+    const packageJsonFile = result.files.find((f) => f.path === 'package.json');
+    expect(packageJsonFile).toBeDefined();
+    expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.2"');
+  });
+
   it('should hoist inline request and response schemas into explicit operation types across languages', async () => {
     const typeScriptGenerator = new TypeScriptGenerator();
     const tsResult = await typeScriptGenerator.generate(baseConfig, inlineIoSpec);
@@ -695,6 +752,44 @@ describe('OpenAPI Security And Compliance', () => {
     const pyGenerator = new PythonGenerator();
     const pyResult = await pyGenerator.generate({ ...baseConfig, language: 'python' }, nonAsciiTagSpec);
     expect(pyResult.files.some((f) => /\/api\/group[0-9a-f]+\.py$/i.test(f.path))).toBe(false);
+  });
+
+  it('should merge equivalent tags into one canonical api without Api2 suffixes', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, equivalentTagSpec);
+    const sdkFile = result.files.find((f) => f.path === 'src/sdk.ts');
+    const driveApiFiles = result.files.filter((f) => f.path === 'src/api/drive.ts');
+    const voiceSpeakerApiFiles = result.files.filter((f) => f.path === 'src/api/voice-speaker.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(result.stats.apis).toBe(2);
+    expect(driveApiFiles).toHaveLength(1);
+    expect(voiceSpeakerApiFiles).toHaveLength(1);
+    expect(driveApiFiles[0].content).toContain('async listDriveItems(');
+    expect(driveApiFiles[0].content).toContain('async uploadDriveItem(');
+    expect(voiceSpeakerApiFiles[0].content).toContain('async listVoiceSpeakers(');
+    expect(voiceSpeakerApiFiles[0].content).toContain('async listMarketVoices(');
+    expect(sdkFile).toBeDefined();
+    expect(sdkFile!.content).toContain('public readonly drive: DriveApi;');
+    expect(sdkFile!.content).toContain('public readonly voiceSpeaker: VoiceSpeakerApi;');
+    expect(sdkFile!.content).not.toContain('DriveApi2');
+    expect(sdkFile!.content).not.toContain('VoiceSpeakerApi2');
+    expect(sdkFile!.content).not.toContain('drive2');
+    expect(sdkFile!.content).not.toContain('voiceSpeaker2');
+  });
+  it('should place types export condition before import and require in generated package.json', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, mockSpec);
+    const packageJsonFile = result.files.find((f) => f.path === 'package.json');
+
+    expect(packageJsonFile).toBeDefined();
+
+    const packageJson = JSON.parse(packageJsonFile!.content) as {
+      exports?: Record<string, Record<string, string>>;
+    };
+    const exportConditionKeys = Object.keys(packageJson.exports?.['.'] ?? {});
+
+    expect(exportConditionKeys).toEqual(['types', 'import', 'require']);
   });
 
   it('should use unified sdkwork-prefixed client names', async () => {

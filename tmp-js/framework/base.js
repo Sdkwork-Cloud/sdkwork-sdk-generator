@@ -1,5 +1,5 @@
 import { normalizeReadmeFile } from './readme.js';
-import { normalizeOperationId } from './naming.js';
+import { normalizeOperationId, normalizeTagName } from './naming.js';
 export * from './types.js';
 export class BaseGenerator {
     constructor(languageConfig) {
@@ -99,10 +99,11 @@ export class BaseGenerator {
                 const operationSchemaBaseName = this.resolveOperationSchemaBaseName(operation, normalizedMethod, path);
                 const operationParameters = this.resolveParameters(spec, operation.parameters);
                 const mergedParameters = this.mergeParameters(pathParameters, operationParameters);
-                const queryParameters = mergedParameters.filter((p) => p.in === 'query');
+                const visibleParameters = mergedParameters.filter((parameter) => !this.isManagedAuthParameter(parameter, auth));
+                const queryParameters = visibleParameters.filter((p) => p.in === 'query');
                 const requestBody = this.hoistRequestBodySchemas(this.resolveRequestBody(spec, operation.requestBody), schemas, operationSchemaBaseName, normalizedMethod, inlineSchemaNameByObject);
                 const responses = this.hoistResponseSchemas(this.resolveResponses(spec, operation.responses || {}), schemas, operationSchemaBaseName, normalizedMethod, inlineSchemaNameByObject);
-                const tag = this.resolveOperationTag(operation, path);
+                const tag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
                 if (!apiGroups[tag]) {
                     apiGroups[tag] = { tag, operations: [] };
                 }
@@ -111,7 +112,7 @@ export class BaseGenerator {
                     path,
                     method: normalizedMethod,
                     parameters: queryParameters,
-                    allParameters: mergedParameters,
+                    allParameters: visibleParameters,
                     requestBody,
                     responses,
                 });
@@ -188,6 +189,13 @@ export class BaseGenerator {
             .toLowerCase()
             .split('_')
             .filter(Boolean);
+    }
+    normalizeOperationGroupTag(tag) {
+        const parts = this.toIdentifierParts(tag);
+        if (parts.length > 0) {
+            return parts.join('_');
+        }
+        return normalizeTagName(tag || 'default');
     }
     singularize(value) {
         const input = (value || '').trim().toLowerCase();
@@ -306,6 +314,28 @@ export class BaseGenerator {
     }
     supportsNonJsonRequestBodyMediaTypes(_mediaTypes) {
         return false;
+    }
+    isManagedAuthParameter(parameter, auth) {
+        if (!parameter || typeof parameter !== 'object') {
+            return false;
+        }
+        if (parameter.in !== 'header') {
+            return false;
+        }
+        const parameterName = typeof parameter.name === 'string'
+            ? parameter.name.trim().toLowerCase()
+            : '';
+        if (!parameterName) {
+            return false;
+        }
+        const managedHeaders = new Set([
+            'authorization',
+            'access-token',
+        ]);
+        if (auth?.apiKeyHeader) {
+            managedHeaders.add(String(auth.apiKeyHeader).trim().toLowerCase());
+        }
+        return managedHeaders.has(parameterName);
     }
     deriveAuthContext(spec) {
         const securitySchemes = spec.components?.securitySchemes || {};

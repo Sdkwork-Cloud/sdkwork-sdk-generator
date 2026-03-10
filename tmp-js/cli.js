@@ -4,6 +4,7 @@ import { generateSdk, getSupportedLanguages } from './index.js';
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, chmodSync, readdirSync, rmSync } from 'fs';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveSdkVersion } from './framework/versioning.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 void __dirname;
 const program = new Command();
@@ -49,7 +50,12 @@ program
     .option('--api-prefix <prefix>', 'API prefix', '')
     .option('--package-name <name>', 'Package name')
     .option('--common-package <spec>', 'Common package spec (language-specific, optional)')
-    .option('--sdk-version <ver>', 'SDK version', '1.0.0')
+    .option('--sdk-version <ver>', 'SDK version')
+    .option('--fixed-sdk-version <ver>', 'Use an exact SDK version without auto-increment checks')
+    .option('--npm-registry <url>', 'Registry used for published TypeScript SDK version checks', 'https://registry.npmjs.org')
+    .option('--sdk-root <path>', 'SDK workspace root used to scan sibling language package versions')
+    .option('--sdk-name <name>', 'SDK workspace prefix, for example sdkwork-app-sdk')
+    .option('--no-sync-published-version', 'Skip published npm version checks when resolving sdk version')
     .option('--description <text>', 'Description')
     .option('--author <name>', 'Author')
     .option('--license <license>', 'License', 'MIT')
@@ -59,6 +65,10 @@ program
     const supported = getSupportedLanguages();
     if (!supported.includes(options.language)) {
         console.error(`Unsupported language: ${options.language}`);
+        process.exit(1);
+    }
+    if (options.sdkVersion && options.fixedSdkVersion) {
+        console.error('Use either --sdk-version or --fixed-sdk-version, not both.');
         process.exit(1);
     }
     let spec;
@@ -103,9 +113,36 @@ program
         console.error(`Failed to load spec: ${error}`);
         process.exit(1);
     }
+    const resolvedVersion = await resolveSdkVersion({
+        sdkRoot: options.sdkRoot,
+        sdkName: options.sdkName,
+        outputPath: resolve(options.output),
+        language: options.language,
+        sdkType: options.type,
+        packageName: options.packageName,
+        requestedVersion: options.fixedSdkVersion || options.sdkVersion,
+        fixedVersion: Boolean(options.fixedSdkVersion),
+        npmRegistryUrl: options.npmRegistry,
+        syncPublishedVersion: options.syncPublishedVersion !== false,
+    });
+    if (options.fixedSdkVersion) {
+        console.log(`   Fixed SDK version: ${resolvedVersion.version}`);
+    }
+    else if (options.sdkVersion && resolvedVersion.version !== options.sdkVersion) {
+        console.warn(`Requested sdk version ${options.sdkVersion} is not newer than the existing baseline. Using ${resolvedVersion.version} instead.`);
+    }
+    else if (!options.sdkVersion) {
+        console.log(`   Resolved SDK version: ${resolvedVersion.version}`);
+        if (resolvedVersion.localVersions.length > 0) {
+            console.log(`   Local baseline versions: ${resolvedVersion.localVersions.join(', ')}`);
+        }
+        if (resolvedVersion.publishedVersion) {
+            console.log(`   Published baseline version: ${resolvedVersion.publishedVersion}`);
+        }
+    }
     const config = {
         name: options.name,
-        version: options.sdkVersion,
+        version: resolvedVersion.version,
         description: options.description,
         author: options.author,
         license: options.license,

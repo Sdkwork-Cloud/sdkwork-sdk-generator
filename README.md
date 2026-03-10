@@ -28,6 +28,14 @@ npm install @sdkwork/sdk-generator
 sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript
 ```
 
+By default the generator resolves the SDK version from the highest available baseline:
+
+- existing generated SDK manifests in the workspace
+- the published npm version for the TypeScript package
+- an explicitly requested `--sdk-version`
+
+For multi-language batch generation, resolve the version once and pass it back with `--fixed-sdk-version` so every language uses the same release number.
+
 ### Options
 
 | Option | Description | Required | Default |
@@ -37,7 +45,12 @@ sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript
 | `-n, --name` | SDK name | Yes | - |
 | `-l, --language` | Target language | No | `typescript` |
 | `-t, --type` | SDK type (app, backend, ai) | No | `backend` |
-| `--sdk-version` | SDK version | No | `1.0.0` |
+| `--sdk-version` | Requested SDK version, auto-bumped if it is not newer than local/npm baseline | No | Auto-resolved |
+| `--fixed-sdk-version` | Use an exact SDK version without auto-increment checks | No | - |
+| `--npm-registry` | Registry used for published TypeScript SDK version checks | No | `https://registry.npmjs.org` |
+| `--sdk-root` | Workspace root used to scan sibling generated SDK versions | No | - |
+| `--sdk-name` | Workspace prefix, for example `sdkwork-app-sdk` | No | - |
+| `--no-sync-published-version` | Skip published npm version checks when resolving SDK version | No | `false` |
 | `--base-url` | Base URL for API | No | From spec |
 | `--api-prefix` | API path prefix | No | `/api/v1` |
 | `--package-name` | Package name | No | Auto-generated |

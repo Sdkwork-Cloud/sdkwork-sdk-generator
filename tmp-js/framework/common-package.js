@@ -111,7 +111,7 @@ function normalizeTypeScriptImportPath(codeImport, fallbackName) {
 }
 export function resolveTypeScriptCommonPackage(config) {
     const { dependencySpec, codeImport } = splitSpec(config.commonPackage);
-    const { name, version } = splitPackageAndVersion(dependencySpec || '@sdkwork/sdk-common', '@sdkwork/sdk-common', '^1.0.0');
+    const { name, version } = splitPackageAndVersion(dependencySpec || '@sdkwork/sdk-common', '@sdkwork/sdk-common', '^1.0.2');
     const importPath = normalizeTypeScriptImportPath(codeImport, name);
     return {
         dependencyName: name,

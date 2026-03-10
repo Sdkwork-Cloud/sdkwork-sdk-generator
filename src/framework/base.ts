@@ -11,7 +11,7 @@ import type {
   AuthContext
 } from './types.js';
 import { normalizeReadmeFile } from './readme.js';
-import { normalizeOperationId } from './naming.js';
+import { normalizeOperationId, normalizeTagName } from './naming.js';
 
 export * from './types.js';
 
@@ -228,7 +228,8 @@ export abstract class BaseGenerator {
         const operationSchemaBaseName = this.resolveOperationSchemaBaseName(operation, normalizedMethod, path);
         const operationParameters = this.resolveParameters(spec, operation.parameters);
         const mergedParameters = this.mergeParameters(pathParameters, operationParameters);
-        const queryParameters = mergedParameters.filter((p: any) => p.in === 'query');
+        const visibleParameters = mergedParameters.filter((parameter: any) => !this.isManagedAuthParameter(parameter, auth));
+        const queryParameters = visibleParameters.filter((p: any) => p.in === 'query');
         const requestBody = this.hoistRequestBodySchemas(
           this.resolveRequestBody(spec, operation.requestBody),
           schemas,
@@ -244,7 +245,7 @@ export abstract class BaseGenerator {
           inlineSchemaNameByObject
         );
 
-        const tag = this.resolveOperationTag(operation, path);
+        const tag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
         if (!apiGroups[tag]) {
           apiGroups[tag] = { tag, operations: [] };
         }
@@ -254,7 +255,7 @@ export abstract class BaseGenerator {
           path,
           method: normalizedMethod,
           parameters: queryParameters,
-          allParameters: mergedParameters,
+          allParameters: visibleParameters,
           requestBody,
           responses,
         });
@@ -349,6 +350,16 @@ export abstract class BaseGenerator {
       .toLowerCase()
       .split('_')
       .filter(Boolean);
+  }
+
+
+  private normalizeOperationGroupTag(tag: string): string {
+    const parts = this.toIdentifierParts(tag);
+    if (parts.length > 0) {
+      return parts.join('_');
+    }
+
+    return normalizeTagName(tag || 'default');
   }
 
   private singularize(value: string): string {
@@ -489,6 +500,33 @@ export abstract class BaseGenerator {
 
   protected supportsNonJsonRequestBodyMediaTypes(_mediaTypes: string[]): boolean {
     return false;
+  }
+
+  protected isManagedAuthParameter(parameter: any, auth: AuthContext): boolean {
+    if (!parameter || typeof parameter !== 'object') {
+      return false;
+    }
+
+    if (parameter.in !== 'header') {
+      return false;
+    }
+
+    const parameterName = typeof parameter.name === 'string'
+      ? parameter.name.trim().toLowerCase()
+      : '';
+    if (!parameterName) {
+      return false;
+    }
+
+    const managedHeaders = new Set<string>([
+      'authorization',
+      'access-token',
+    ]);
+    if (auth?.apiKeyHeader) {
+      managedHeaders.add(String(auth.apiKeyHeader).trim().toLowerCase());
+    }
+
+    return managedHeaders.has(parameterName);
   }
 
   private deriveAuthContext(spec: ApiSpec): AuthContext {
