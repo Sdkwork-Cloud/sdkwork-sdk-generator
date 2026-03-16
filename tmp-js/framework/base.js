@@ -83,6 +83,7 @@ export class BaseGenerator {
         const auth = this.deriveAuthContext(spec);
         const inlineSchemaNameByObject = new WeakMap();
         const apiGroups = {};
+        const operationRegistry = new Map();
         const paths = spec.paths || {};
         for (const [path, pathItem] of Object.entries(paths)) {
             const item = (pathItem || {});
@@ -103,11 +104,20 @@ export class BaseGenerator {
                 const queryParameters = visibleParameters.filter((p) => p.in === 'query');
                 const requestBody = this.hoistRequestBodySchemas(this.resolveRequestBody(spec, operation.requestBody), schemas, operationSchemaBaseName, normalizedMethod, inlineSchemaNameByObject);
                 const responses = this.hoistResponseSchemas(this.resolveResponses(spec, operation.responses || {}), schemas, operationSchemaBaseName, normalizedMethod, inlineSchemaNameByObject);
-                const tag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
-                if (!apiGroups[tag]) {
-                    apiGroups[tag] = { tag, operations: [] };
+                const group = this.resolveOperationGroup(operation, path);
+                if (!apiGroups[group.domain]) {
+                    apiGroups[group.domain] = {
+                        tag: group.domain,
+                        domain: group.domain,
+                        displayName: group.displayName,
+                        sourceTags: group.sourceTag ? [group.sourceTag] : [],
+                        operations: [],
+                    };
                 }
-                apiGroups[tag].operations.push({
+                if (group.sourceTag && !apiGroups[group.domain].sourceTags.includes(group.sourceTag)) {
+                    apiGroups[group.domain].sourceTags.push(group.sourceTag);
+                }
+                const generatedOperation = {
                     ...operation,
                     path,
                     method: normalizedMethod,
@@ -115,6 +125,25 @@ export class BaseGenerator {
                     allParameters: visibleParameters,
                     requestBody,
                     responses,
+                };
+                const operationKey = `${group.domain}:${this.resolveOperationDedupKey(normalizedMethod, path, operation)}`;
+                const operationScore = this.scoreOperationPathMatch(path);
+                const existingOperation = operationRegistry.get(operationKey);
+                if (existingOperation) {
+                    if (existingOperation.score >= operationScore) {
+                        continue;
+                    }
+                    apiGroups[group.domain].operations[existingOperation.index] = generatedOperation;
+                    operationRegistry.set(operationKey, {
+                        index: existingOperation.index,
+                        score: operationScore,
+                    });
+                    continue;
+                }
+                apiGroups[group.domain].operations.push(generatedOperation);
+                operationRegistry.set(operationKey, {
+                    index: apiGroups[group.domain].operations.length - 1,
+                    score: operationScore,
                 });
             }
         }
@@ -122,6 +151,148 @@ export class BaseGenerator {
             schemaFileMap.set(this.toPascalCase(name), this.toFileName(name));
         }
         return { schemas, schemaFileMap, apiGroups, auth };
+    }
+    resolveOperationGroup(operation, path) {
+        const rawTag = typeof operation.tags?.[0] === 'string' ? operation.tags[0].trim() : '';
+        const explicitDomain = this.resolveExplicitSdkDomain(operation);
+        if (explicitDomain) {
+            return {
+                domain: explicitDomain,
+                displayName: this.toPascalCase(explicitDomain),
+                sourceTag: rawTag || explicitDomain,
+            };
+        }
+        const configuredDomain = this.deriveDomainFromConfiguredPrefix(path);
+        if (configuredDomain) {
+            return {
+                domain: configuredDomain,
+                displayName: this.toPascalCase(configuredDomain),
+                sourceTag: rawTag || configuredDomain,
+            };
+        }
+        const fallbackTag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
+        return {
+            domain: fallbackTag,
+            displayName: rawTag || this.toPascalCase(fallbackTag),
+            sourceTag: rawTag || fallbackTag,
+        };
+    }
+    resolveExplicitSdkDomain(operation) {
+        const rawValue = operation?.['x-sdk-domain'];
+        if (typeof rawValue !== 'string' || !rawValue.trim()) {
+            return '';
+        }
+        return this.normalizeOperationGroupTag(rawValue);
+    }
+    deriveDomainFromConfiguredPrefix(path) {
+        const pathSegments = this.toNormalizedPathSegments(path);
+        const prefixCandidates = this.resolveConfiguredPrefixCandidates();
+        for (const prefixSegments of prefixCandidates) {
+            if (pathSegments.length <= prefixSegments.length) {
+                continue;
+            }
+            if (!this.pathMatchesPrefix(pathSegments, prefixSegments)) {
+                continue;
+            }
+            const domainCandidates = pathSegments.slice(prefixSegments.length);
+            const domainSegment = domainCandidates.find((segment) => !BaseGenerator.RESERVED_GROUP_SEGMENTS_AFTER_PREFIX.has(segment)) || domainCandidates[0];
+            if (domainSegment) {
+                return this.normalizeOperationGroupTag(domainSegment);
+            }
+        }
+        return '';
+    }
+    resolveOperationDedupKey(method, path, operation) {
+        const normalizedOperationId = typeof operation.operationId === 'string'
+            ? normalizeOperationId(operation.operationId)
+            : '';
+        const relativePath = this.resolveRelativeOperationPath(path);
+        return `${method}:${relativePath}:${normalizedOperationId}`;
+    }
+    resolveRelativeOperationPath(path) {
+        const rawSegments = this.toRawPathSegments(path);
+        const normalizedSegments = this.toNormalizedPathSegments(path);
+        const prefixCandidates = this.resolveConfiguredPrefixCandidates();
+        for (const prefixSegments of prefixCandidates) {
+            if (!this.pathMatchesPrefix(normalizedSegments, prefixSegments)) {
+                continue;
+            }
+            const relativeSegments = rawSegments.slice(prefixSegments.length);
+            return relativeSegments.length > 0 ? `/${relativeSegments.join('/')}` : '/';
+        }
+        return rawSegments.length > 0 ? `/${rawSegments.join('/')}` : '/';
+    }
+    scoreOperationPathMatch(path) {
+        const normalizedSegments = this.toNormalizedPathSegments(path);
+        const prefixCandidates = this.resolveConfiguredPrefixCandidates();
+        for (let index = 0; index < prefixCandidates.length; index += 1) {
+            if (this.pathMatchesPrefix(normalizedSegments, prefixCandidates[index])) {
+                return prefixCandidates.length - index;
+            }
+        }
+        return 0;
+    }
+    resolveConfiguredPrefixCandidates() {
+        const primary = this.toNormalizedPathSegments(this.config?.apiPrefix || '');
+        if (primary.length === 0) {
+            return [];
+        }
+        const candidates = [primary];
+        const versionIndex = primary.findIndex((segment) => /^v\d+$/.test(segment));
+        if (versionIndex >= 0) {
+            const alias = ['v1', ...primary.slice(versionIndex + 1)];
+            if (alias.length > 0 &&
+                !candidates.some((candidate) => this.sameSegments(candidate, alias))) {
+                candidates.push(alias);
+            }
+        }
+        return candidates;
+    }
+    pathMatchesPrefix(pathSegments, prefixSegments) {
+        if (pathSegments.length < prefixSegments.length) {
+            return false;
+        }
+        for (let index = 0; index < prefixSegments.length; index += 1) {
+            if (pathSegments[index] !== prefixSegments[index]) {
+                return false;
+            }
+        }
+        return true;
+    }
+    sameSegments(left, right) {
+        if (left.length !== right.length) {
+            return false;
+        }
+        for (let index = 0; index < left.length; index += 1) {
+            if (left[index] !== right[index]) {
+                return false;
+            }
+        }
+        return true;
+    }
+    toRawPathSegments(value) {
+        return String(value || '')
+            .split('/')
+            .map((segment) => segment.trim())
+            .filter(Boolean);
+    }
+    toNormalizedPathSegments(value) {
+        return String(value || '')
+            .split('/')
+            .map((segment) => segment.trim())
+            .filter(Boolean)
+            .filter((segment) => !(segment.startsWith('{') && segment.endsWith('}')))
+            .map((segment) => {
+            const parts = this.toIdentifierParts(segment);
+            if (parts.length === 0) {
+                return '';
+            }
+            const normalized = parts.join('_');
+            return BaseGenerator.RESERVED_TAG_PATH_SEGMENTS.has(normalized)
+                ? normalized
+                : this.singularize(normalized);
+        })
+            .filter(Boolean);
     }
     resolveOperationTag(operation, path) {
         const rawTag = typeof operation.tags?.[0] === 'string' ? operation.tags[0].trim() : '';
@@ -211,8 +382,13 @@ export class BaseGenerator {
         if (input.endsWith('ies') && input.length > 3) {
             return `${input.slice(0, -3)}y`;
         }
-        if (input.endsWith('sses')) {
-            return input;
+        if (input.length > 4 &&
+            (input.endsWith('sses') ||
+                input.endsWith('ches') ||
+                input.endsWith('shes') ||
+                input.endsWith('xes') ||
+                input.endsWith('zes'))) {
+            return input.slice(0, -2);
         }
         if (input.length > 3 && input.endsWith('s') && !input.endsWith('ss')) {
             return input.slice(0, -1);
@@ -679,6 +855,12 @@ BaseGenerator.RESERVED_TAG_PATH_SEGMENTS = new Set([
     'v3',
     'v4',
     'v5',
+]);
+BaseGenerator.RESERVED_GROUP_SEGMENTS_AFTER_PREFIX = new Set([
+    'management',
+    'manage',
+    'admin',
+    'internal',
 ]);
 BaseGenerator.OPERATION_VERBS = new Set([
     'get',

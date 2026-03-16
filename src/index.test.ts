@@ -339,6 +339,129 @@ const equivalentTagSpec: ApiSpec = {
     schemas: {},
   },
 };
+
+const appDomainGroupingSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'App Domain API', version: '1.0.0' },
+  paths: {
+    '/app/v3/api/app/manage': {
+      post: {
+        summary: 'Create app',
+        operationId: 'createApp',
+        tags: ['App Manage'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/app/v3/api/app/update/check': {
+      get: {
+        summary: 'Check update',
+        operationId: 'checkUpdate',
+        tags: ['App Update'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const backendDomainGroupingSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Backend Domain API', version: '1.0.0' },
+  paths: {
+    '/backend/v3/api/tenant/user/page': {
+      get: {
+        summary: 'List tenant users',
+        operationId: 'listTenantUsers',
+        tags: ['Tenant User Management'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/backend/v3/api/tenant/member/{id}': {
+      get: {
+        summary: 'Get tenant member',
+        operationId: 'getTenantMember',
+        tags: ['Tenant Member Management'],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const aiDomainGroupingSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'AI Domain API', version: '1.0.0' },
+  paths: {
+    '/ai/v3/chat/completions': {
+      post: {
+        summary: 'Create chat completion',
+        operationId: 'createChatCompletion',
+        tags: ['Chat'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/ai/v3/chat/completions/{completion_id}': {
+      get: {
+        summary: 'Get chat completion',
+        operationId: 'getChatCompletion',
+        tags: ['Chat'],
+        parameters: [{ name: 'completion_id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/ai/v3/chat/completions/{completion_id}/messages': {
+      get: {
+        summary: 'List chat completion messages',
+        operationId: 'listChatCompletionMessages',
+        tags: ['Chat'],
+        parameters: [{ name: 'completion_id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const aiAliasDedupSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'AI Alias Dedup API', version: '1.0.0' },
+  paths: {
+    '/ai/v3/batches': {
+      get: {
+        summary: 'List batches',
+        tags: ['Batches'],
+        responses: { '200': { description: 'Success' } },
+      },
+      post: {
+        summary: 'Create batch',
+        tags: ['Batches'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/v1/batches': {
+      get: {
+        summary: 'List batches',
+        tags: ['Batches'],
+        responses: { '200': { description: 'Success' } },
+      },
+      post: {
+        summary: 'Create batch',
+        tags: ['Batches'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
 const inlineIoSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Inline IO API', version: '1.0.0' },
@@ -777,6 +900,154 @@ describe('OpenAPI Security And Compliance', () => {
     expect(sdkFile!.content).not.toContain('drive2');
     expect(sdkFile!.content).not.toContain('voiceSpeaker2');
   });
+
+  it('should group app v3 endpoints by app domain instead of controller tags', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        language: 'typescript',
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+      },
+      appDomainGroupingSpec
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.files.some((f) => f.path === 'src/api/app.ts')).toBe(true);
+    expect(result.files.some((f) => f.path === 'src/api/manage.ts')).toBe(false);
+    expect(result.files.some((f) => f.path === 'src/api/update.ts')).toBe(false);
+
+    const appApi = result.files.find((f) => f.path === 'src/api/app.ts');
+    const sdkFile = result.files.find((f) => f.path === 'src/sdk.ts');
+    const readmeFile = result.files.find((f) => f.path === 'README.md');
+
+    expect(appApi).toBeDefined();
+    expect(appApi!.content).toContain('async createApp(');
+    expect(appApi!.content).toContain('async checkUpdate(');
+
+    expect(sdkFile).toBeDefined();
+    expect(sdkFile!.content).toContain('public readonly app: AppApi;');
+    expect(sdkFile!.content).toContain('this.app = createAppApi(this.httpClient);');
+    expect(sdkFile!.content).not.toContain('public readonly manage:');
+    expect(sdkFile!.content).not.toContain('public readonly update:');
+
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('client.app');
+    expect(readmeFile!.content).not.toContain('client.manage');
+    expect(readmeFile!.content).not.toContain('client.update');
+  });
+
+  it('should group backend v3 endpoints by first business domain segment', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        language: 'python',
+        sdkType: 'backend',
+        apiPrefix: '/backend/v3/api',
+      },
+      backendDomainGroupingSpec
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.files.some((f) => f.path.endsWith('/api/tenant.py'))).toBe(true);
+    expect(result.files.some((f) => f.path.endsWith('/api/user.py'))).toBe(false);
+
+    const tenantApi = result.files.find((f) => f.path.endsWith('/api/tenant.py'));
+    expect(tenantApi).toBeDefined();
+    expect(tenantApi!.content).toContain('class TenantApi:');
+    expect(tenantApi!.content).toContain('def list_tenant_users(');
+    expect(tenantApi!.content).toContain('def get_tenant_member(');
+  });
+
+  it('should group ai v3 chat endpoints under chat across languages', async () => {
+    const tsGenerator = new TypeScriptGenerator();
+    const tsResult = await tsGenerator.generate(
+      {
+        ...baseConfig,
+        language: 'typescript',
+        sdkType: 'ai',
+        apiPrefix: '/ai/v3',
+      },
+      aiDomainGroupingSpec
+    );
+
+    expect(tsResult.errors).toEqual([]);
+    expect(tsResult.files.some((f) => f.path === 'src/api/chat.ts')).toBe(true);
+    expect(tsResult.files.some((f) => f.path === 'src/api/management.ts')).toBe(false);
+    expect(tsResult.files.some((f) => f.path === 'src/api/chat-completions-management.ts')).toBe(false);
+
+    const tsChatApi = tsResult.files.find((f) => f.path === 'src/api/chat.ts');
+    const tsSdk = tsResult.files.find((f) => f.path === 'src/sdk.ts');
+    expect(tsChatApi).toBeDefined();
+    expect(tsChatApi!.content).toContain('async createChatCompletion(');
+    expect(tsChatApi!.content).toContain('async getChatCompletion(');
+    expect(tsChatApi!.content).toContain('async listChatCompletionMessages(');
+    expect(tsChatApi!.content).not.toContain('getManagedChatCompletion');
+    expect(tsSdk).toBeDefined();
+    expect(tsSdk!.content).toContain('public readonly chat: ChatApi;');
+    expect(tsSdk!.content).not.toContain('public readonly management:');
+    expect(tsSdk!.content).not.toContain('public readonly chatCompletions:');
+
+    const javaGenerator = new JavaGenerator();
+    const javaResult = await javaGenerator.generate(
+      {
+        ...baseConfig,
+        language: 'java',
+        sdkType: 'ai',
+        apiPrefix: '/ai/v3',
+      },
+      aiDomainGroupingSpec
+    );
+
+    expect(javaResult.errors).toEqual([]);
+    expect(
+      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatApi.java')
+    ).toBe(true);
+    expect(
+      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/ai/api/ManagementApi.java')
+    ).toBe(false);
+    expect(
+      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatCompletionsApi.java')
+    ).toBe(false);
+
+    const javaChatApi = javaResult.files.find(
+      (f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatApi.java'
+    );
+    expect(javaChatApi).toBeDefined();
+    expect(javaChatApi!.content).toContain('createChatCompletion');
+    expect(javaChatApi!.content).toContain('getChatCompletion');
+    expect(javaChatApi!.content).toContain('listChatCompletionMessages');
+    expect(javaChatApi!.content).not.toContain('getManagedChatCompletion');
+  });
+
+  it('should deduplicate legacy alias operations within the same ai domain', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        language: 'typescript',
+        sdkType: 'ai',
+        apiPrefix: '/ai/v3',
+      },
+      aiAliasDedupSpec
+    );
+
+    expect(result.errors).toEqual([]);
+    const batchApi = result.files.find((f) => f.path === 'src/api/batch.ts');
+    expect(batchApi).toBeDefined();
+    expect(batchApi!.content).toContain('aiApiPath(`/batches`)');
+    expect(batchApi!.content).not.toContain('aiApiPath(`/v1/batches`)');
+    expect(batchApi!.content).not.toContain('getListBatchesV1');
+    expect(batchApi!.content).not.toContain('createBatchesV1');
+
+    const sdkFile = result.files.find((f) => f.path === 'src/sdk.ts');
+    expect(sdkFile).toBeDefined();
+    expect(sdkFile!.content).toContain('public readonly batch: BatchApi;');
+    expect(sdkFile!.content).not.toContain('public readonly batche:');
+  });
+
   it('should place types export condition before import and require in generated package.json', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(baseConfig, mockSpec);

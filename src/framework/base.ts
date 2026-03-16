@@ -1,14 +1,15 @@
-import type { 
-  GeneratorConfig, 
-  GeneratorResult, 
-  GeneratedFile, 
-  ApiSpec, 
+import type {
+  GeneratorConfig,
+  GeneratorResult,
+  GeneratedFile,
+  ApiSpec,
   Language,
   SchemaContext,
   LanguageConfig,
   TypeMapping,
   NamingConventions,
-  AuthContext
+  AuthContext,
+  ApiOperationGroup
 } from './types.js';
 import { normalizeReadmeFile } from './readme.js';
 import { normalizeOperationId, normalizeTagName } from './naming.js';
@@ -88,6 +89,13 @@ export abstract class BaseGenerator {
     'v3',
     'v4',
     'v5',
+  ]);
+
+  private static readonly RESERVED_GROUP_SEGMENTS_AFTER_PREFIX = new Set([
+    'management',
+    'manage',
+    'admin',
+    'internal',
   ]);
 
   private static readonly OPERATION_VERBS = new Set([
@@ -207,7 +215,8 @@ export abstract class BaseGenerator {
     const auth = this.deriveAuthContext(spec);
     const inlineSchemaNameByObject = new WeakMap<object, string>();
     
-    const apiGroups: Record<string, { tag: string; operations: any[] }> = {};
+    const apiGroups: Record<string, ApiOperationGroup> = {};
+    const operationRegistry = new Map<string, { index: number; score: number }>();
     const paths = spec.paths || {};
     
     for (const [path, pathItem] of Object.entries(paths)) {
@@ -245,12 +254,22 @@ export abstract class BaseGenerator {
           inlineSchemaNameByObject
         );
 
-        const tag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
-        if (!apiGroups[tag]) {
-          apiGroups[tag] = { tag, operations: [] };
+        const group = this.resolveOperationGroup(operation, path);
+        if (!apiGroups[group.domain]) {
+          apiGroups[group.domain] = {
+            tag: group.domain,
+            domain: group.domain,
+            displayName: group.displayName,
+            sourceTags: group.sourceTag ? [group.sourceTag] : [],
+            operations: [],
+          };
         }
 
-        apiGroups[tag].operations.push({
+        if (group.sourceTag && !apiGroups[group.domain].sourceTags.includes(group.sourceTag)) {
+          apiGroups[group.domain].sourceTags.push(group.sourceTag);
+        }
+
+        const generatedOperation = {
           ...operation,
           path,
           method: normalizedMethod,
@@ -258,6 +277,27 @@ export abstract class BaseGenerator {
           allParameters: visibleParameters,
           requestBody,
           responses,
+        };
+        const operationKey = `${group.domain}:${this.resolveOperationDedupKey(normalizedMethod, path, operation)}`;
+        const operationScore = this.scoreOperationPathMatch(path);
+        const existingOperation = operationRegistry.get(operationKey);
+        if (existingOperation) {
+          if (existingOperation.score >= operationScore) {
+            continue;
+          }
+
+          apiGroups[group.domain].operations[existingOperation.index] = generatedOperation;
+          operationRegistry.set(operationKey, {
+            index: existingOperation.index,
+            score: operationScore,
+          });
+          continue;
+        }
+
+        apiGroups[group.domain].operations.push(generatedOperation);
+        operationRegistry.set(operationKey, {
+          index: apiGroups[group.domain].operations.length - 1,
+          score: operationScore,
         });
       }
     }
@@ -267,6 +307,181 @@ export abstract class BaseGenerator {
     }
 
     return { schemas, schemaFileMap, apiGroups, auth };
+  }
+
+  private resolveOperationGroup(
+    operation: Record<string, any>,
+    path: string
+  ): { domain: string; displayName: string; sourceTag?: string } {
+    const rawTag = typeof operation.tags?.[0] === 'string' ? operation.tags[0].trim() : '';
+    const explicitDomain = this.resolveExplicitSdkDomain(operation);
+    if (explicitDomain) {
+      return {
+        domain: explicitDomain,
+        displayName: this.toPascalCase(explicitDomain),
+        sourceTag: rawTag || explicitDomain,
+      };
+    }
+
+    const configuredDomain = this.deriveDomainFromConfiguredPrefix(path);
+    if (configuredDomain) {
+      return {
+        domain: configuredDomain,
+        displayName: this.toPascalCase(configuredDomain),
+        sourceTag: rawTag || configuredDomain,
+      };
+    }
+
+    const fallbackTag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
+    return {
+      domain: fallbackTag,
+      displayName: rawTag || this.toPascalCase(fallbackTag),
+      sourceTag: rawTag || fallbackTag,
+    };
+  }
+
+  private resolveExplicitSdkDomain(operation: Record<string, any>): string {
+    const rawValue = operation?.['x-sdk-domain'];
+    if (typeof rawValue !== 'string' || !rawValue.trim()) {
+      return '';
+    }
+    return this.normalizeOperationGroupTag(rawValue);
+  }
+
+  private deriveDomainFromConfiguredPrefix(path: string): string {
+    const pathSegments = this.toNormalizedPathSegments(path);
+    const prefixCandidates = this.resolveConfiguredPrefixCandidates();
+
+    for (const prefixSegments of prefixCandidates) {
+      if (pathSegments.length <= prefixSegments.length) {
+        continue;
+      }
+
+      if (!this.pathMatchesPrefix(pathSegments, prefixSegments)) {
+        continue;
+      }
+
+      const domainCandidates = pathSegments.slice(prefixSegments.length);
+      const domainSegment = domainCandidates.find(
+        (segment) => !BaseGenerator.RESERVED_GROUP_SEGMENTS_AFTER_PREFIX.has(segment)
+      ) || domainCandidates[0];
+      if (domainSegment) {
+        return this.normalizeOperationGroupTag(domainSegment);
+      }
+    }
+
+    return '';
+  }
+
+  private resolveOperationDedupKey(method: string, path: string, operation: Record<string, any>): string {
+    const normalizedOperationId = typeof operation.operationId === 'string'
+      ? normalizeOperationId(operation.operationId)
+      : '';
+    const relativePath = this.resolveRelativeOperationPath(path);
+    return `${method}:${relativePath}:${normalizedOperationId}`;
+  }
+
+  private resolveRelativeOperationPath(path: string): string {
+    const rawSegments = this.toRawPathSegments(path);
+    const normalizedSegments = this.toNormalizedPathSegments(path);
+    const prefixCandidates = this.resolveConfiguredPrefixCandidates();
+
+    for (const prefixSegments of prefixCandidates) {
+      if (!this.pathMatchesPrefix(normalizedSegments, prefixSegments)) {
+        continue;
+      }
+
+      const relativeSegments = rawSegments.slice(prefixSegments.length);
+      return relativeSegments.length > 0 ? `/${relativeSegments.join('/')}` : '/';
+    }
+
+    return rawSegments.length > 0 ? `/${rawSegments.join('/')}` : '/';
+  }
+
+  private scoreOperationPathMatch(path: string): number {
+    const normalizedSegments = this.toNormalizedPathSegments(path);
+    const prefixCandidates = this.resolveConfiguredPrefixCandidates();
+
+    for (let index = 0; index < prefixCandidates.length; index += 1) {
+      if (this.pathMatchesPrefix(normalizedSegments, prefixCandidates[index])) {
+        return prefixCandidates.length - index;
+      }
+    }
+
+    return 0;
+  }
+
+  private resolveConfiguredPrefixCandidates(): string[][] {
+    const primary = this.toNormalizedPathSegments(this.config?.apiPrefix || '');
+    if (primary.length === 0) {
+      return [];
+    }
+
+    const candidates: string[][] = [primary];
+    const versionIndex = primary.findIndex((segment) => /^v\d+$/.test(segment));
+    if (versionIndex >= 0) {
+      const alias = ['v1', ...primary.slice(versionIndex + 1)];
+      if (
+        alias.length > 0 &&
+        !candidates.some((candidate) => this.sameSegments(candidate, alias))
+      ) {
+        candidates.push(alias);
+      }
+    }
+
+    return candidates;
+  }
+
+  private pathMatchesPrefix(pathSegments: string[], prefixSegments: string[]): boolean {
+    if (pathSegments.length < prefixSegments.length) {
+      return false;
+    }
+
+    for (let index = 0; index < prefixSegments.length; index += 1) {
+      if (pathSegments[index] !== prefixSegments[index]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private sameSegments(left: string[], right: string[]): boolean {
+    if (left.length !== right.length) {
+      return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+      if (left[index] !== right[index]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private toRawPathSegments(value: string): string[] {
+    return String(value || '')
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+  }
+
+  private toNormalizedPathSegments(value: string): string[] {
+    return String(value || '')
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .filter((segment) => !(segment.startsWith('{') && segment.endsWith('}')))
+      .map((segment) => {
+        const parts = this.toIdentifierParts(segment);
+        if (parts.length === 0) {
+          return '';
+        }
+        const normalized = parts.join('_');
+        return BaseGenerator.RESERVED_TAG_PATH_SEGMENTS.has(normalized)
+          ? normalized
+          : this.singularize(normalized);
+      })
+      .filter(Boolean);
   }
 
   private resolveOperationTag(operation: Record<string, any>, path: string): string {
@@ -376,8 +591,17 @@ export abstract class BaseGenerator {
     if (input.endsWith('ies') && input.length > 3) {
       return `${input.slice(0, -3)}y`;
     }
-    if (input.endsWith('sses')) {
-      return input;
+    if (
+      input.length > 4 &&
+      (
+        input.endsWith('sses') ||
+        input.endsWith('ches') ||
+        input.endsWith('shes') ||
+        input.endsWith('xes') ||
+        input.endsWith('zes')
+      )
+    ) {
+      return input.slice(0, -2);
     }
     if (input.length > 3 && input.endsWith('s') && !input.endsWith('ss')) {
       return input.slice(0, -1);

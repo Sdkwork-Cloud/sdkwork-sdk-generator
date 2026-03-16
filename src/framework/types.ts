@@ -205,7 +205,18 @@ export interface AuthContext {
 
 export interface ApiOperationGroup {
   tag: string;
-  operations: (ApiOperation & { path: string; method: string })[];
+  domain: string;
+  displayName: string;
+  sourceTags: string[];
+  operations: GeneratedApiOperation[];
+}
+
+export interface GeneratedApiOperation extends ApiOperation {
+  path: string;
+  method: string;
+  allParameters?: ApiParameter[];
+  requestBody?: ApiRequestBody;
+  responses: Record<string, ApiResponse>;
 }
 
 export interface GeneratorHooks {
