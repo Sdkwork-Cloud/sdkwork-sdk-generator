@@ -16,21 +16,24 @@ export class ModelGenerator {
     generateClass(name, schema) {
         const className = FLUTTER_CONFIG.namingConventions.modelName(name);
         const props = schema.properties || {};
-        const fields = Object.entries(props).map(([propName, propSchema]) => {
+        const propEntries = Object.entries(props);
+        const fields = propEntries.map(([propName, propSchema]) => {
             const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
             const fieldType = getFlutterType(propSchema, FLUTTER_CONFIG);
             return `  final ${fieldType}? ${fieldName};`;
         }).join('\n');
-        const constructor = Object.entries(props).map(([propName]) => {
-            const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
-            return `    this.${fieldName}`;
-        }).join(',\n');
+        const constructor = propEntries.length === 0
+            ? `  ${className}();`
+            : `  ${className}({
+${propEntries.map(([propName]) => {
+                const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
+                return `    this.${fieldName}`;
+            }).join(',\n')}
+  });`;
         return `class ${className} {
 ${fields}
 
-  ${className}({
 ${constructor}
-  });
 }`;
     }
     format(content) {

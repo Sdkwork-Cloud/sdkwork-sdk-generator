@@ -49,6 +49,7 @@ export class ApiGenerator {
       path: `lib/src/api/${fileName}.dart`,
       content: this.format(`import '../http/client.dart';
 import '../models.dart';
+import 'paths.dart';
 
 class ${className} {
   final HttpClient _client;

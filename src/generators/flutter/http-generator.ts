@@ -48,7 +48,7 @@ class HttpClient extends BaseHttpClient {
     const imports = tags.map(tag => {
       const resolvedTagName = resolvedTagNames.get(tag) || tag;
       const fileName = FLUTTER_CONFIG.namingConventions.fileName(resolvedTagName);
-      return `import '../api/${fileName}.dart';`;
+      return `import 'src/api/${fileName}.dart';`;
     }).join('\n');
 
     const modules = tags.map(tag => {
