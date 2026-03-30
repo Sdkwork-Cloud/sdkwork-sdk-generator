@@ -57,6 +57,10 @@ function toKebabCase(str: string): string {
   return `group-${fallback}`;
 }
 
+function wrapComplexType(type: string): string {
+  return /[|&]/.test(type) ? `(${type})` : type;
+}
+
 export function getTypeScriptType(schema: any, config: LanguageConfig, knownModels?: Set<string>): string {
   if (!schema || typeof schema !== 'object') {
     return 'unknown';
@@ -86,6 +90,14 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
       return 'unknown';
     }
     return schema.nullable ? `${modelName} | null` : modelName;
+  }
+
+  if (schema.additionalProperties) {
+    const valueType = schema.additionalProperties === true
+      ? 'unknown'
+      : getTypeScriptType(schema.additionalProperties, config, knownModels);
+    const recordType = `Record<string, ${valueType}>`;
+    return schema.nullable ? `${recordType} | null` : recordType;
   }
   
   const type = schema.type;
@@ -122,16 +134,11 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
   
   if (type === 'array') {
     const itemType = schema.items ? getTypeScriptType(schema.items, config, knownModels) : 'unknown';
-    const arrayType = `${itemType}[]`;
+    const arrayType = `${wrapComplexType(itemType)}[]`;
     return schema.nullable ? `${arrayType} | null` : arrayType;
   }
   
   if (type === 'object') {
-    if (schema.additionalProperties) {
-      const valueType = getTypeScriptType(schema.additionalProperties, config, knownModels);
-      const recordType = `Record<string, ${valueType}>`;
-      return schema.nullable ? `${recordType} | null` : recordType;
-    }
     const objectType = 'Record<string, unknown>';
     return schema.nullable ? `${objectType} | null` : objectType;
   }

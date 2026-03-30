@@ -200,6 +200,57 @@ const duplicateOperationIdSpec: ApiSpec = {
   },
 };
 
+const postBodyAndQuerySpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Post Body And Query API', version: '1.0.0' },
+  paths: {
+    '/tenant/list': {
+      post: {
+        summary: 'Get tenants by page',
+        operationId: 'listByPage',
+        tags: ['Tenant'],
+        parameters: [
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer' } },
+          { name: 'size', in: 'query', required: false, schema: { type: 'integer' } },
+        ],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PlusTenantQueryListForm' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlusApiResultPagePlusTenantVO' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      PlusTenantQueryListForm: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+        },
+      },
+      PlusApiResultPagePlusTenantVO: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 const managementTagSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Management Tag API', version: '1.0.0' },
@@ -792,6 +843,20 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tenantCsApi!.content).toContain('UpdateAsync(');
     expect(tenantCsApi!.content).not.toContain('Create28Async');
     expect(tenantCsApi!.content).not.toContain('Update28Async');
+  });
+
+  it('should keep both request body and query params on post endpoints', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, postBodyAndQuerySpec);
+    const tenantApi = result.files.find((f) => f.path === 'src/api/tenant.ts');
+
+    expect(tenantApi).toBeDefined();
+    expect(tenantApi!.content).toContain(
+      'async listByPage(body?: PlusTenantQueryListForm, params?: QueryParams): Promise<PlusApiResultPagePlusTenantVO>'
+    );
+    expect(tenantApi!.content).toContain(
+      'return this.client.post<PlusApiResultPagePlusTenantVO>(backendApiPath(`/tenant/list`), body, params);'
+    );
   });
 
   it('should expose flattened and simplified typescript client api properties', async () => {
