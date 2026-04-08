@@ -1,3 +1,4 @@
+import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
 export const CSHARP_CONFIG = {
     language: 'csharp',
     displayName: 'C# (.NET)',
@@ -80,6 +81,20 @@ export function getCSharpType(schema, config) {
         return 'Dictionary<string, object>';
     }
     return 'object';
+}
+export function getCSharpNamespace(config) {
+    const explicit = String(config.namespace || '').trim();
+    if (explicit) {
+        return explicit.replace(/\//g, '.').replace(/\\/g, '.');
+    }
+    return resolveSdkTypePascal(config);
+}
+export function getCSharpPackageId(config) {
+    const explicit = String(config.packageName || '').trim();
+    if (explicit) {
+        return explicit;
+    }
+    return getCSharpNamespace(config);
 }
 function normalizeSchemaType(type) {
     if (typeof type === 'string') {

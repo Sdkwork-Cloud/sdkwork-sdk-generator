@@ -4,10 +4,13 @@ Professional SDK code generator for multiple programming languages. Generate typ
 
 ## Features
 
-- **Multi-language Support**: TypeScript, Python, Go, Java, Swift, Kotlin, Flutter, C#
+- **Multi-language Support**: TypeScript, Dart, Python, Go, Java, Kotlin, Swift, C#, Flutter, Rust, PHP, Ruby
 - **Type-safe**: Generate strongly typed models and API clients
 - **Modular Architecture**: Each generator has independent sub-modules for models, APIs, HTTP client, build config, and docs
 - **README System**: Every generated SDK always includes a top-level `README.md`
+- **Unified Metadata Manifest**: Every generated SDK also includes `sdkwork-sdk.json` for stable multi-language version governance
+- **Safe Regeneration**: Generated ownership is tracked in `.sdkwork/sdkwork-generator-manifest.json`, each run writes `.sdkwork/sdkwork-generator-changes.json`, apply mode also writes a versioned `.sdkwork/sdkwork-generator-report.json`, stale generated files are pruned safely, and custom code is preserved
+- **Impact-Aware Automation**: Every generation run classifies changed files into machine-readable impact areas so verification and release automation can react to real change scope
 - **Unified Client Naming**: `Sdkwork{SdkType}Client` across all languages (for example `SdkworkAiClient`)
 - **Auth Clarity**: README examples document API key mode and dual-token mode as mutually exclusive
 - **Unified Publish Bin**: Every generated language SDK includes `bin/publish-core.mjs`, `bin/publish.sh`, and `bin/publish.ps1`
@@ -36,7 +39,157 @@ By default the generator resolves the SDK version from the highest available bas
 
 For multi-language batch generation, resolve the version once and pass it back with `--fixed-sdk-version` so every language uses the same release number.
 
-### Options
+If your multi-language SDK family uses a custom TypeScript npm package as the published version anchor, pass it explicitly:
+
+```bash
+sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l python --package-name sdkwork-app-sdk-python --npm-package-name @acme/unified-app-sdk
+```
+
+To preview what regeneration would change without touching the filesystem, use dry-run mode:
+
+```bash
+sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript --dry-run
+```
+
+To let automation consume the full execution result directly, add `--json`:
+
+```bash
+sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript --dry-run --json
+```
+
+To lock apply mode to an already reviewed dry-run plan, pass the fingerprint back:
+
+```bash
+sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript --expected-change-fingerprint <fingerprint>
+```
+
+### Initialize SDK Workspace
+
+Use `init` when you want a minimal, regeneration-safe workspace before the OpenAPI spec or full SDK package is ready:
+
+```bash
+sdkgen init -o ./sdk -n MySDK -l typescript -t backend
+```
+
+The init command creates only the stable workspace boundary:
+
+- `README.md` with the next `sdkgen generate` command
+- `sdkwork-sdk.json` with SDK metadata
+- `custom/README.md` for hand-written extensions
+- `.sdkwork/` control-plane artifacts so `sdkgen inspect` stays healthy
+
+Key rules:
+
+- `init` is idempotent when rerun against its own scaffold
+- `init` does not generate API/runtime/build files from OpenAPI
+- `init` refuses to replace an already generated SDK control plane
+- `init` supports `--dry-run`, `--json`, and `--expected-change-fingerprint` for the same review/apply automation style as `generate`
+
+### Inspect SDK Control Plane
+
+To inspect the persisted regeneration control plane for an existing generated SDK:
+
+```bash
+sdkgen inspect -o ./sdk
+```
+
+For automation:
+
+```bash
+sdkgen inspect -o ./sdk --json
+```
+
+The inspect command returns the parsed manifest, change summary, and execution report snapshot together with a unified health evaluation and recommended next action.
+
+To turn inspect into an explicit automation gate:
+
+```bash
+sdkgen inspect -o ./sdk --fail-on degraded
+sdkgen inspect -o ./sdk --require-action verify
+```
+
+Supported inspect gate values:
+
+- `--fail-on`: `empty`, `degraded`, `invalid`
+- `--require-action`: `generate`, `review`, `apply`, `verify`, `complete`, `skip`
+
+### Safe Regeneration Contract
+
+Every generated SDK now follows the same regeneration rules:
+
+- Generator-owned files are tracked in `.sdkwork/sdkwork-generator-manifest.json`
+- Each generation run writes `.sdkwork/sdkwork-generator-changes.json` with created, updated, unchanged, deleted, scaffolded, preserved, and backed-up file lists
+- The change summary also includes classified impact areas such as `api-surface`, `models`, `runtime`, `build-metadata`, `publish-workflow`, `documentation`, and `custom-scaffold`
+- The change summary now also persists the resolved verification plan so CI and agent workflows can continue from a single machine-readable control-plane artifact
+- The change summary also persists the resolved execution decision so downstream automation knows whether the next best action is `review`, `apply`, `verify`, `complete`, or `skip`
+- Apply mode also writes `.sdkwork/sdkwork-generator-report.json` with the same full execution report structure as CLI `--json`, including `schemaVersion`, `generator`, stable artifact paths, sdk metadata, versioning, stats, warnings, `changeImpact`, `verificationPlan`, `executionDecision`, and `executionHandoff`
+- CLI JSON output also includes an execution handoff with concrete next commands, including reviewed apply commands for dry-run flows
+- Hand-written extensions belong in `custom/`
+- `custom/` is scaffolded once and is never overwritten by later generations
+- Modified generated-owned files are backed up to `.sdkwork/manual-backups/` before overwrite or deletion
+- Legacy SDK outputs without a prior manifest are preserved on the first safe regeneration pass
+- `--dry-run` reuses the same diff engine but does not write files, manifests, change summaries, execution reports, or backups
+- `--json` emits a versioned machine-readable report on both success and failure; success matches the apply-mode `.sdkwork/sdkwork-generator-report.json` contract, while failure includes the same `schemaVersion` and `generator` identity plus available artifact paths
+- Both text and JSON outputs now include a post-generation verification plan based on impact classification and language-specific verification capability
+- `syncSummary.changeFingerprint` provides a stable fingerprint for the planned mutations, and `--expected-change-fingerprint` can require apply mode to match a reviewed dry-run plan before writing
+
+This keeps repeat generation idempotent while avoiding destructive cleanup of custom code.
+
+For programmatic Node.js callers that need the same safe write semantics as the CLI, use the Node-only helper:
+
+```typescript
+import { syncGeneratedOutput } from '@sdkwork/sdk-generator/node/output-sync';
+```
+
+For programmatic Node.js callers that want the full `resolve version -> generate -> safe sync` pipeline:
+
+```typescript
+import { generateSdkProject } from '@sdkwork/sdk-generator/node/generate';
+```
+
+For programmatic Node.js callers that want to resolve or read the latest persisted execution report:
+
+```typescript
+import {
+  parseGenerateExecutionReport,
+  readGenerateExecutionReport,
+  resolveGenerateExecutionArtifacts,
+} from '@sdkwork/sdk-generator/node/execution-report';
+```
+
+For downstream agents that want a single health-checked snapshot of manifest, change summary, and execution report:
+
+```typescript
+import { readGenerateControlPlaneSnapshot } from '@sdkwork/sdk-generator/node/control-plane';
+```
+
+The returned snapshot includes parsed artifacts, structured `issues`, and a unified `evaluation` with `status`, `recommendedAction`, and `summary` so orchestration layers can decide whether to `generate`, `review`, `apply`, `verify`, `complete`, or `skip`.
+
+For programmatic Node.js callers that want to initialize a regeneration-safe SDK workspace before generation:
+
+```typescript
+import { initializeSdkWorkspace } from '@sdkwork/sdk-generator/node/init';
+```
+
+For automation that needs to classify a planned diff before deciding verification or release steps:
+
+```typescript
+import { analyzeChangeImpact } from '@sdkwork/sdk-generator';
+```
+
+For automation that needs a machine-readable next-step decision after dry-run or apply:
+
+```typescript
+import { buildExecutionDecisionFromContext } from '@sdkwork/sdk-generator';
+```
+
+For automation that needs concrete next commands after a generate run:
+
+```typescript
+import { buildExecutionHandoff } from '@sdkwork/sdk-generator';
+```
+
+### Generate Options
 
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
@@ -44,21 +197,26 @@ For multi-language batch generation, resolve the version once and pass it back w
 | `-o, --output` | Output directory | Yes | - |
 | `-n, --name` | SDK name | Yes | - |
 | `-l, --language` | Target language | No | `typescript` |
-| `-t, --type` | SDK type (app, backend, ai) | No | `backend` |
+| `-t, --type` | SDK type (`app`, `backend`, `ai`, `custom`) | No | `backend` |
 | `--sdk-version` | Requested SDK version, auto-bumped if it is not newer than local/npm baseline | No | Auto-resolved |
 | `--fixed-sdk-version` | Use an exact SDK version without auto-increment checks | No | - |
 | `--npm-registry` | Registry used for published TypeScript SDK version checks | No | `https://registry.npmjs.org` |
+| `--npm-package-name` | Override the TypeScript npm package used as the published version baseline | No | Auto-derived |
 | `--sdk-root` | Workspace root used to scan sibling generated SDK versions | No | - |
 | `--sdk-name` | Workspace prefix, for example `sdkwork-app-sdk` | No | - |
 | `--no-sync-published-version` | Skip published npm version checks when resolving SDK version | No | `false` |
 | `--base-url` | Base URL for API | No | From spec |
-| `--api-prefix` | API path prefix | No | `/api/v1` |
+| `--api-prefix` | API path prefix | No | empty string |
 | `--package-name` | Package name | No | Auto-generated |
 | `--common-package` | Override language common component | No | Language default |
-| `--namespace` | Namespace (C#) | No | `SDKWork.SDK` |
+| `--namespace` | Namespace override for languages that support it, such as C# and PHP | No | Language-specific |
 | `--author` | Author name | No | `SDKWork Team` |
 | `--license` | License | No | `MIT` |
 | `--description` | SDK description | No | - |
+| `--no-clean` | Do not prune stale generated files before generation | No | `false` |
+| `--dry-run` | Preview generated, deleted, scaffolded, and backup changes without writing output | No | `false` |
+| `--expected-change-fingerprint` | Require apply mode to match a previously reviewed change fingerprint before writing | No | - |
+| `--json` | Emit machine-readable JSON output for automation | No | `false` |
 
 ### Supported Languages
 
@@ -69,24 +227,28 @@ sdkgen languages
 | Language | Flag | Description |
 |----------|------|-------------|
 | TypeScript | `typescript` | TypeScript/JavaScript with full type support |
+| Dart | `dart` | Standalone Dart 3.0+ with `http` transport |
 | Python | `python` | Python 3.8+ with type hints |
 | Go | `go` | Go 1.21+ with strong typing |
 | Java | `java` | Java 11+ with OkHttp and Jackson |
 | Swift | `swift` | Swift 5.7+ for iOS/macOS |
 | Kotlin | `kotlin` | Kotlin 1.9+ for Android/JVM |
-| Flutter | `flutter` | Flutter/Dart 3.0+ for cross-platform |
+| Flutter | `flutter` | Flutter 3.0+ for cross-platform UI apps |
 | C# | `csharp` | C# .NET 6+ with HttpClient |
-
-### Initialize New SDK Project
-
-```bash
-sdkgen init -n MySDK -l typescript -t backend
-```
+| Rust | `rust` | Rust 1.75+ with reqwest and serde |
+| PHP | `php` | PHP 8.1+ with Composer and Guzzle |
+| Ruby | `ruby` | Ruby 3.0+ with gem packaging and Faraday |
 
 ## Programmatic Usage
 
 ```typescript
-import { TypeScriptGenerator, PythonGenerator, GoGenerator } from '@sdkwork/sdk-generator';
+import {
+  TypeScriptGenerator,
+  DartGenerator,
+  PythonGenerator,
+  GoGenerator,
+  RustGenerator,
+} from '@sdkwork/sdk-generator';
 import type { GeneratorConfig, ApiSpec } from '@sdkwork/sdk-generator';
 import { readFileSync } from 'fs';
 
@@ -141,8 +303,12 @@ generators/
 |-- java/
 |-- swift/
 |-- kotlin/
+|-- dart/
 |-- flutter/
--- csharp/
+|-- csharp/
+|-- php/
+|-- ruby/
+-- rust/
 ```
 
 ### Generator Components
@@ -184,6 +350,19 @@ For server-side applications. Includes:
 - README generation is mandatory for every language and every sdk type.
 - Authentication examples in generated README always state that API key mode and dual-token mode are mutually exclusive.
 ## Generated Structure
+
+All generated SDK layouts also reserve these stable cross-language paths:
+
+```
+sdk/
+|-- custom/
+|   -- README.md                     # Hand-written wrappers and extensions live here
+-- .sdkwork/
+    |-- sdkwork-generator-manifest.json
+    |-- sdkwork-generator-changes.json # Machine-readable change summary from the latest generation run
+    |-- sdkwork-generator-report.json  # Full machine-readable execution report from the latest applied run
+    -- manual-backups/              # Backups of modified generated-owned files
+```
 
 ### TypeScript
 
@@ -307,12 +486,34 @@ sdk/
 -- README.md
 ```
 
-### Flutter/Dart
+### Dart
+
+```
+sdk/
+|-- lib/
+|   |-- app_client.dart       # Main SDK client
+|   |-- sdkwork_app_sdk_dart.dart
+|   |-- src/
+|   |   |-- api/
+|   |   |   |-- paths.dart
+|   |   |   |-- user.dart
+|   |   |   -- api.dart
+|   |   |-- http/
+|   |   |   |-- client.dart
+|   |   |   -- sdk_config.dart
+|   |   -- models.dart
+|-- pubspec.yaml
+|-- analysis_options.yaml
+-- README.md
+```
+
+### Flutter
 
 ```
 sdk/
 |-- lib/
 |   |-- backend_client.dart   # Main SDK client
+|   |-- backend_sdk.dart
 |   |-- src/
 |   |   |-- api/
 |   |   |   |-- paths.dart    # API path utilities
@@ -342,6 +543,72 @@ sdk/
 -- README.md
 ```
 
+### Rust
+
+```
+sdk/
+|-- src/
+|   |-- api/
+|   |   |-- base.rs          # Shared API aliases
+|   |   |-- paths.rs         # API path utilities
+|   |   |-- user.rs          # User API module
+|   |   -- mod.rs            # API exports
+|   |-- http/
+|   |   |-- client.rs        # Reqwest-based HTTP client
+|   |   -- mod.rs            # HTTP exports
+|   |-- models/
+|   |   |-- common.rs        # Common models
+|   |   |-- user.rs          # Model structs
+|   |   -- mod.rs            # Model exports
+|   |-- client.rs            # Main SDK client
+|   -- lib.rs                # Crate entrypoint
+|-- Cargo.toml
+-- README.md
+```
+
+### PHP
+
+```
+sdk/
+|-- src/
+|   |-- Api/
+|   |   |-- BaseApi.php
+|   |   -- User.php
+|   |-- Http/
+|   |   -- HttpClient.php
+|   |-- Models/
+|   |   -- User.php
+|   |-- SdkConfig.php
+|   -- SdkworkAppClient.php
+|-- composer.json
+|-- sdkwork-sdk.json
+-- README.md
+```
+
+### Ruby
+
+```
+sdk/
+|-- lib/
+|   |-- sdkwork/
+|   |   |-- app_sdk.rb
+|   |   -- app_sdk/
+|   |      |-- version.rb
+|   |      |-- sdk_config.rb
+|   |      |-- client.rb
+|   |      |-- http/
+|   |      |   -- client.rb
+|   |      |-- api/
+|   |      |   |-- base_api.rb
+|   |      |   -- user.rb
+|   |      -- models/
+|   |          -- user.rb
+|-- sdkwork-app-sdk.gemspec
+|-- Gemfile
+|-- sdkwork-sdk.json
+-- README.md
+```
+
 ## Import Standards
 
 All generated TypeScript SDKs import from the package root:
@@ -362,7 +629,11 @@ Generated SDKs depend on language-specific SDKWork common components:
 - Java/Kotlin: `com.sdkwork:sdk-common`
 - Swift: `SDKworkCommon` (Swift Package)
 - C#: `SDKwork.Common`
+- Dart: self-contained `http`
 - Flutter: `sdkwork_common_flutter`
+- Rust: self-contained `reqwest` + `serde` + `thiserror`
+- PHP: self-contained `guzzlehttp/guzzle`
+- Ruby: self-contained `faraday`
 
 You can override the common component through CLI:
 
@@ -378,7 +649,11 @@ sdkgen generate ... --common-package "<language-specific-spec>"
 - Go: `github.com/org/common-go@v1.2.3` or `github.com/org/common-go@v1.2.3|github.com/org/common-go/common`
 - Swift: `https://host/common-swift.git@1.2.3` or `https://host/common-swift.git@1.2.3|CommonProduct`
 - C#: `Common.Package@1.2.3` or `Common.Package@1.2.3|Common.Package.Core`
+- Dart: currently self-contained; `--common-package` is ignored
 - Flutter: `sdkwork_common_flutter@^1.2.3` or `sdkwork_common_flutter@^1.2.3|package:sdkwork_common_flutter/sdkwork_common_flutter.dart`
+- Rust: currently self-contained; `--common-package` is ignored
+- PHP: currently self-contained; `--common-package` is ignored
+- Ruby: currently self-contained; `--common-package` is ignored
 
 These common packages provide:
 

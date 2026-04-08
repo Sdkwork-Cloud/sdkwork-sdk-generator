@@ -1,4 +1,4 @@
-import { CSHARP_CONFIG, getCSharpType } from './config.js';
+import { CSHARP_CONFIG, getCSharpNamespace, getCSharpType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
         const files = [];
@@ -21,7 +21,7 @@ export class ModelGenerator {
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace ${CSHARP_CONFIG.namingConventions.modelName(config.sdkType)}.Models
+namespace ${getCSharpNamespace(config)}.Models
 {
     public class ${className}
     {

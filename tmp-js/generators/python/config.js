@@ -23,17 +23,67 @@ export const PYTHON_CONFIG = {
     },
     namingConventions: {
         modelName: (name) => toPascalCase(name),
-        propertyName: (name) => toSnakeCase(name),
-        methodName: (name) => toSnakeCase(name),
-        fileName: (name) => toSnakeCase(name),
-        packageName: (name) => toSnakeCase(name),
+        propertyName: (name) => toPythonIdentifier(name),
+        methodName: (name) => toPythonIdentifier(name),
+        fileName: (name) => toPythonIdentifier(name),
+        packageName: (name) => toPythonIdentifier(name),
     },
 };
+const PYTHON_RESERVED_WORDS = new Set([
+    'false',
+    'none',
+    'true',
+    'and',
+    'as',
+    'assert',
+    'async',
+    'await',
+    'break',
+    'case',
+    'class',
+    'continue',
+    'def',
+    'del',
+    'elif',
+    'else',
+    'except',
+    'finally',
+    'for',
+    'from',
+    'global',
+    'if',
+    'import',
+    'in',
+    'is',
+    'lambda',
+    'match',
+    'nonlocal',
+    'not',
+    'or',
+    'pass',
+    'raise',
+    'return',
+    'try',
+    'while',
+    'with',
+    'yield',
+]);
 function toPascalCase(str) {
     return str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '').replace(/^(.)/, c => c.toUpperCase());
 }
 function toSnakeCase(str) {
     return str.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]/g, '_').toLowerCase();
+}
+function toPythonIdentifier(str) {
+    const snakeCase = toSnakeCase(str)
+        .replace(/[^a-zA-Z0-9_]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+    if (!snakeCase) {
+        return 'value';
+    }
+    const prefixed = /^\d/.test(snakeCase) ? `_${snakeCase}` : snakeCase;
+    return PYTHON_RESERVED_WORDS.has(prefixed) ? `${prefixed}_` : prefixed;
 }
 export function getPythonType(schema, config) {
     if (!schema || typeof schema !== 'object') {
@@ -122,5 +172,6 @@ export function getPythonPackageRoot(config) {
     if (!packageRoot) {
         return 'sdkwork_sdk';
     }
-    return /^\d/.test(packageRoot) ? `sdk_${packageRoot}` : packageRoot;
+    const normalizedRoot = /^\d/.test(packageRoot) ? `sdk_${packageRoot}` : packageRoot;
+    return PYTHON_RESERVED_WORDS.has(normalizedRoot) ? `${normalizedRoot}_` : normalizedRoot;
 }

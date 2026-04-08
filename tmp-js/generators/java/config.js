@@ -1,3 +1,4 @@
+import { toSafeCamelIdentifier, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
 export const JAVA_CONFIG = {
     language: 'java',
     displayName: 'Java',
@@ -23,12 +24,93 @@ export const JAVA_CONFIG = {
     },
     namingConventions: {
         modelName: (name) => toPascalCase(name),
-        propertyName: (name) => toCamelCase(name),
-        methodName: (name) => toCamelCase(name),
+        propertyName: (name) => toSafeCamelIdentifier(name, JAVA_RESERVED_WORDS),
+        methodName: (name) => toSafeCamelIdentifier(name, JAVA_DISALLOWED_METHOD_NAMES),
         fileName: (name) => toPascalCase(name),
-        packageName: (name) => toSnakeCase(name),
+        packageName: (name) => toSafeSnakeIdentifier(name, EMPTY_RESERVED_WORDS),
     },
 };
+const EMPTY_RESERVED_WORDS = new Set();
+const JAVA_RESERVED_WORDS = new Set([
+    'abstract',
+    'assert',
+    'boolean',
+    'break',
+    'byte',
+    'case',
+    'catch',
+    'char',
+    'class',
+    'const',
+    'continue',
+    'default',
+    'do',
+    'double',
+    'else',
+    'enum',
+    'extends',
+    'exports',
+    'false',
+    'final',
+    'finally',
+    'float',
+    'for',
+    'goto',
+    'if',
+    'implements',
+    'import',
+    'instanceof',
+    'int',
+    'interface',
+    'long',
+    'module',
+    'native',
+    'new',
+    'nonsealed',
+    'null',
+    'open',
+    'opens',
+    'package',
+    'permits',
+    'private',
+    'protected',
+    'public',
+    'provides',
+    'record',
+    'return',
+    'requires',
+    'sealed',
+    'short',
+    'static',
+    'strictfp',
+    'super',
+    'switch',
+    'synchronized',
+    'this',
+    'throw',
+    'throws',
+    'to',
+    'transitive',
+    'transient',
+    'true',
+    'try',
+    'uses',
+    'var',
+    'void',
+    'volatile',
+    'while',
+    'with',
+    'yield',
+]);
+const JAVA_DISALLOWED_METHOD_NAMES = new Set([
+    ...JAVA_RESERVED_WORDS,
+    'clone',
+    'finalize',
+    'getclass',
+    'notify',
+    'notifyall',
+    'wait',
+]);
 function toPascalCase(str) {
     return str
         .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -37,16 +119,6 @@ function toPascalCase(str) {
         .filter(Boolean)
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join('');
-}
-function toCamelCase(str) {
-    const pascal = toPascalCase(str);
-    return pascal.charAt(0).toLowerCase() + pascal.slice(1);
-}
-function toSnakeCase(str) {
-    return str.replace(/([a-z])([A-Z])/g, '$1_$2')
-        .replace(/[\s-]+/g, '_')
-        .replace(/[^a-zA-Z0-9_]/g, '')
-        .toLowerCase();
 }
 export function getJavaType(schema, config) {
     if (!schema || typeof schema !== 'object') {

@@ -1,3 +1,4 @@
+import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
 export const SWIFT_CONFIG = {
     language: 'swift',
     displayName: 'Swift',
@@ -23,12 +24,94 @@ export const SWIFT_CONFIG = {
     },
     namingConventions: {
         modelName: (name) => toPascalCase(name),
-        propertyName: (name) => toCamelCase(name),
-        methodName: (name) => toCamelCase(name),
+        propertyName: (name) => toSafeCamelIdentifier(name, SWIFT_RESERVED_WORDS),
+        methodName: (name) => toSafeCamelIdentifier(name, SWIFT_RESERVED_WORDS),
         fileName: (name) => toPascalCase(name),
         packageName: (name) => toSnakeCase(name),
     },
 };
+const SWIFT_RESERVED_WORDS = new Set([
+    'actor',
+    'any',
+    'as',
+    'associatedtype',
+    'associativity',
+    'async',
+    'await',
+    'break',
+    'case',
+    'catch',
+    'class',
+    'convenience',
+    'continue',
+    'default',
+    'defer',
+    'deinit',
+    'didset',
+    'do',
+    'dynamic',
+    'else',
+    'enum',
+    'extension',
+    'fallthrough',
+    'false',
+    'fileprivate',
+    'final',
+    'for',
+    'func',
+    'get',
+    'guard',
+    'if',
+    'import',
+    'in',
+    'indirect',
+    'infix',
+    'init',
+    'inout',
+    'internal',
+    'is',
+    'lazy',
+    'left',
+    'let',
+    'mutating',
+    'nil',
+    'none',
+    'nonmutating',
+    'open',
+    'operator',
+    'optional',
+    'override',
+    'postfix',
+    'precedence',
+    'prefix',
+    'private',
+    'protocol',
+    'public',
+    'repeat',
+    'required',
+    'rethrows',
+    'return',
+    'right',
+    'self',
+    'set',
+    'some',
+    'static',
+    'struct',
+    'subscript',
+    'super',
+    'switch',
+    'throw',
+    'throws',
+    'true',
+    'try',
+    'typealias',
+    'unowned',
+    'var',
+    'weak',
+    'where',
+    'while',
+    'willset',
+]);
 function toPascalCase(str) {
     return str
         .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -37,10 +120,6 @@ function toPascalCase(str) {
         .filter(Boolean)
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join('');
-}
-function toCamelCase(str) {
-    const pascal = toPascalCase(str);
-    return pascal.charAt(0).toLowerCase() + pascal.slice(1);
 }
 function toSnakeCase(str) {
     return str.replace(/([a-z])([A-Z])/g, '$1_$2')

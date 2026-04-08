@@ -1,4 +1,16 @@
-export type Language = 'typescript' | 'python' | 'java' | 'csharp' | 'go' | 'rust' | 'swift' | 'flutter' | 'kotlin';
+export type Language =
+  | 'typescript'
+  | 'dart'
+  | 'python'
+  | 'java'
+  | 'csharp'
+  | 'go'
+  | 'rust'
+  | 'swift'
+  | 'flutter'
+  | 'kotlin'
+  | 'php'
+  | 'ruby';
 
 export type SdkType = 'app' | 'backend' | 'ai' | 'custom';
 
@@ -164,7 +176,13 @@ export interface GeneratedFile {
   content: string;
   language: Language;
   description?: string;
+  ownership?: GeneratedFileOwnership;
+  overwriteStrategy?: GeneratedFileOverwriteStrategy;
 }
+
+export type GeneratedFileOwnership = 'generated' | 'scaffold';
+
+export type GeneratedFileOverwriteStrategy = 'always' | 'if-missing';
 
 export interface GeneratorResult {
   files: GeneratedFile[];

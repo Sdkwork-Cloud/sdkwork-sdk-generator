@@ -1,45 +1,27 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { generateSdk, getSupportedLanguages } from './index.js';
-import { writeFileSync, mkdirSync, existsSync, unlinkSync, chmodSync, readdirSync, rmSync } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { getSupportedLanguages, getSupportedSdkTypes } from './index.js';
+import { dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { GeneratorConfig } from './framework/types.js';
-import { resolveSdkVersion } from './framework/versioning.js';
+import {
+  formatInspectFailure,
+  formatInspectSuccess,
+  resolveInspectGate,
+  runInspectCommand,
+} from './cli-inspect.js';
+import {
+  formatInitFailure,
+  formatInitSuccess,
+  runInitCommand,
+} from './cli-init.js';
+import { runGenerateCommand } from './cli-runner.js';
+import { formatGenerateFailure, formatGenerateSuccess } from './cli-output.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 void __dirname;
 
 const program = new Command();
-const TRANSIENT_FS_ERROR_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
-const MAX_FS_RETRIES = 5;
-const BASE_RETRY_DELAY_MS = 50;
-
-function sleepSync(ms: number): void {
-  const sab = new SharedArrayBuffer(4);
-  const int32 = new Int32Array(sab);
-  Atomics.wait(int32, 0, 0, ms);
-}
-
-function withFsRetry<T>(action: () => T, onRetry?: () => void): T {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_FS_RETRIES; attempt += 1) {
-    try {
-      return action();
-    } catch (error) {
-      lastError = error;
-      const code = (error as NodeJS.ErrnoException)?.code;
-      const isTransient = typeof code === 'string' && TRANSIENT_FS_ERROR_CODES.has(code);
-      if (!isTransient || attempt >= MAX_FS_RETRIES) {
-        throw error;
-      }
-      onRetry?.();
-      sleepSync(BASE_RETRY_DELAY_MS * attempt);
-    }
-  }
-  throw lastError;
-}
 
 program
   .name('sdkgen')
@@ -47,208 +29,144 @@ program
   .version('1.0.0');
 
 program
+  .command('init')
+  .description('Initialize a minimal SDK workspace scaffold')
+  .requiredOption('-o, --output <path>', 'Output directory')
+  .requiredOption('-n, --name <name>', 'SDK name')
+  .option('-t, --type <type>', 'SDK type (app, backend, ai, custom)', 'backend')
+  .option('-l, --language <lang>', 'Language', 'typescript')
+  .option('--package-name <name>', 'Package name')
+  .option('--namespace <name>', 'Namespace override for languages that support it, such as C# and PHP')
+  .option('--sdk-version <ver>', 'Exact SDK version for the initialized scaffold')
+  .option('--description <text>', 'Description')
+  .option('--author <name>', 'Author')
+  .option('--license <license>', 'License', 'MIT')
+  .option('--dry-run', 'Preview scaffold changes without writing output')
+  .option('--expected-change-fingerprint <fingerprint>', 'Require the planned scaffold fingerprint to match before writing output')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action(async (options) => {
+    try {
+      if (!options.json) {
+        console.log(`\nInitializing ${options.language} SDK workspace: ${options.name}\n`);
+      }
+      const execution = await runInitCommand({
+        output: options.output,
+        name: options.name,
+        type: options.type,
+        language: options.language,
+        packageName: options.packageName,
+        namespace: options.namespace,
+        sdkVersion: options.sdkVersion,
+        description: options.description,
+        author: options.author,
+        license: options.license,
+        dryRun: options.dryRun,
+        expectedChangeFingerprint: options.expectedChangeFingerprint,
+      });
+      process.stdout.write(formatInitSuccess(execution, {
+        json: options.json,
+        outputPath: options.output,
+        requestedSdkVersion: options.sdkVersion,
+      }));
+    } catch (error) {
+      const output = formatInitFailure(error, {
+        json: options.json,
+        outputPath: options.output,
+      });
+      process.stderr.write(output.endsWith('\n') ? output : `${output}\n`);
+      process.exit(1);
+    }
+  });
+
+program
   .command('generate')
   .requiredOption('-i, --input <path>', 'OpenAPI spec file or URL')
   .requiredOption('-o, --output <path>', 'Output directory')
   .requiredOption('-n, --name <name>', 'SDK name')
-  .option('-t, --type <type>', 'SDK type (app, backend, ai)', 'backend')
+  .option('-t, --type <type>', 'SDK type (app, backend, ai, custom)', 'backend')
   .option('-l, --language <lang>', 'Language', 'typescript')
   .option('--base-url <url>', 'Base URL')
   .option('--api-prefix <prefix>', 'API prefix', '')
   .option('--package-name <name>', 'Package name')
+  .option('--namespace <name>', 'Namespace override for languages that support it, such as C# and PHP')
   .option('--common-package <spec>', 'Common package spec (language-specific, optional)')
   .option('--sdk-version <ver>', 'SDK version')
   .option('--fixed-sdk-version <ver>', 'Use an exact SDK version without auto-increment checks')
   .option('--npm-registry <url>', 'Registry used for published TypeScript SDK version checks', 'https://registry.npmjs.org')
+  .option('--npm-package-name <name>', 'TypeScript npm package used as the published version baseline for multi-language releases')
   .option('--sdk-root <path>', 'SDK workspace root used to scan sibling language package versions')
   .option('--sdk-name <name>', 'SDK workspace prefix, for example sdkwork-app-sdk')
   .option('--no-sync-published-version', 'Skip published npm version checks when resolving sdk version')
   .option('--description <text>', 'Description')
   .option('--author <name>', 'Author')
   .option('--license <license>', 'License', 'MIT')
-  .option('--no-clean', 'Do not clean output directory before generation')
+  .option('--no-clean', 'Do not prune stale generated files before generation')
+  .option('--dry-run', 'Preview file changes without writing output')
+  .option('--expected-change-fingerprint <fingerprint>', 'Require the planned change fingerprint to match before writing output')
+  .option('--json', 'Emit machine-readable JSON output')
   .action(async (options) => {
-    console.log(`\nGenerating ${options.language} SDK: ${options.name}\n`);
-
     const supported = getSupportedLanguages();
+    const supportedSdkTypes = getSupportedSdkTypes();
     if (!supported.includes(options.language as any)) {
-      console.error(`Unsupported language: ${options.language}`);
+      const message = `Unsupported language: ${options.language}`;
+      console.error(options.json ? formatGenerateFailure(new Error(message), {
+        json: true,
+        outputPath: options.output,
+      }) : message);
       process.exit(1);
     }
-
-    if (options.sdkVersion && options.fixedSdkVersion) {
-      console.error('Use either --sdk-version or --fixed-sdk-version, not both.');
+    if (!supportedSdkTypes.includes(options.type as any)) {
+      const message = `Unsupported SDK type: ${options.type}. Supported: ${supportedSdkTypes.join(', ')}`;
+      console.error(options.json ? formatGenerateFailure(new Error(message), {
+        json: true,
+        outputPath: options.output,
+      }) : message);
       process.exit(1);
     }
-
-    let spec: any;
-    try {
-      const isUrl = options.input.startsWith('http://') || options.input.startsWith('https://');
-      if (isUrl) {
-        console.log(`   Fetching from: ${options.input}`);
-        const res = await fetch(options.input);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
-        const text = await res.text();
-        const contentType = res.headers.get('content-type') || '';
-        const looksLikeYaml = options.input.endsWith('.yaml')
-          || options.input.endsWith('.yml')
-          || contentType.includes('yaml')
-          || contentType.includes('x-yaml')
-          || contentType.includes('text/plain');
-
-        if (looksLikeYaml) {
-          const yaml = await import('js-yaml');
-          spec = yaml.load(text);
-        } else {
-          try {
-            spec = JSON.parse(text);
-          } catch {
-            const yaml = await import('js-yaml');
-            spec = yaml.load(text);
-          }
-        }
-      } else {
-        const { readFileSync } = await import('fs');
-        const yaml = await import('js-yaml');
-        const inputPath = resolve(options.input);
-        const content = readFileSync(inputPath, 'utf-8');
-        spec = inputPath.endsWith('.json') ? JSON.parse(content) : yaml.load(content);
-      }
-    } catch (error) {
-      console.error(`Failed to load spec: ${error}`);
-      process.exit(1);
-    }
-
-    const resolvedVersion = await resolveSdkVersion({
-      sdkRoot: options.sdkRoot,
-      sdkName: options.sdkName,
-      outputPath: resolve(options.output),
-      language: options.language as any,
-      sdkType: options.type as any,
-      packageName: options.packageName,
-      requestedVersion: options.fixedSdkVersion || options.sdkVersion,
-      fixedVersion: Boolean(options.fixedSdkVersion),
-      npmRegistryUrl: options.npmRegistry,
-      syncPublishedVersion: options.syncPublishedVersion !== false,
-    });
-
-    if (options.fixedSdkVersion) {
-      console.log(`   Fixed SDK version: ${resolvedVersion.version}`);
-    } else if (options.sdkVersion && resolvedVersion.version !== options.sdkVersion) {
-      console.warn(
-        `Requested sdk version ${options.sdkVersion} is not newer than the existing baseline. Using ${resolvedVersion.version} instead.`
-      );
-    } else if (!options.sdkVersion) {
-      console.log(`   Resolved SDK version: ${resolvedVersion.version}`);
-      if (resolvedVersion.localVersions.length > 0) {
-        console.log(`   Local baseline versions: ${resolvedVersion.localVersions.join(', ')}`);
-      }
-      if (resolvedVersion.publishedVersion) {
-        console.log(`   Published baseline version: ${resolvedVersion.publishedVersion}`);
-      }
-    }
-
-    const config: GeneratorConfig = {
-      name: options.name,
-      version: resolvedVersion.version,
-      description: options.description,
-      author: options.author,
-      license: options.license,
-      language: options.language as any,
-      sdkType: options.type as any,
-      outputPath: resolve(options.output),
-      apiSpecPath: options.input.startsWith('http://') || options.input.startsWith('https://')
-        ? options.input
-        : resolve(options.input),
-      baseUrl: options.baseUrl || spec.servers?.[0]?.url || 'http://localhost:8080',
-      apiPrefix: options.apiPrefix,
-      packageName: options.packageName,
-      commonPackage: options.commonPackage,
-      generateReadme: true,
-    };
 
     try {
-      const result = await generateSdk(config, spec);
-      if (result.errors.length > 0) {
-        console.error('\nGeneration failed with errors:');
-        for (const error of result.errors) {
-          console.error(`   [${error.code}] ${error.message}`);
-        }
-        process.exit(1);
+      if (!options.json) {
+        console.log(`\nGenerating ${options.language} SDK: ${options.name}\n`);
       }
-
-      if (result.files.length === 0) {
-        console.error('\nGeneration produced no files.');
-        process.exit(1);
-      }
-
-      const outDir = resolve(options.output);
-      if (options.clean !== false) {
-        cleanOutputDirectory(outDir);
-      }
-      if (!existsSync(outDir)) {
-        withFsRetry(() => mkdirSync(outDir, { recursive: true }));
-      }
-
-      for (const file of result.files) {
-        const filePath = join(outDir, file.path);
-        const dir = dirname(filePath);
-        if (!existsSync(dir)) {
-          withFsRetry(() => mkdirSync(dir, { recursive: true }));
-        }
-        withFsRetry(
-          () => writeFileSync(filePath, file.content, 'utf-8'),
-          () => {
-            if (!existsSync(filePath)) {
-              return;
-            }
-            try {
-              chmodSync(filePath, 0o666);
-            } catch {
-              // Ignore chmod errors during retry cleanup.
-            }
-            try {
-              unlinkSync(filePath);
-            } catch {
-              // Ignore unlink errors during retry cleanup.
-            }
-          }
-        );
-      }
-
-      console.log('\nGenerated successfully!');
-      console.log(`   Output: ${outDir}`);
-      console.log(`   Files: ${result.stats.totalFiles}`);
-      console.log(`   Models: ${result.stats.models}`);
-      console.log(`   APIs: ${result.stats.apis}\n`);
-      if (result.warnings.length > 0) {
-        console.log('Warnings:');
-        for (const warning of result.warnings) {
-          console.log(`   - ${warning}`);
-        }
-        console.log('');
-      }
+      const execution = await runGenerateCommand({
+        input: options.input,
+        output: options.output,
+        name: options.name,
+        type: options.type,
+        language: options.language,
+        baseUrl: options.baseUrl,
+        apiPrefix: options.apiPrefix,
+        packageName: options.packageName,
+        namespace: options.namespace,
+        commonPackage: options.commonPackage,
+        sdkVersion: options.sdkVersion,
+        fixedSdkVersion: options.fixedSdkVersion,
+        npmRegistry: options.npmRegistry,
+        npmPackageName: options.npmPackageName,
+        sdkRoot: options.sdkRoot,
+        sdkName: options.sdkName,
+        syncPublishedVersion: options.syncPublishedVersion,
+        description: options.description,
+        author: options.author,
+        license: options.license,
+        clean: options.clean,
+        dryRun: options.dryRun,
+        expectedChangeFingerprint: options.expectedChangeFingerprint,
+      });
+      process.stdout.write(formatGenerateSuccess(execution, {
+        json: options.json,
+        fixedSdkVersion: options.fixedSdkVersion,
+        requestedSdkVersion: options.sdkVersion,
+      }));
     } catch (error) {
-      console.error(`Failed to generate SDK: ${error}`);
+      const output = formatGenerateFailure(error, {
+        json: options.json,
+        outputPath: options.output,
+      });
+      process.stderr.write(output.endsWith('\n') ? output : `${output}\n`);
       process.exit(1);
     }
   });
-
-function cleanOutputDirectory(outputPath: string): void {
-  if (!existsSync(outputPath)) {
-    return;
-  }
-
-  for (const entry of readdirSync(outputPath)) {
-    if (entry === '.git' || entry === '.gitignore') {
-      continue;
-    }
-    const target = join(outputPath, entry);
-    withFsRetry(() => rmSync(target, { recursive: true, force: true }));
-  }
-}
 
 const printLanguages = (): void => {
   console.log('\nSupported languages:\n');
@@ -268,6 +186,39 @@ program
   .description('List supported languages')
   .action(() => {
     printLanguages();
+  });
+
+program
+  .command('inspect')
+  .description('Inspect persisted SDK control-plane artifacts')
+  .requiredOption('-o, --output <path>', 'Output directory')
+  .option('--fail-on <status>', 'Fail when evaluation status is at or above empty, degraded, or invalid')
+  .option('--require-action <action>', 'Fail when recommended action does not equal the expected action')
+  .option('--json', 'Emit machine-readable JSON output')
+  .action((options) => {
+    try {
+      const snapshot = runInspectCommand({
+        output: options.output,
+      });
+      const inspectOptions = {
+        json: options.json,
+        failOn: options.failOn,
+        requireAction: options.requireAction,
+      } as const;
+      process.stdout.write(formatInspectSuccess(snapshot, {
+        ...inspectOptions,
+      }));
+      const gate = resolveInspectGate(snapshot, inspectOptions);
+      if (gate.exitCode !== 0) {
+        process.exit(gate.exitCode);
+      }
+    } catch (error) {
+      const output = formatInspectFailure(error, {
+        json: options.json,
+      });
+      process.stderr.write(output.endsWith('\n') ? output : `${output}\n`);
+      process.exit(1);
+    }
   });
 
 program.parse();

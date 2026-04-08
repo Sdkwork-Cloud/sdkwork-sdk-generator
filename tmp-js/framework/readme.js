@@ -38,6 +38,8 @@ function resolvePublishEnvHint(language) {
     switch (language) {
         case 'typescript':
             return 'Set `NPM_TOKEN` (and optional `NPM_REGISTRY_URL`) before release publish.';
+        case 'dart':
+            return 'Ensure `dart pub publish --dry-run` passes before release publish.';
         case 'python':
             return 'Set `PYPI_TOKEN` for release (or `TEST_PYPI_TOKEN` for test channel).';
         case 'java':
@@ -46,12 +48,18 @@ function resolvePublishEnvHint(language) {
             return 'Configure Gradle publishing credentials and optional `GRADLE_PUBLISH_TASK`.';
         case 'go':
             return 'Set `GO_RELEASE_TAG` (or `SDKWORK_RELEASE_TAG`) and push tag if needed.';
+        case 'rust':
+            return 'Set cargo registry credentials before `cargo publish` and use `--dry-run` first.';
         case 'swift':
             return 'Set `SWIFT_RELEASE_TAG` (or `SDKWORK_RELEASE_TAG`) for tag-based release.';
         case 'flutter':
             return 'Ensure `dart pub publish --dry-run` passes before release publish.';
         case 'csharp':
             return 'Set `NUGET_API_KEY` for release (or `NUGET_TEST_API_KEY` for test channel).';
+        case 'php':
+            return 'Set `PHP_RELEASE_TAG` (or `SDKWORK_RELEASE_TAG`) for Composer/Packagist tag-based release.';
+        case 'ruby':
+            return 'Set `GEM_HOST_API_KEY` (or `RUBYGEMS_API_KEY`) before `gem push`.';
         default:
             return 'Prepare registry credentials before publish.';
     }
@@ -85,9 +93,22 @@ export function buildPublishSection(language) {
         `> ${envHint}`,
     ].join('\n');
 }
+export function buildRegenerationContractSection() {
+    return [
+        '## Regeneration Contract',
+        '',
+        '- Generator-owned files are tracked in `.sdkwork/sdkwork-generator-manifest.json`.',
+        '- Each run also writes `.sdkwork/sdkwork-generator-changes.json` so automation can inspect created, updated, deleted, unchanged, scaffolded, and backed-up files plus the classified impact areas, verification plan, and execution decision for the latest generation.',
+        '- Apply mode also writes `.sdkwork/sdkwork-generator-report.json` with the full execution report, including `schemaVersion`, `generator`, stable artifact paths, and the execution handoff commands that match CLI `--json` output.',
+        '- CLI JSON output also includes an execution handoff with concrete next commands, including reviewed apply commands for dry-run flows.',
+        '- Put hand-written wrappers, adapters, and orchestration in `custom/`.',
+        '- Files scaffolded under `custom/` are created once and preserved across regenerations.',
+        '- If a generated-owned file was modified locally, its previous content is copied to `.sdkwork/manual-backups/` before overwrite or removal.',
+    ].join('\n');
+}
 export function normalizeReadmeFile(file) {
     const normalizedPath = (file.path || '').replace(/\\/g, '/');
-    const normalizedContent = (file.content || '').trim();
+    const normalizedContent = appendRegenerationContract((file.content || '').trim());
     const nextFile = {
         ...file,
         path: 'README.md',
@@ -106,4 +127,14 @@ export function normalizeReadmeFile(file) {
         };
     }
     return { file: nextFile };
+}
+function appendRegenerationContract(content) {
+    if (content.includes('## Regeneration Contract')) {
+        return content;
+    }
+    const trimmedContent = content.trim();
+    if (!trimmedContent) {
+        return buildRegenerationContractSection();
+    }
+    return `${trimmedContent}\n\n${buildRegenerationContractSection()}`;
 }

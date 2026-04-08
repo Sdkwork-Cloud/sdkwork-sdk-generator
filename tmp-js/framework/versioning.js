@@ -1,20 +1,48 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
+const SDKWORK_METADATA_FILE = 'sdkwork-sdk.json';
+const SUPPORTED_WORKSPACE_LANGUAGES = [
+    'typescript',
+    'dart',
+    'python',
+    'java',
+    'csharp',
+    'go',
+    'rust',
+    'swift',
+    'flutter',
+    'kotlin',
+    'php',
+    'ruby',
+];
+function isSupportedWorkspaceLanguage(language) {
+    return SUPPORTED_WORKSPACE_LANGUAGES.includes(language);
+}
 const MANIFEST_FILES_BY_LANGUAGE = {
     typescript: ['package.json'],
+    dart: ['pubspec.yaml'],
     python: ['pyproject.toml', 'setup.py'],
     java: ['pom.xml'],
     kotlin: ['build.gradle.kts', 'build.gradle'],
     flutter: ['pubspec.yaml'],
+    rust: ['Cargo.toml'],
+    php: ['composer.json'],
     csharp: [],
 };
 const VERSION_PATTERNS_BY_LANGUAGE = {
     typescript: [/"version"\s*:\s*"([^"]+)"/],
+    dart: [/^version:\s*([^\s]+)/m],
     python: [/^version\s*=\s*"([^"]+)"/m, /version\s*=\s*"([^"]+)"/],
     java: [/<version>\s*([^<\s]+)\s*<\/version>/],
     kotlin: [/version\s*=\s*"([^"]+)"/],
     flutter: [/^version:\s*([^\s]+)/m],
+    rust: [/^version\s*=\s*"([^"]+)"/m],
+    php: [/"version"\s*:\s*"([^"]+)"/],
     csharp: [/<Version>\s*([^<\s]+)\s*<\/Version>/],
+    ruby: [
+        /\.version\s*=\s*["']([^"']+)["']/,
+        /VERSION\s*=\s*["']([^"']+)["']/,
+    ],
 };
 const INITIAL_VERSION = '1.0.0';
 export function normalizeVersion(rawVersion) {
@@ -64,6 +92,19 @@ export function detectVersionFromManifestContent(language, content) {
     }
     return undefined;
 }
+function readVersionFromSdkworkMetadata(projectDir) {
+    const manifestPath = join(projectDir, SDKWORK_METADATA_FILE);
+    if (!existsSync(manifestPath)) {
+        return undefined;
+    }
+    try {
+        const payload = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+        return normalizeVersion(payload.version);
+    }
+    catch {
+        return undefined;
+    }
+}
 function readVersionFromCSharpProject(projectDir) {
     const files = readdirSync(projectDir).filter((file) => file.toLowerCase().endsWith('.csproj'));
     for (const file of files) {
@@ -75,13 +116,59 @@ function readVersionFromCSharpProject(projectDir) {
     }
     return undefined;
 }
+function readVersionFromRubyProject(projectDir) {
+    const gemspecFiles = readdirSync(projectDir).filter((file) => file.toLowerCase().endsWith('.gemspec'));
+    for (const file of gemspecFiles) {
+        const content = readFileSync(join(projectDir, file), 'utf-8');
+        const version = detectVersionFromManifestContent('ruby', content);
+        if (version) {
+            return version;
+        }
+    }
+    const libDir = join(projectDir, 'lib');
+    if (!existsSync(libDir)) {
+        return undefined;
+    }
+    for (const filePath of collectFilesRecursively(libDir)) {
+        if (!filePath.toLowerCase().endsWith('version.rb')) {
+            continue;
+        }
+        const content = readFileSync(filePath, 'utf-8');
+        const version = detectVersionFromManifestContent('ruby', content);
+        if (version) {
+            return version;
+        }
+    }
+    return undefined;
+}
+function collectFilesRecursively(rootDir) {
+    const files = [];
+    for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+        const fullPath = join(rootDir, entry.name);
+        if (entry.isDirectory()) {
+            files.push(...collectFilesRecursively(fullPath));
+            continue;
+        }
+        if (entry.isFile()) {
+            files.push(fullPath);
+        }
+    }
+    return files;
+}
 export function detectVersionFromProject(language, projectDir) {
     const resolvedProjectDir = resolve(projectDir);
     if (!existsSync(resolvedProjectDir)) {
         return undefined;
     }
+    const metadataVersion = readVersionFromSdkworkMetadata(resolvedProjectDir);
+    if (metadataVersion) {
+        return metadataVersion;
+    }
     if (language === 'csharp') {
         return readVersionFromCSharpProject(resolvedProjectDir);
+    }
+    if (language === 'ruby') {
+        return readVersionFromRubyProject(resolvedProjectDir);
     }
     const manifestFiles = MANIFEST_FILES_BY_LANGUAGE[language] || [];
     for (const manifest of manifestFiles) {
@@ -97,7 +184,13 @@ export function detectVersionFromProject(language, projectDir) {
     }
     return undefined;
 }
-function resolveDefaultTypeScriptPackageName(sdkType, packageName) {
+function resolveDefaultTypeScriptPackageName(sdkType, language, packageName, npmPackageName) {
+    if (npmPackageName) {
+        return npmPackageName;
+    }
+    if (language && language !== 'typescript') {
+        return `@sdkwork/${sdkType}-sdk`;
+    }
     return packageName || `@sdkwork/${sdkType}-sdk`;
 }
 async function fetchPublishedNpmVersion(packageName, registryUrl) {
@@ -125,6 +218,9 @@ function collectWorkspaceVersions(sdkRoot, sdkName) {
         .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix));
     for (const entry of directories) {
         const language = entry.name.slice(prefix.length);
+        if (!isSupportedWorkspaceLanguage(language)) {
+            continue;
+        }
         const version = detectVersionFromProject(language, join(resolvedRoot, entry.name));
         if (version) {
             versions.push(version);
@@ -182,7 +278,7 @@ export async function resolveSdkVersion(options) {
             : []);
     let publishedVersion;
     if (options.syncPublishedVersion !== false) {
-        const packageName = resolveDefaultTypeScriptPackageName(options.sdkType, options.packageName);
+        const packageName = resolveDefaultTypeScriptPackageName(options.sdkType, options.language, options.packageName, options.npmPackageName);
         if (packageName) {
             try {
                 publishedVersion = await fetchPublishedNpmVersion(packageName, options.npmRegistryUrl || 'https://registry.npmjs.org');

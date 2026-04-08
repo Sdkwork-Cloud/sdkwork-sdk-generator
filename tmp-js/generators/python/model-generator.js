@@ -13,7 +13,11 @@ export class ModelGenerator {
         const modelName = PYTHON_CONFIG.namingConventions.modelName(name);
         const props = schema.properties || {};
         const required = schema.required || [];
-        const fields = Object.entries(props).map(([propName, propSchema]) => {
+        const orderedEntries = [
+            ...Object.entries(props).filter(([propName]) => required.includes(propName)),
+            ...Object.entries(props).filter(([propName]) => !required.includes(propName)),
+        ];
+        const fields = orderedEntries.map(([propName, propSchema]) => {
             const isRequired = required.includes(propName);
             const pyType = getPythonType(propSchema, PYTHON_CONFIG);
             const defaultValue = isRequired ? '' : ' = None';
@@ -25,7 +29,8 @@ export class ModelGenerator {
             : '';
         return {
             path: `${packageRoot}/models/${PYTHON_CONFIG.namingConventions.fileName(name)}.py`,
-            content: this.format(`from dataclasses import dataclass
+            content: this.format(`from __future__ import annotations
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 
 @dataclass

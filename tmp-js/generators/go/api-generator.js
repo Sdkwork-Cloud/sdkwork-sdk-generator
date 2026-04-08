@@ -1,5 +1,33 @@
+import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { GO_CONFIG, getGoType } from './config.js';
+const GO_RESERVED_WORDS = new Set([
+    'break',
+    'case',
+    'chan',
+    'const',
+    'continue',
+    'default',
+    'defer',
+    'else',
+    'fallthrough',
+    'for',
+    'func',
+    'go',
+    'goto',
+    'if',
+    'import',
+    'interface',
+    'map',
+    'package',
+    'range',
+    'return',
+    'select',
+    'struct',
+    'switch',
+    'type',
+    'var',
+]);
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
@@ -58,7 +86,7 @@ ${methods}
         };
     }
     generateMethod(op, structName, config, methodName, knownModels) {
-        const pathParams = this.extractPathParams(op.path);
+        const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const hasQuery = allParameters.some((param) => param?.in === 'query');
         const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -86,9 +114,18 @@ ${methods}
         if (responseSchema) {
             this.collectReferencedModels(responseSchema, knownModels, referencedModels);
         }
+        const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => toSafeCamelIdentifier(value, GO_RESERVED_WORDS), [
+            hasBody ? 'body' : '',
+            hasQuery ? 'query' : '',
+            hasHeaders ? 'headers' : '',
+        ]);
+        const pathParams = rawPathParams.map((rawName) => ({
+            rawName,
+            safeName: pathParamNames.get(rawName) || rawName,
+        }));
         const params = [];
         if (pathParams.length > 0) {
-            params.push(...pathParams.map((p) => `${p} string`));
+            params.push(...pathParams.map((param) => `${param.safeName} string`));
         }
         if (hasBody) {
             const bodyType = requestBodyRequired ? requestType : this.toOptionalGoType(requestType);
@@ -103,7 +140,7 @@ ${methods}
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '%s');
         const formattedPath = pathParams.length > 0
-            ? `fmt.Sprintf("${pathTemplate}", ${pathParams.join(', ')})`
+            ? `fmt.Sprintf("${pathTemplate}", ${pathParams.map((param) => param.safeName).join(', ')})`
             : `"${pathTemplate}"`;
         const prefixedPath = `${GO_CONFIG.namingConventions.modelName(config.sdkType)}ApiPath(${formattedPath})`;
         let call = '';

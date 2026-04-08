@@ -1,5 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -89,7 +90,7 @@ ${methods}
     methodName: string,
     knownModels: Set<string>
   ): GeneratedMethod {
-    const pathParams = this.extractPathParams(op.path);
+    const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
     const hasQuery = allParameters.some((param: any) => param?.in === 'query');
     const hasHeaders = allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
@@ -117,9 +118,23 @@ ${methods}
       this.collectReferencedModels(responseSchema, knownModels, referencedModels);
     }
 
+    const pathParamNames = createUniqueIdentifierMap(
+      rawPathParams,
+      (value) => PYTHON_CONFIG.namingConventions.propertyName(value),
+      [
+        hasBody ? 'body' : '',
+        hasQuery ? 'params' : '',
+        hasHeaders ? 'headers' : '',
+      ]
+    );
+    const pathParams = rawPathParams.map((rawName) => ({
+      rawName,
+      safeName: pathParamNames.get(rawName) || rawName,
+    }));
+
     const params: string[] = ['self'];
     if (pathParams.length) {
-      params.push(...pathParams.map((p) => `${p}: str`));
+      params.push(...pathParams.map((param) => `${param.safeName}: str`));
     }
     if (hasBody) {
       if (requestBodyRequired) {
@@ -139,7 +154,10 @@ ${methods}
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const rawPath = this.withApiPrefix(config.apiPrefix, normalizedOperationPath);
-    const pathTemplate = rawPath.replace(/\{([^}]+)\}/g, '{$1}');
+    const pathTemplate = rawPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
+      const safeName = pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);
+      return `{${safeName}}`;
+    });
     let call = '';
     
     switch (method) {

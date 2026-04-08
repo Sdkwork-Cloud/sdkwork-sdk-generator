@@ -1,10 +1,10 @@
 import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { CSHARP_CONFIG } from './config.js';
+import { CSHARP_CONFIG, getCSharpNamespace } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
-        const namespace = CSHARP_CONFIG.namingConventions.modelName(config.sdkType);
+        const namespace = getCSharpNamespace(config);
         const clientName = resolveSdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
@@ -36,7 +36,7 @@ namespace ${namespace}.Http
     public class HttpClient
     {
         private const string ApiKeyHeader = "${apiKeyHeader}";
-        private const bool ApiKeyUseBearer = ${apiKeyUseBearer ? 'true' : 'false'};
+        private static readonly bool ApiKeyUseBearer = ${apiKeyUseBearer ? 'true' : 'false'};
 
         private readonly System.Net.Http.HttpClient _client;
         private readonly string _baseUrl;
@@ -135,11 +135,11 @@ namespace ${namespace}.Http
         }
 
         private HttpRequestMessage BuildRequest(
-            HttpMethod method,
+            System.Net.Http.HttpMethod method,
             string path,
-            Dictionary<string, object> parameters = null,
-            Dictionary<string, string> requestHeaders = null,
-            HttpContent content = null)
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null,
+            HttpContent? content = null)
         {
             var request = new HttpRequestMessage(method, BuildUrl(path, parameters));
             if (content != null)
@@ -168,7 +168,7 @@ namespace ${namespace}.Http
             return request;
         }
 
-        private static HttpContent CreateMultipartContent(object body)
+        private static HttpContent CreateMultipartContent(object? body)
         {
             if (body is HttpContent rawContent)
             {
@@ -176,7 +176,7 @@ namespace ${namespace}.Http
             }
 
             var multipart = new MultipartFormDataContent();
-            void AddValue(string key, object value)
+            void AddValue(string key, object? value)
             {
                 if (value == null)
                 {
@@ -224,10 +224,10 @@ namespace ${namespace}.Http
             return multipart;
         }
 
-        private static HttpContent CreateFormContent(object body)
+        private static HttpContent CreateFormContent(object? body)
         {
             var entries = new List<KeyValuePair<string, string>>();
-            void AddEntry(string key, object value)
+            void AddEntry(string key, object? value)
             {
                 if (value is IEnumerable values && value is not string && value is not byte[])
                 {
@@ -266,7 +266,7 @@ namespace ${namespace}.Http
             return new FormUrlEncodedContent(entries);
         }
 
-        private static HttpContent CreateContent(object body, string contentType = null)
+        private static HttpContent? CreateContent(object? body, string? contentType = null)
         {
             if (body == null)
             {
@@ -297,7 +297,7 @@ namespace ${namespace}.Http
             return new StringContent(json, Encoding.UTF8, "application/json");
         }
 
-        private string BuildUrl(string path, Dictionary<string, object> parameters = null)
+        private string BuildUrl(string path, Dictionary<string, object>? parameters = null)
         {
             var url = _baseUrl + path;
             if (parameters == null || parameters.Count == 0)
@@ -310,7 +310,7 @@ namespace ${namespace}.Http
             return $"{url}?{query}";
         }
 
-        private static async Task<T> ReadResponseAsync<T>(HttpResponseMessage response)
+        private static async Task<T?> ReadResponseAsync<T>(HttpResponseMessage response)
         {
             response.EnsureSuccessStatusCode();
 
@@ -328,61 +328,61 @@ namespace ${namespace}.Http
             return await response.Content.ReadFromJsonAsync<T>();
         }
 
-        public async Task<T> GetAsync<T>(
+        public async Task<T?> GetAsync<T>(
             string path,
-            Dictionary<string, object> parameters = null,
-            Dictionary<string, string> requestHeaders = null)
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null)
         {
-            using var request = BuildRequest(HttpMethod.Get, path, parameters, requestHeaders);
+            using var request = BuildRequest(System.Net.Http.HttpMethod.Get, path, parameters, requestHeaders);
             var response = await _client.SendAsync(request);
             return await ReadResponseAsync<T>(response);
         }
 
-        public async Task<T> PostAsync<T>(
+        public async Task<T?> PostAsync<T>(
             string path,
-            object body = null,
-            Dictionary<string, object> parameters = null,
-            Dictionary<string, string> requestHeaders = null,
-            string contentType = null)
+            object? body = null,
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null,
+            string? contentType = null)
         {
             using var content = CreateContent(body, contentType);
-            using var request = BuildRequest(HttpMethod.Post, path, parameters, requestHeaders, content);
+            using var request = BuildRequest(System.Net.Http.HttpMethod.Post, path, parameters, requestHeaders, content);
             var response = await _client.SendAsync(request);
             return await ReadResponseAsync<T>(response);
         }
 
-        public async Task<T> PutAsync<T>(
+        public async Task<T?> PutAsync<T>(
             string path,
-            object body = null,
-            Dictionary<string, object> parameters = null,
-            Dictionary<string, string> requestHeaders = null,
-            string contentType = null)
+            object? body = null,
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null,
+            string? contentType = null)
         {
             using var content = CreateContent(body, contentType);
-            using var request = BuildRequest(HttpMethod.Put, path, parameters, requestHeaders, content);
+            using var request = BuildRequest(System.Net.Http.HttpMethod.Put, path, parameters, requestHeaders, content);
             var response = await _client.SendAsync(request);
             return await ReadResponseAsync<T>(response);
         }
 
-        public async Task<T> DeleteAsync<T>(
+        public async Task<T?> DeleteAsync<T>(
             string path,
-            Dictionary<string, object> parameters = null,
-            Dictionary<string, string> requestHeaders = null)
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null)
         {
-            using var request = BuildRequest(HttpMethod.Delete, path, parameters, requestHeaders);
+            using var request = BuildRequest(System.Net.Http.HttpMethod.Delete, path, parameters, requestHeaders);
             var response = await _client.SendAsync(request);
             return await ReadResponseAsync<T>(response);
         }
 
-        public async Task<T> PatchAsync<T>(
+        public async Task<T?> PatchAsync<T>(
             string path,
-            object body = null,
-            Dictionary<string, object> parameters = null,
-            Dictionary<string, string> requestHeaders = null,
-            string contentType = null)
+            object? body = null,
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null,
+            string? contentType = null)
         {
             using var content = CreateContent(body, contentType);
-            using var request = BuildRequest(HttpMethod.Patch, path, parameters, requestHeaders, content);
+            using var request = BuildRequest(System.Net.Http.HttpMethod.Patch, path, parameters, requestHeaders, content);
             var response = await _client.SendAsync(request);
             return await ReadResponseAsync<T>(response);
         }
@@ -409,27 +409,27 @@ namespace ${namespace}.Http
         return {
             path: `${clientName}.cs`,
             content: this.format(`using System;
-using ${namespace}.Http;
 using ${commonNamespace};
-${tags.map(tag => `using ${namespace}.Api;`).join('\n')}
+using SdkHttpClient = ${namespace}.Http.HttpClient;
+using ${namespace}.Api;
 
 namespace ${namespace}
 {
     public class ${clientName}
     {
-        private readonly HttpClient _httpClient;
+        private readonly SdkHttpClient _httpClient;
 
 ${modules}
 
         public ${clientName}(string baseUrl)
         {
-            _httpClient = new HttpClient(baseUrl);
+            _httpClient = new SdkHttpClient(baseUrl);
 ${inits}
         }
 
         public ${clientName}(SdkConfig config)
         {
-            _httpClient = new HttpClient(config);
+            _httpClient = new SdkHttpClient(config);
 ${inits}
         }
 

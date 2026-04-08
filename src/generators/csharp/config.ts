@@ -1,4 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
+import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
 
 export const CSHARP_CONFIG: LanguageConfig = {
   language: 'csharp',
@@ -88,6 +90,22 @@ export function getCSharpType(schema: any, config: LanguageConfig): string {
   }
   
   return 'object';
+}
+
+export function getCSharpNamespace(config: GeneratorConfig): string {
+  const explicit = String(config.namespace || '').trim();
+  if (explicit) {
+    return explicit.replace(/\//g, '.').replace(/\\/g, '.');
+  }
+  return resolveSdkTypePascal(config);
+}
+
+export function getCSharpPackageId(config: GeneratorConfig): string {
+  const explicit = String(config.packageName || '').trim();
+  if (explicit) {
+    return explicit;
+  }
+  return getCSharpNamespace(config);
 }
 
 function normalizeSchemaType(type: unknown): string | undefined {

@@ -1,3 +1,4 @@
+import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { SWIFT_CONFIG, getSwiftType } from './config.js';
 export class ApiGenerator {
@@ -40,7 +41,7 @@ ${methods}
         };
     }
     generateMethod(op, config, methodName, knownModels) {
-        const pathParams = this.extractPathParams(op.path);
+        const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const hasQuery = allParameters.some((param) => param?.in === 'query');
         const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -59,9 +60,18 @@ ${methods}
         const responseType = responseSchema
             ? this.ensureKnownType(getSwiftType(responseSchema, SWIFT_CONFIG), knownModels)
             : this.inferFallbackResponseType(op);
+        const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => SWIFT_CONFIG.namingConventions.propertyName(value), [
+            hasBody ? 'body' : '',
+            hasQuery ? 'params' : '',
+            hasHeaders ? 'headers' : '',
+        ]);
+        const pathParams = rawPathParams.map((rawName) => ({
+            rawName,
+            safeName: pathParamNames.get(rawName) || rawName,
+        }));
         const params = [];
         if (pathParams.length) {
-            params.push(...pathParams.map((p) => `${p}: String`));
+            params.push(...pathParams.map((param) => `${param.safeName}: String`));
         }
         if (hasBody) {
             if (requestBodyRequired) {
@@ -78,7 +88,10 @@ ${methods}
             params.push('headers: [String: String]? = nil');
         }
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
-        const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '\\($1)');
+        const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
+            const safeName = pathParamNames.get(paramName) || SWIFT_CONFIG.namingConventions.propertyName(paramName);
+            return `\\(${safeName})`;
+        });
         const pathCall = `ApiPaths.${SWIFT_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
         let call = '';
         switch (method) {

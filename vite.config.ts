@@ -1,6 +1,16 @@
 import { defineConfig } from 'vite';
+import { builtinModules } from 'node:module';
 import { resolve } from 'path';
 import dts from 'vite-plugin-dts';
+
+const NODE_BUILTIN_EXTERNALS = Array.from(new Set([
+  'fs',
+  'path',
+  'url',
+  'crypto',
+  ...builtinModules,
+  ...builtinModules.map((name) => `node:${name}`),
+]));
 
 export default defineConfig({
   build: {
@@ -14,7 +24,12 @@ export default defineConfig({
     sourcemap: true,
     minify: 'esbuild',
     rollupOptions: {
-      external: ['@sdkwork/sdk-common', /^@sdkwork\/sdk-common\/.*/],
+      external: [
+        '@sdkwork/sdk-common',
+        /^@sdkwork\/sdk-common\/.*/,
+        ...NODE_BUILTIN_EXTERNALS,
+        /^node:/,
+      ],
       output: {
         exports: 'named',
       },

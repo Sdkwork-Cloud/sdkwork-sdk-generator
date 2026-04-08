@@ -1,5 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -71,7 +72,7 @@ ${methods}
   }
 
   private generateMethod(op: any, config: GeneratorConfig, methodName: string, knownModels: Set<string>): string {
-    const pathParams = this.extractPathParams(op.path);
+    const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
     const hasQuery = allParameters.some((param: any) => param?.in === 'query');
     const hasHeaders = allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
@@ -90,9 +91,23 @@ ${methods}
       ? getJavaType(responseSchema, JAVA_CONFIG)
       : this.inferFallbackResponseType(op);
 
+    const pathParamNames = createUniqueIdentifierMap(
+      rawPathParams,
+      (value) => JAVA_CONFIG.namingConventions.propertyName(value),
+      [
+        hasBody ? 'body' : '',
+        hasQuery ? 'params' : '',
+        hasHeaders ? 'headers' : '',
+      ]
+    );
+    const pathParams = rawPathParams.map((rawName) => ({
+      rawName,
+      safeName: pathParamNames.get(rawName) || rawName,
+    }));
+
     const params: string[] = [];
     if (pathParams.length) {
-      params.push(...pathParams.map((p) => `String ${p}`));
+      params.push(...pathParams.map((param) => `String ${param.safeName}`));
     }
     if (hasBody) {
       params.push(`${requestType} body`);
@@ -105,7 +120,10 @@ ${methods}
     }
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
-    const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '" + $1 + "');
+    const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
+      const safeName = pathParamNames.get(paramName) || JAVA_CONFIG.namingConventions.propertyName(paramName);
+      return `" + ${safeName} + "`;
+    });
     const pathCall = `ApiPaths.${JAVA_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
     let call = '';
     

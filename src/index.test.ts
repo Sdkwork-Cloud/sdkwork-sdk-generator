@@ -5,8 +5,21 @@ import { GoGenerator } from './generators/go/index.js';
 import { JavaGenerator } from './generators/java/index.js';
 import { SwiftGenerator } from './generators/swift/index.js';
 import { KotlinGenerator } from './generators/kotlin/index.js';
+import { DartGenerator } from './generators/dart/index.js';
 import { FlutterGenerator } from './generators/flutter/index.js';
 import { CSharpGenerator } from './generators/csharp/index.js';
+import { PhpGenerator } from './generators/php/index.js';
+import { RubyGenerator } from './generators/ruby/index.js';
+import { RustGenerator } from './generators/rust/index.js';
+import {
+  analyzeChangeImpact,
+  buildExecutionDecisionFromContext,
+  buildExecutionHandoff,
+  getGenerator,
+  getSupportedLanguages,
+  getSupportedSdkTypes,
+  generateSdk,
+} from './index.js';
 import type { GeneratorConfig, ApiSpec } from './framework/types.js';
 
 const mockSpec: ApiSpec = {
@@ -62,6 +75,275 @@ const baseConfig: GeneratorConfig = {
   baseUrl: 'https://api.example.com',
   apiPrefix: '/api/v1',
 };
+
+describe('Generator registry', () => {
+  it('should export change impact analysis for external automation', () => {
+    const impact = analyzeChangeImpact({
+      createdGeneratedFiles: ['src/api/user.ts'],
+      updatedGeneratedFiles: [],
+      unchangedGeneratedFiles: [],
+      deletedGeneratedFiles: [],
+      scaffoldedFiles: [],
+      preservedScaffoldFiles: [],
+      backedUpFiles: [],
+    });
+
+    expect(impact.areas).toEqual(['api-surface']);
+    expect(impact.requiresVerification).toBe(true);
+  });
+
+  it('should export execution decision planning for external automation', () => {
+    const decision = buildExecutionDecisionFromContext({
+      language: 'typescript',
+      outputPath: '/tmp/generated-sdk',
+      dryRun: true,
+      preservedLegacyFiles: false,
+      changes: {
+        createdGeneratedFiles: ['src/api/user.ts'],
+        updatedGeneratedFiles: [],
+        unchangedGeneratedFiles: [],
+        deletedGeneratedFiles: [],
+        scaffoldedFiles: [],
+        preservedScaffoldFiles: [],
+        backedUpFiles: [],
+      },
+    });
+
+    expect(decision.nextAction).toBe('apply');
+    expect(decision.applyRequiresExpectedFingerprint).toBe(true);
+  });
+
+  it('should export execution handoff planning for command-level automation', () => {
+    const handoff = buildExecutionHandoff({
+      config: {
+        ...baseConfig,
+        apiSpecPath: '/tmp/openapi.json',
+      },
+      spec: mockSpec,
+      result: {
+        files: [],
+        errors: [],
+        warnings: [],
+        stats: {
+          totalFiles: 0,
+          models: 0,
+          apis: 0,
+          types: 0,
+        },
+      },
+      resolvedVersion: {
+        version: '1.0.0',
+        localVersions: [],
+        publishedVersion: undefined,
+      },
+      syncSummary: {
+        dryRun: true,
+        writtenFiles: 1,
+        skippedScaffoldFiles: 0,
+        skippedUnchangedGeneratedFiles: 0,
+        deletedGeneratedFiles: 0,
+        changeSummaryPath: '.sdkwork/sdkwork-generator-changes.json',
+        changeFingerprint: 'fingerprint-1',
+        changes: {
+          createdGeneratedFiles: ['src/api/user.ts'],
+          updatedGeneratedFiles: [],
+          unchangedGeneratedFiles: [],
+          deletedGeneratedFiles: [],
+          scaffoldedFiles: [],
+          preservedScaffoldFiles: [],
+          backedUpFiles: [],
+        },
+        backedUpFiles: [],
+        preservedLegacyFiles: false,
+      },
+    });
+
+    expect(handoff.steps[0].displayCommand).toContain('--expected-change-fingerprint fingerprint-1');
+  });
+
+  it('should register dart as a supported language', () => {
+    expect(getSupportedLanguages()).toContain('dart');
+    expect(getGenerator('dart' as any)).toBeDefined();
+    expect(getGenerator('dart' as any)?.language).toBe('dart');
+  });
+
+  it('should register rust as a supported language', () => {
+    expect(getSupportedLanguages()).toContain('rust');
+    expect(getGenerator('rust')).toBeDefined();
+    expect(getGenerator('rust')?.language).toBe('rust');
+  });
+
+  it('should expose the supported sdk types for orchestration callers', () => {
+    expect(getSupportedSdkTypes()).toEqual(['app', 'backend', 'ai', 'custom']);
+  });
+
+  it('should register php and ruby as supported languages', () => {
+    expect(getSupportedLanguages()).toContain('php');
+    expect(getSupportedLanguages()).toContain('ruby');
+    expect(getGenerator('php')?.language).toBe('php');
+    expect(getGenerator('ruby')?.language).toBe('ruby');
+  });
+
+  it('should scaffold a stable custom area for regeneration-safe sdk layouts', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, mockSpec);
+    const customReadme = result.files.find((file) => file.path === 'custom/README.md');
+    const readme = result.files.find((file) => file.path === 'README.md');
+
+    expect(customReadme).toBeDefined();
+    expect(customReadme!.ownership).toBe('scaffold');
+    expect(customReadme!.overwriteStrategy).toBe('if-missing');
+
+    expect(readme).toBeDefined();
+    expect(readme!.content).toContain('## Regeneration Contract');
+    expect(readme!.content).toContain('`custom/`');
+  });
+
+  it('should reject unsupported sdk types for programmatic generation callers', async () => {
+    await expect(generateSdk({
+      ...baseConfig,
+      sdkType: 'desktop' as any,
+    }, mockSpec)).rejects.toThrow(
+      'Unsupported SDK type: desktop. Supported: app, backend, ai, custom'
+    );
+  });
+
+  it('should load remote yaml specs for programmatic generation callers', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        get: (name: string) => name.toLowerCase() === 'content-type' ? 'application/yaml' : null,
+      },
+      json: async () => {
+        throw new Error('json parser should not be required for yaml specs');
+      },
+      text: async () => `openapi: 3.0.0
+info:
+  title: Remote Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      tags:
+        - User
+      responses:
+        '200':
+          description: Success
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+`,
+    })) as typeof fetch;
+
+    try {
+      const result = await generateSdk(baseConfig, 'https://example.com/openapi.yaml');
+      expect(result.errors).toEqual([]);
+      expect(result.files.some((file) => file.path === 'src/api/user.ts')).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('Rust Generator', () => {
+  it('should generate cargo-based sdk output for app clients', async () => {
+    const generator = getGenerator('rust');
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(
+      {
+        ...baseConfig,
+        language: 'rust',
+        sdkType: 'app',
+        packageName: 'sdkwork-app-sdk',
+      },
+      mockSpec
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.files.some((file) => file.path === 'Cargo.toml')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/lib.rs')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/client.rs')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/http/client.rs')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/api/user.rs')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/models/user.rs')).toBe(true);
+
+    const readme = result.files.find((file) => file.path === 'README.md');
+    expect(readme).toBeDefined();
+    expect(readme!.content).toContain('Rust');
+    expect(readme!.content).toContain('SdkworkAppClient');
+    expect(readme!.content).toContain('cargo add sdkwork-app-sdk');
+  });
+});
+
+describe('PHP And Ruby Generators', () => {
+  it('should generate composer-based sdk output for php app clients', async () => {
+    const generator = getGenerator('php');
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(
+      {
+        ...baseConfig,
+        language: 'php',
+        sdkType: 'app',
+        packageName: 'sdkwork/app-sdk',
+      },
+      mockSpec
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.files.some((file) => file.path === 'composer.json')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/SdkConfig.php')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/Http/HttpClient.php')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/Api/User.php')).toBe(true);
+    expect(result.files.some((file) => file.path === 'src/Models/User.php')).toBe(true);
+    expect(result.files.some((file) => file.path === 'sdkwork-sdk.json')).toBe(true);
+
+    const readme = result.files.find((file) => file.path === 'README.md');
+    expect(readme).toBeDefined();
+    expect(readme!.content).toContain('PHP');
+    expect(readme!.content).toContain('SdkworkAppClient');
+    expect(readme!.content).toContain('composer require sdkwork/app-sdk');
+  });
+
+  it('should generate gem-based sdk output for ruby app clients', async () => {
+    const generator = getGenerator('ruby');
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(
+      {
+        ...baseConfig,
+        language: 'ruby',
+        sdkType: 'app',
+        packageName: 'sdkwork-app-sdk',
+      },
+      mockSpec
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.files.some((file) => file.path === 'sdkwork-app-sdk.gemspec')).toBe(true);
+    expect(result.files.some((file) => file.path === 'Gemfile')).toBe(true);
+    expect(result.files.some((file) => file.path === 'lib/sdkwork/app_sdk.rb')).toBe(true);
+    expect(result.files.some((file) => file.path === 'lib/sdkwork/app_sdk/client.rb')).toBe(true);
+    expect(result.files.some((file) => file.path === 'lib/sdkwork/app_sdk/api/user.rb')).toBe(true);
+    expect(result.files.some((file) => file.path === 'lib/sdkwork/app_sdk/models/user.rb')).toBe(true);
+    expect(result.files.some((file) => file.path === 'sdkwork-sdk.json')).toBe(true);
+
+    const readme = result.files.find((file) => file.path === 'README.md');
+    expect(readme).toBeDefined();
+    expect(readme!.content).toContain('Ruby');
+    expect(readme!.content).toContain('SdkworkAppClient');
+    expect(readme!.content).toContain('gem install sdkwork-app-sdk');
+  });
+});
 
 const securitySpec: ApiSpec = {
   openapi: '3.0.3',
@@ -140,6 +422,135 @@ const modelRefSpec: ApiSpec = {
         },
       },
       ModelB: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+const pythonDataclassOrderingSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Python Dataclass Ordering API', version: '1.0.0' },
+  paths: {
+    '/ordered-model': {
+      get: {
+        summary: 'Get ordered model',
+        operationId: 'getOrderedModel',
+        tags: ['Ordered Model'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      OrderedModel: {
+        type: 'object',
+        properties: {
+          optionalName: { type: 'string' },
+          requiredId: { type: 'string' },
+          optionalCount: { type: 'integer' },
+        },
+        required: ['requiredId'],
+      },
+    },
+  },
+};
+
+const pythonKeywordPropertySpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Python Keyword Property API', version: '1.0.0' },
+  paths: {
+    '/keyword-model': {
+      get: {
+        summary: 'Get keyword model',
+        operationId: 'getKeywordModel',
+        tags: ['Keyword Model'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      KeywordModel: {
+        type: 'object',
+        properties: {
+          async: { type: 'boolean' },
+          await: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+const reservedIdentifierSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Reserved Identifier API', version: '1.0.0' },
+  paths: {
+    '/keyword-model': {
+      get: {
+        summary: 'Get keyword model',
+        operationId: 'class',
+        tags: ['Keyword Model'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/KeywordModel' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      KeywordModel: {
+        type: 'object',
+        properties: {
+          class: { type: 'string' },
+          return: { type: 'boolean' },
+        },
+      },
+    },
+  },
+};
+
+const pathParameterIdentifierSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Path Parameter Identifier API', version: '1.0.0' },
+  paths: {
+    '/keyword-model/{class}/{user-id}/{headers}': {
+      get: {
+        summary: 'Get keyword model by path',
+        operationId: 'getKeywordModelByPath',
+        tags: ['Keyword Model'],
+        parameters: [
+          { name: 'class', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'user-id', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'headers', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'X-Trace-Id', in: 'header', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/KeywordModel' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      KeywordModel: {
         type: 'object',
         properties: {
           id: { type: 'string' },
@@ -562,6 +973,7 @@ const inlineIoSpec: ApiSpec = {
 describe('SDK Generators', () => {
   const generators = [
     { name: 'TypeScript', Generator: TypeScriptGenerator },
+    { name: 'Dart', Generator: DartGenerator },
     { name: 'Python', Generator: PythonGenerator },
     { name: 'Go', Generator: GoGenerator },
     { name: 'Java', Generator: JavaGenerator },
@@ -569,6 +981,8 @@ describe('SDK Generators', () => {
     { name: 'Kotlin', Generator: KotlinGenerator },
     { name: 'Flutter', Generator: FlutterGenerator },
     { name: 'C#', Generator: CSharpGenerator },
+    { name: 'PHP', Generator: PhpGenerator },
+    { name: 'Ruby', Generator: RubyGenerator },
   ];
 
   generators.forEach(({ name, Generator }) => {
@@ -649,7 +1063,10 @@ describe('SDK Generators', () => {
           f.path.includes('go.mod') ||
           f.path.includes('.csproj') ||
           f.path.includes('setup.py') ||
-          f.path.includes('pyproject.toml')
+          f.path.includes('pyproject.toml') ||
+          f.path.includes('composer.json') ||
+          f.path.includes('Gemfile') ||
+          f.path.includes('.gemspec')
         );
         expect(configFiles.length).toBeGreaterThan(0);
       });
@@ -685,6 +1102,7 @@ describe('SDK Generators', () => {
 describe('OpenAPI Security And Compliance', () => {
   const generators = [
     TypeScriptGenerator,
+    DartGenerator,
     PythonGenerator,
     GoGenerator,
     JavaGenerator,
@@ -692,6 +1110,8 @@ describe('OpenAPI Security And Compliance', () => {
     KotlinGenerator,
     FlutterGenerator,
     CSharpGenerator,
+    PhpGenerator,
+    RubyGenerator,
   ];
 
   it('should map apiKey security scheme header into generated clients', async () => {
@@ -728,6 +1148,320 @@ describe('OpenAPI Security And Compliance', () => {
     expect(modelAFile).toBeDefined();
     expect(modelAFile!.content).toContain("import type { ModelB } from './model-b';");
     expect(modelAFile!.content).toContain('modelB?: ModelB;');
+  });
+
+  it('should emit deferred annotations for python model references', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'python' }, modelRefSpec);
+    const modelAFile = result.files.find((f) => f.path.endsWith('/models/model_a.py'));
+
+    expect(modelAFile).toBeDefined();
+    expect(modelAFile!.content).toContain('from __future__ import annotations');
+    expect(modelAFile!.content).toContain('model_b: ModelB = None');
+  });
+
+  it('should place required python dataclass fields before optional defaults', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate(
+      { ...baseConfig, language: 'python' },
+      pythonDataclassOrderingSpec
+    );
+    const orderedModelFile = result.files.find((f) => f.path.endsWith('/models/ordered_model.py'));
+
+    expect(orderedModelFile).toBeDefined();
+    const requiredIndex = orderedModelFile!.content.indexOf('required_id: str');
+    const optionalIndex = orderedModelFile!.content.indexOf('optional_name: str = None');
+    expect(requiredIndex).toBeGreaterThanOrEqual(0);
+    expect(optionalIndex).toBeGreaterThanOrEqual(0);
+    expect(requiredIndex).toBeLessThan(optionalIndex);
+  });
+
+  it('should escape python keyword property names', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate(
+      { ...baseConfig, language: 'python' },
+      pythonKeywordPropertySpec
+    );
+    const keywordModelFile = result.files.find((f) => f.path.endsWith('/models/keyword_model.py'));
+
+    expect(keywordModelFile).toBeDefined();
+    expect(keywordModelFile!.content).toContain('async_: bool = None');
+    expect(keywordModelFile!.content).toContain('await_: str = None');
+    expect(keywordModelFile!.content).not.toContain('\n    async: bool = None');
+  });
+
+  it('should escape reserved identifiers in java models and apis', async () => {
+    const generator = new JavaGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'java' }, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path.endsWith('/model/KeywordModel.java'));
+    const apiFile = result.files.find((f) => f.path.endsWith('/api/KeywordModelApi.java'));
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('private String class_;');
+    expect(modelFile!.content).toContain('private Boolean return_;');
+    expect(modelFile!.content).toContain('public String getClass_()');
+    expect(modelFile!.content).toContain('public void setClass_(String class_)');
+    expect(modelFile!.content).not.toContain('public String getClass()');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('public KeywordModel class_()');
+    expect(apiFile!.content).not.toContain('public KeywordModel class()');
+  });
+
+  it('should escape reserved identifiers in kotlin models and apis', async () => {
+    const generator = new KotlinGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'kotlin' }, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path.endsWith('/KeywordModel.kt'));
+    const apiFile = result.files.find((f) => f.path.endsWith('/api/KeywordModelApi.kt'));
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('val class_: String? = null');
+    expect(modelFile!.content).toContain('val return_: Boolean? = null');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('suspend fun class_(');
+    expect(apiFile!.content).not.toContain('suspend fun class(');
+  });
+
+  it('should escape reserved identifiers in swift models and apis', async () => {
+    const generator = new SwiftGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'swift' }, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path === 'Sources/Models.swift');
+    const apiFile = result.files.find((f) => f.path === 'Sources/API/KeywordModelApi.swift');
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('let class_: String?');
+    expect(modelFile!.content).toContain('let return_: Bool?');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('public func class_(');
+    expect(apiFile!.content).not.toContain('public func class(');
+  });
+
+  it('should escape reserved identifiers in php models and apis', async () => {
+    const generator = new PhpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'php' }, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path === 'src/Models/KeywordModel.php');
+    const apiFile = result.files.find((f) => f.path === 'src/Api/KeywordModel.php');
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('public ?string $class_ = null;');
+    expect(modelFile!.content).toContain('public ?bool $return_ = null;');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('public function class_(): ?KeywordModel');
+    expect(apiFile!.content).not.toContain('public function class(): ?KeywordModel');
+  });
+
+  it('should escape reserved identifiers in ruby models and apis', async () => {
+    const generator = new RubyGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'ruby' }, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path.endsWith('/models/keyword_model.rb'));
+    const apiFile = result.files.find((f) => f.path.endsWith('/api/keyword_model.rb'));
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('attr_accessor :class_, :return_');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('def class_(');
+    expect(apiFile!.content).not.toContain('def class(');
+  });
+
+  it('should escape reserved identifiers in dart models and apis', async () => {
+    const generator = new DartGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'dart' } as any, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path === 'lib/src/models.dart');
+    const apiFile = result.files.find((f) => f.path === 'lib/src/api/keyword_model.dart');
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('final String? class_;');
+    expect(modelFile!.content).toContain('final bool? return_;');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('Future<KeywordModel?> class_(');
+    expect(apiFile!.content).not.toContain('Future<KeywordModel?> class(');
+  });
+
+  it('should escape reserved identifiers in flutter models and apis', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'flutter' }, reservedIdentifierSpec);
+    const modelFile = result.files.find((f) => f.path === 'lib/src/models.dart');
+    const apiFile = result.files.find((f) => f.path === 'lib/src/api/keyword_model.dart');
+
+    expect(modelFile).toBeDefined();
+    expect(modelFile!.content).toContain('final String? class_;');
+    expect(modelFile!.content).toContain('final bool? return_;');
+
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('Future<KeywordModel?> class_(');
+    expect(apiFile!.content).not.toContain('Future<KeywordModel?> class(');
+  });
+
+  it('should sanitize unsafe path parameters in typescript and python apis', async () => {
+    const tsGenerator = new TypeScriptGenerator();
+    const tsResult = await tsGenerator.generate(baseConfig, pathParameterIdentifierSpec);
+    const tsApi = tsResult.files.find(
+      (f) => f.path.startsWith('src/api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(tsApi).toBeDefined();
+    expect(tsApi!.content).toContain('class_: string | number');
+    expect(tsApi!.content).toContain('userId: string | number');
+    expect(tsApi!.content).toContain('headers_: string | number');
+    expect(tsApi!.content).toContain('headers?: Record<string, string>');
+    expect(tsApi!.content).toContain('/keyword-model/${class_}/${userId}/${headers_}');
+
+    const pyGenerator = new PythonGenerator();
+    const pyResult = await pyGenerator.generate({ ...baseConfig, language: 'python' }, pathParameterIdentifierSpec);
+    const pyApi = pyResult.files.find(
+      (f) => f.path.includes('/api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(pyApi).toBeDefined();
+    expect(pyApi!.content).toContain('class_: str');
+    expect(pyApi!.content).toContain('user_id: str');
+    expect(pyApi!.content).toContain('headers_: str');
+    expect(pyApi!.content).toContain('headers: Optional[Dict[str, str]] = None');
+    expect(pyApi!.content).toContain('f"/api/v1/keyword-model/{class_}/{user_id}/{headers_}"');
+  });
+
+  it('should sanitize unsafe path parameters in go java kotlin swift and csharp apis', async () => {
+    const goGenerator = new GoGenerator();
+    const goResult = await goGenerator.generate({ ...baseConfig, language: 'go' }, pathParameterIdentifierSpec);
+    const goApi = goResult.files.find(
+      (f) => f.path.startsWith('api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(goApi).toBeDefined();
+    expect(goApi!.content).toContain('class string');
+    expect(goApi!.content).toContain('userId string');
+    expect(goApi!.content).toContain('headers_ string');
+    expect(goApi!.content).toContain('headers map[string]string');
+    expect(goApi!.content).toContain('fmt.Sprintf("/keyword-model/%s/%s/%s", class, userId, headers_)');
+
+    const javaGenerator = new JavaGenerator();
+    const javaResult = await javaGenerator.generate({ ...baseConfig, language: 'java' }, pathParameterIdentifierSpec);
+    const javaApi = javaResult.files.find((f) => f.path.endsWith('/api/KeywordModelApi.java'));
+
+    expect(javaApi).toBeDefined();
+    expect(javaApi!.content).toContain('String class_');
+    expect(javaApi!.content).toContain('String userId');
+    expect(javaApi!.content).toContain('String headers_');
+    expect(javaApi!.content).toContain('Map<String, String> headers');
+    expect(javaApi!.content).toContain('/keyword-model/" + class_ + "/" + userId + "/" + headers_ + "');
+
+    const kotlinGenerator = new KotlinGenerator();
+    const kotlinResult = await kotlinGenerator.generate(
+      { ...baseConfig, language: 'kotlin' },
+      pathParameterIdentifierSpec
+    );
+    const kotlinApi = kotlinResult.files.find((f) => f.path.endsWith('/api/KeywordModelApi.kt'));
+
+    expect(kotlinApi).toBeDefined();
+    expect(kotlinApi!.content).toContain('class_: String');
+    expect(kotlinApi!.content).toContain('userId: String');
+    expect(kotlinApi!.content).toContain('headers_: String');
+    expect(kotlinApi!.content).toContain('headers: Map<String, String>? = null');
+    expect(kotlinApi!.content).toContain('"/keyword-model/$class_/$userId/$headers_"');
+
+    const swiftGenerator = new SwiftGenerator();
+    const swiftResult = await swiftGenerator.generate(
+      { ...baseConfig, language: 'swift' },
+      pathParameterIdentifierSpec
+    );
+    const swiftApi = swiftResult.files.find((f) => f.path === 'Sources/API/KeywordModelApi.swift');
+
+    expect(swiftApi).toBeDefined();
+    expect(swiftApi!.content).toContain('class_: String');
+    expect(swiftApi!.content).toContain('userId: String');
+    expect(swiftApi!.content).toContain('headers_: String');
+    expect(swiftApi!.content).toContain('headers: [String: String]? = nil');
+    expect(swiftApi!.content).toContain('"/keyword-model/\\(class_)/\\(userId)/\\(headers_)"');
+
+    const csharpGenerator = new CSharpGenerator();
+    const csharpResult = await csharpGenerator.generate(
+      { ...baseConfig, language: 'csharp' },
+      pathParameterIdentifierSpec
+    );
+    const csharpApi = csharpResult.files.find((f) => f.path === 'Api/KeywordModelApi.cs');
+
+    expect(csharpApi).toBeDefined();
+    expect(csharpApi!.content).toContain('string class_');
+    expect(csharpApi!.content).toContain('string userId');
+    expect(csharpApi!.content).toContain('string headers_');
+    expect(csharpApi!.content).toContain('Dictionary<string, string>? headers = null');
+    expect(csharpApi!.content).toContain('$"/keyword-model/{class_}/{userId}/{headers_}"');
+  });
+
+  it('should sanitize unsafe path parameters in php ruby dart and flutter apis', async () => {
+    const phpGenerator = new PhpGenerator();
+    const phpResult = await phpGenerator.generate({ ...baseConfig, language: 'php' }, pathParameterIdentifierSpec);
+    const phpApi = phpResult.files.find(
+      (f) => f.path.startsWith('src/Api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(phpApi).toBeDefined();
+    expect(phpApi!.content).toContain('string $class_');
+    expect(phpApi!.content).toContain('string $userId');
+    expect(phpApi!.content).toContain('string $headers_');
+    expect(phpApi!.content).toContain('array $headers = []');
+    expect(phpApi!.content).toContain("'class' => $class_");
+    expect(phpApi!.content).toContain("'user-id' => $userId");
+    expect(phpApi!.content).toContain("'headers' => $headers_");
+
+    const rubyGenerator = new RubyGenerator();
+    const rubyResult = await rubyGenerator.generate({ ...baseConfig, language: 'ruby' }, pathParameterIdentifierSpec);
+    const rubyApi = rubyResult.files.find(
+      (f) => f.path.includes('/api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(rubyApi).toBeDefined();
+    expect(rubyApi!.content).toContain('def get_keyword_model_by_path(class_, user_id, headers_, headers: {})');
+    expect(rubyApi!.content).toContain("class: class_, 'user-id': user_id, headers: headers_");
+
+    const dartGenerator = new DartGenerator();
+    const dartResult = await dartGenerator.generate({ ...baseConfig, language: 'dart' } as any, pathParameterIdentifierSpec);
+    const dartApi = dartResult.files.find(
+      (f) => f.path.startsWith('lib/src/api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(dartApi).toBeDefined();
+    expect(dartApi!.content).toContain('String class_');
+    expect(dartApi!.content).toContain('String userId');
+    expect(dartApi!.content).toContain('String headers_');
+    expect(dartApi!.content).toContain('Map<String, String>? headers');
+    expect(dartApi!.content).toContain("'/keyword-model/$class_/$userId/$headers_'");
+
+    const flutterGenerator = new FlutterGenerator();
+    const flutterResult = await flutterGenerator.generate(
+      { ...baseConfig, language: 'flutter' },
+      pathParameterIdentifierSpec
+    );
+    const flutterApi = flutterResult.files.find(
+      (f) => f.path.startsWith('lib/src/api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(flutterApi).toBeDefined();
+    expect(flutterApi!.content).toContain('String class_');
+    expect(flutterApi!.content).toContain('String userId');
+    expect(flutterApi!.content).toContain('String headers_');
+    expect(flutterApi!.content).toContain('Map<String, String>? headers');
+    expect(flutterApi!.content).toContain("'/keyword-model/$class_/$userId/$headers_'");
+  });
+
+  it('should sanitize unsafe path parameters in rust apis', async () => {
+    const rustGenerator = new RustGenerator();
+    const rustResult = await rustGenerator.generate({ ...baseConfig, language: 'rust' } as any, pathParameterIdentifierSpec);
+    const rustApi = rustResult.files.find(
+      (f) => f.path.startsWith('src/api/') && f.content.includes('/keyword-model/')
+    );
+
+    expect(rustApi).toBeDefined();
+    expect(rustApi!.content).toContain('class: &str');
+    expect(rustApi!.content).toContain('user_id: &str');
+    expect(rustApi!.content).toContain('headers_: &str');
+    expect(rustApi!.content).toContain('headers: Option<&RequestHeaders>');
+    expect(rustApi!.content).toContain('format!("/keyword-model/{}/{}/{}", class, user_id, headers_)');
   });
 
   it('should handle advanced OpenAPI patterns without generation errors', async () => {
@@ -809,6 +1543,27 @@ describe('OpenAPI Security And Compliance', () => {
     );
     expect(result.files.some((f) => f.path.startsWith('scope_sdk_work/'))).toBe(true);
     expect(result.files.some((f) => f.path.startsWith('sdkwork/'))).toBe(false);
+  });
+
+  it('should generate streamlined python packaging metadata', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'python' }, mockSpec);
+    const setupPy = result.files.find((f) => f.path === 'setup.py');
+    const pyproject = result.files.find((f) => f.path === 'pyproject.toml');
+    const manifest = result.files.find((f) => f.path === 'MANIFEST.in');
+
+    expect(setupPy).toBeDefined();
+    expect(setupPy!.content).not.toContain('install_requires');
+    expect(setupPy!.content).not.toContain('classifiers');
+
+    expect(pyproject).toBeDefined();
+    expect(pyproject!.content).toContain('license = "MIT"');
+    expect(pyproject!.content).toContain('readme = "README.md"');
+    expect(pyproject!.content).toContain('classifiers = [');
+    expect(pyproject!.content).not.toContain('License :: OSI Approved :: MIT License');
+
+    expect(manifest).toBeDefined();
+    expect(manifest!.content).not.toContain('include LICENSE');
   });
 
   it('should normalize trailing numeric suffixes per api class only', async () => {

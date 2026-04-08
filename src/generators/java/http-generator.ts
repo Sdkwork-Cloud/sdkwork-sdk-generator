@@ -154,12 +154,14 @@ public class HttpClient {
     }
 
     private RequestBody createMultipartBody(Object body) {
-        if (body instanceof RequestBody requestBody) {
+        if (body instanceof RequestBody) {
+            RequestBody requestBody = (RequestBody) body;
             return requestBody;
         }
 
         MultipartBody.Builder builder = new MultipartBody.Builder().setType(MultipartBody.FORM);
-        if (body instanceof Map<?, ?> mapBody) {
+        if (body instanceof Map<?, ?>) {
+            Map<?, ?> mapBody = (Map<?, ?>) body;
             for (Map.Entry<?, ?> entry : mapBody.entrySet()) {
                 if (entry.getKey() == null) {
                     continue;
@@ -170,7 +172,8 @@ public class HttpClient {
                     builder.addFormDataPart(key, "");
                     continue;
                 }
-                if (value instanceof byte[] bytes) {
+                if (value instanceof byte[]) {
+                    byte[] bytes = (byte[]) value;
                     builder.addFormDataPart(
                         key,
                         key,
@@ -178,13 +181,15 @@ public class HttpClient {
                     );
                     continue;
                 }
-                if (value instanceof Iterable<?> iterable) {
+                if (value instanceof Iterable<?>) {
+                    Iterable<?> iterable = (Iterable<?>) value;
                     for (Object item : iterable) {
                         builder.addFormDataPart(key, item == null ? "" : String.valueOf(item));
                     }
                     continue;
                 }
-                if (value instanceof Collection<?> collection) {
+                if (value instanceof Collection<?>) {
+                    Collection<?> collection = (Collection<?>) value;
                     for (Object item : collection) {
                         builder.addFormDataPart(key, item == null ? "" : String.valueOf(item));
                     }
@@ -199,11 +204,13 @@ public class HttpClient {
     }
 
     private RequestBody createFormBody(Object body) {
-        if (body instanceof RequestBody requestBody) {
+        if (body instanceof RequestBody) {
+            RequestBody requestBody = (RequestBody) body;
             return requestBody;
         }
         FormBody.Builder builder = new FormBody.Builder(StandardCharsets.UTF_8);
-        if (body instanceof Map<?, ?> mapBody) {
+        if (body instanceof Map<?, ?>) {
+            Map<?, ?> mapBody = (Map<?, ?>) body;
             for (Map.Entry<?, ?> entry : mapBody.entrySet()) {
                 if (entry.getKey() == null) {
                     continue;
@@ -214,13 +221,15 @@ public class HttpClient {
                     builder.add(key, "");
                     continue;
                 }
-                if (value instanceof Iterable<?> iterable) {
+                if (value instanceof Iterable<?>) {
+                    Iterable<?> iterable = (Iterable<?>) value;
                     for (Object item : iterable) {
                         builder.add(key, item == null ? "" : String.valueOf(item));
                     }
                     continue;
                 }
-                if (value instanceof Collection<?> collection) {
+                if (value instanceof Collection<?>) {
+                    Collection<?> collection = (Collection<?>) value;
                     for (Object item : collection) {
                         builder.add(key, item == null ? "" : String.valueOf(item));
                     }
@@ -245,7 +254,8 @@ public class HttpClient {
         if (normalized.startsWith("application/x-www-form-urlencoded")) {
             return createFormBody(body);
         }
-        if (body instanceof RequestBody requestBody) {
+        if (body instanceof RequestBody) {
+            RequestBody requestBody = (RequestBody) body;
             return requestBody;
         }
         return createJsonBody(body);

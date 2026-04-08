@@ -14,37 +14,11 @@ export class BuildConfigGenerator {
   }
 
   private generateSetupPy(config: GeneratorConfig): GeneratedFile {
-    const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
-    const commonPkg = resolvePythonCommonPackage(config);
-    
     return {
       path: 'setup.py',
-      content: this.format(`from setuptools import setup, find_packages
+      content: this.format(`from setuptools import setup
 
-setup(
-    name="${pkgName}",
-    version="${config.version}",
-    description="${config.description || config.name + ' SDK'}",
-    author="${config.author || 'SDKWork Team'}",
-    author_email="support@sdkwork.com",
-    url="https://github.com/sdkwork/${pkgName}",
-    packages=find_packages(),
-    install_requires=[
-        "${commonPkg.requirement}",
-    ],
-    python_requires=">=3.8",
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-    ],
-)
+setup()
 `),
       language: 'python',
       description: 'Setup configuration',
@@ -54,6 +28,7 @@ setup(
   private generatePyprojectToml(config: GeneratorConfig): GeneratedFile {
     const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
     const commonPkg = resolvePythonCommonPackage(config);
+    const packageRoot = getPythonPackageRoot(config);
     
     return {
       path: 'pyproject.toml',
@@ -66,9 +41,21 @@ name = "${pkgName}"
 version = "${config.version}"
 description = "${config.description || config.name + ' SDK'}"
 authors = [{name = "${config.author || 'SDKWork Team'}"}]
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.8"
 dependencies = [
     "${commonPkg.requirement}",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 
 [project.optional-dependencies]
@@ -88,6 +75,9 @@ python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[tool.setuptools.packages.find]
+include = ["${packageRoot}*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -114,7 +104,6 @@ asyncio_mode = "auto"
     return {
       path: 'MANIFEST.in',
       content: `include README.md
-include LICENSE
 recursive-include ${packageRoot} *.py
 `,
       language: 'python',

@@ -13,6 +13,7 @@ export class HttpClientGenerator {
         return [
             this.generateHttpClient(config, commonPkg.importPath),
             this.generateSdkClient(clientName, tags, resolvedTagNames, config, apiKeyHeader, apiKeyAsBearer, commonPkg.importPath),
+            this.generatePackageEntry(config),
         ];
     }
     generateHttpClient(config, commonImportPath) {
@@ -108,6 +109,19 @@ ${inits}
 `),
             language: 'flutter',
             description: 'Main SDK class',
+        };
+    }
+    generatePackageEntry(config) {
+        const packageName = `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
+        const clientFile = `${FLUTTER_CONFIG.namingConventions.fileName(config.sdkType)}_client.dart`;
+        return {
+            path: `lib/${packageName}.dart`,
+            content: this.format(`export '${clientFile}';
+export 'src/models.dart';
+export 'src/api/api.dart';
+`),
+            language: 'flutter',
+            description: 'Package entrypoint exports',
         };
     }
     format(content) {

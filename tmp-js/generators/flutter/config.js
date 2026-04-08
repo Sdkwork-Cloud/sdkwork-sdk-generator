@@ -1,3 +1,71 @@
+import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
+export const FLUTTER_RESERVED_WORDS = new Set([
+    'abstract',
+    'as',
+    'assert',
+    'async',
+    'await',
+    'base',
+    'break',
+    'case',
+    'catch',
+    'class',
+    'const',
+    'continue',
+    'covariant',
+    'default',
+    'deferred',
+    'do',
+    'dynamic',
+    'else',
+    'enum',
+    'export',
+    'extends',
+    'extension',
+    'external',
+    'false',
+    'factory',
+    'final',
+    'finally',
+    'for',
+    'function',
+    'get',
+    'hide',
+    'if',
+    'implements',
+    'import',
+    'in',
+    'interface',
+    'is',
+    'late',
+    'library',
+    'mixin',
+    'new',
+    'null',
+    'on',
+    'operator',
+    'part',
+    'required',
+    'rethrow',
+    'return',
+    'sealed',
+    'set',
+    'show',
+    'static',
+    'super',
+    'switch',
+    'sync',
+    'this',
+    'throw',
+    'true',
+    'try',
+    'typedef',
+    'var',
+    'void',
+    'while',
+    'with',
+    'yield',
+]);
 export const FLUTTER_CONFIG = {
     language: 'flutter',
     displayName: 'Flutter/Dart',
@@ -23,8 +91,8 @@ export const FLUTTER_CONFIG = {
     },
     namingConventions: {
         modelName: (name) => toPascalCase(name),
-        propertyName: (name) => toCamelCase(name),
-        methodName: (name) => toCamelCase(name),
+        propertyName: (name) => toSafeCamelIdentifier(name, FLUTTER_RESERVED_WORDS),
+        methodName: (name) => toSafeCamelIdentifier(name, FLUTTER_RESERVED_WORDS),
         fileName: (name) => toSnakeCase(name),
         packageName: (name) => toSnakeCase(name),
     },
@@ -37,10 +105,6 @@ function toPascalCase(str) {
         .filter(Boolean)
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join('');
-}
-function toCamelCase(str) {
-    const pascal = toPascalCase(str);
-    return pascal.charAt(0).toLowerCase() + pascal.slice(1);
 }
 function toSnakeCase(str) {
     return str.replace(/([a-z])([A-Z])/g, '$1_$2')

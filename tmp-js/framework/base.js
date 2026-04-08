@@ -45,12 +45,14 @@ export class BaseGenerator {
             files.push(...this.generateApis(this.ctx, this.config));
             files.push(...this.generateClient(this.config));
             files.push(...this.generateBuildConfig(this.config));
+            files.push(this.generateMetadataManifest(this.config));
             files.push(...this.generateBinScripts(this.config));
             if (config.generateReadme === false) {
                 warnings.push('generateReadme=false was provided, but README generation is mandatory and remains enabled.');
             }
             const normalizedReadme = normalizeReadmeFile(this.generateReadme(this.ctx, this.config));
             files.push(normalizedReadme.file);
+            files.push(...this.generateCustomScaffolding(this.config));
             if (normalizedReadme.warning) {
                 warnings.push(normalizedReadme.warning);
             }
@@ -62,15 +64,16 @@ export class BaseGenerator {
                 code: 'GENERATION_ERROR',
             });
         }
+        const finalizedFiles = this.finalizeGeneratedFiles(files);
         const schemaCount = this.ctx ? Object.keys(this.ctx.schemas).length : 0;
         const apiCount = this.ctx ? Object.keys(this.ctx.apiGroups).length : 0;
-        const typeCount = files.filter(f => f.path.includes('/types/') || f.path.includes('models')).length;
+        const typeCount = finalizedFiles.filter(f => f.path.includes('/types/') || f.path.includes('models')).length;
         return {
-            files,
+            files: finalizedFiles,
             errors,
             warnings,
             stats: {
-                totalFiles: files.length,
+                totalFiles: finalizedFiles.length,
                 models: schemaCount,
                 apis: apiCount,
                 types: typeCount,
@@ -789,6 +792,50 @@ export class BaseGenerator {
     }
     formatFile(content) {
         return content.trim() + '\n';
+    }
+    generateCustomScaffolding(_config) {
+        return [
+            {
+                path: 'custom/README.md',
+                content: this.formatFile([
+                    '# Custom Code',
+                    '',
+                    'Keep hand-written wrappers, adapters, and orchestration here.',
+                    'Files outside this directory may be regenerated and overwritten.',
+                    'If you need to extend generated behavior, prefer composition from `custom/` instead of editing generated files directly.',
+                ].join('\n')),
+                language: this.language,
+                description: 'Custom extension boundary',
+                ownership: 'scaffold',
+                overwriteStrategy: 'if-missing',
+            },
+        ];
+    }
+    finalizeGeneratedFiles(files) {
+        return files.map((file) => {
+            const ownership = file.ownership || 'generated';
+            return {
+                ...file,
+                path: String(file.path || '').replace(/\\/g, '/'),
+                ownership,
+                overwriteStrategy: file.overwriteStrategy || (ownership === 'scaffold' ? 'if-missing' : 'always'),
+            };
+        });
+    }
+    generateMetadataManifest(config) {
+        return {
+            path: 'sdkwork-sdk.json',
+            content: `${JSON.stringify({
+                name: config.name,
+                version: config.version,
+                language: config.language,
+                sdkType: config.sdkType,
+                packageName: config.packageName || null,
+                generator: '@sdkwork/sdk-generator',
+            }, null, 2)}\n`,
+            language: config.language,
+            description: 'SDKWork generator metadata',
+        };
     }
     indent(content, spaces = 2) {
         const indent = ' '.repeat(spaces);

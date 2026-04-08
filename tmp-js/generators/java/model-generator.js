@@ -11,21 +11,24 @@ export class ModelGenerator {
     generateClass(name, schema, packageName) {
         const className = JAVA_CONFIG.namingConventions.modelName(name);
         const props = schema.properties || {};
+        const imports = new Set();
         const fields = Object.entries(props).map(([propName, propSchema]) => {
             const fieldName = JAVA_CONFIG.namingConventions.propertyName(propName);
             const fieldType = getJavaType(propSchema, JAVA_CONFIG);
+            this.collectImports(fieldType, imports);
             return `    private ${fieldType} ${fieldName};`;
         }).join('\n');
         const getters = Object.entries(props).map(([propName, propSchema]) => {
             const fieldName = JAVA_CONFIG.namingConventions.propertyName(propName);
             const fieldType = getJavaType(propSchema, JAVA_CONFIG);
-            const methodName = JAVA_CONFIG.namingConventions.methodName(`get_${propName}`);
+            const getterName = this.createAccessorName('get', fieldName);
+            const setterName = this.createAccessorName('set', fieldName);
             return `
-    public ${fieldType} ${methodName}() {
+    public ${fieldType} ${getterName}() {
         return this.${fieldName};
     }
     
-    public void set${JAVA_CONFIG.namingConventions.modelName(propName)}(${fieldType} ${fieldName}) {
+    public void ${setterName}(${fieldType} ${fieldName}) {
         this.${fieldName} = ${fieldName};
     }`;
         }).join('\n');
@@ -33,6 +36,7 @@ export class ModelGenerator {
             path: `src/main/java/com/sdkwork/${packageName}/model/${className}.java`,
             content: this.format(`package com.sdkwork.${packageName}.model;
 
+${this.renderImports(imports)}
 public class ${className} {
 ${fields}
 ${getters}
@@ -44,5 +48,25 @@ ${getters}
     }
     format(content) {
         return content.trim() + '\n';
+    }
+    collectImports(fieldType, imports) {
+        if (fieldType.includes('List<')) {
+            imports.add('import java.util.List;');
+        }
+        if (fieldType.includes('Map<')) {
+            imports.add('import java.util.Map;');
+        }
+    }
+    renderImports(imports) {
+        if (imports.size === 0) {
+            return '';
+        }
+        return `${Array.from(imports).sort().join('\n')}\n`;
+    }
+    createAccessorName(prefix, fieldName) {
+        if (!fieldName) {
+            return prefix;
+        }
+        return `${prefix}${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)}`;
     }
 }

@@ -1,5 +1,5 @@
 export function stripTrailingNumericSuffix(name) {
-    return name.replace(/_?\d+$/, '').replace(/_+$/, '');
+    return name.replace(/_?\d+$/, '');
 }
 const REMOVABLE_TAG_SUFFIXES = new Set([
     'management',

@@ -9,11 +9,12 @@ import {
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { CSHARP_CONFIG } from './config.js';
+import { CSHARP_CONFIG, getCSharpNamespace, getCSharpPackageId } from './config.js';
 
 export class ReadmeGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
-    const namespace = CSHARP_CONFIG.namingConventions.modelName(config.sdkType);
+    const namespace = getCSharpNamespace(config);
+    const packageId = getCSharpPackageId(config);
     const clientName = resolveSdkClientName(config);
     const commonPkg = resolveCSharpCommonPackage(config);
     const tags = Object.keys(ctx.apiGroups);
@@ -75,13 +76,13 @@ ${config.description || 'Professional C# SDK for SDKWork API.'}
 ## Installation
 
 \`\`\`bash
-dotnet add package ${namespace}
+dotnet add package ${packageId}
 \`\`\`
 
 Or add to your \`.csproj\`:
 
 \`\`\`xml
-<PackageReference Include="${namespace}" Version="${config.version}" />
+<PackageReference Include="${packageId}" Version="${config.version}" />
 \`\`\`
 
 ## Quick Start

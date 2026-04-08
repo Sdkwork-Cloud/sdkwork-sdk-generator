@@ -1,3 +1,4 @@
+import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
 export class ApiGenerator {
@@ -53,7 +54,7 @@ ${methods}
         };
     }
     generateMethod(op, config, methodName, knownModels) {
-        const pathParams = this.extractPathParams(op.path);
+        const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const hasQuery = allParameters.some((param) => param?.in === 'query');
         const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -79,9 +80,18 @@ ${methods}
         if (responseSchema) {
             this.collectReferencedModels(responseSchema, knownModels, referencedModels);
         }
+        const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => PYTHON_CONFIG.namingConventions.propertyName(value), [
+            hasBody ? 'body' : '',
+            hasQuery ? 'params' : '',
+            hasHeaders ? 'headers' : '',
+        ]);
+        const pathParams = rawPathParams.map((rawName) => ({
+            rawName,
+            safeName: pathParamNames.get(rawName) || rawName,
+        }));
         const params = ['self'];
         if (pathParams.length) {
-            params.push(...pathParams.map((p) => `${p}: str`));
+            params.push(...pathParams.map((param) => `${param.safeName}: str`));
         }
         if (hasBody) {
             if (requestBodyRequired) {
@@ -102,7 +112,10 @@ ${methods}
         }
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const rawPath = this.withApiPrefix(config.apiPrefix, normalizedOperationPath);
-        const pathTemplate = rawPath.replace(/\{([^}]+)\}/g, '{$1}');
+        const pathTemplate = rawPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
+            const safeName = pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);
+            return `{${safeName}}`;
+        });
         let call = '';
         switch (method) {
             case 'get':

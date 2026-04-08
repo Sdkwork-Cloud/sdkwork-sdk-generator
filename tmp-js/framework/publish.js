@@ -1,13 +1,5 @@
-const SUPPORTED_PUBLISH_LANGUAGES = new Set([
-    'typescript',
-    'python',
-    'java',
-    'kotlin',
-    'go',
-    'swift',
-    'flutter',
-    'csharp',
-]);
+import { getPublishSupportedLanguages } from '../publish-capabilities.js';
+const SUPPORTED_PUBLISH_LANGUAGES = new Set(getPublishSupportedLanguages());
 function formatFile(content) {
     return `${content.trim()}\n`;
 }
@@ -19,13 +11,17 @@ import { spawnSync } from 'node:child_process';
 
 const SUPPORTED_LANGUAGES = new Set([
   'typescript',
+  'dart',
   'python',
   'java',
   'kotlin',
   'go',
+  'rust',
   'swift',
   'flutter',
   'csharp',
+  'php',
+  'ruby',
 ]);
 
 const marker = '[sdk-publish]';
@@ -162,7 +158,10 @@ function printHelp() {
   console.log('  PYPI_TOKEN, PYPI_REPOSITORY_URL, TEST_PYPI_TOKEN, TEST_PYPI_REPOSITORY_URL');
   console.log('  MAVEN_PUBLISH_PROFILE, MAVEN_RELEASE_PROFILE, MAVEN_TEST_PROFILE, MAVEN_SETTINGS');
   console.log('  GRADLE_PUBLISH_TASK');
+  console.log('  CARGO_REGISTRY_TOKEN');
   console.log('  NUGET_API_KEY, NUGET_TEST_API_KEY, NUGET_SOURCE');
+  console.log('  PHP_RELEASE_TAG, PHP_PUSH_TAG, COMPOSER_BIN');
+  console.log('  GEM_HOST_API_KEY, RUBYGEMS_API_KEY, RUBYGEMS_HOST');
   console.log('  SDKWORK_RELEASE_TAG, SDKWORK_PUSH_TAG');
 }
 
@@ -216,6 +215,20 @@ function resolveGradleCommand(projectDir) {
   return process.env.GRADLE_BIN || 'gradle';
 }
 
+function resolveComposerCommand(projectDir) {
+  const preferred = process.env.COMPOSER_BIN || '';
+  if (preferred) {
+    return preferred;
+  }
+
+  const composerPhar = path.join(projectDir, 'composer.phar');
+  if (existsSync(composerPhar)) {
+    return process.platform === 'win32' ? 'php composer.phar' : 'php ./composer.phar';
+  }
+
+  return 'composer';
+}
+
 function runTypeScript(ctx) {
   const packageFile = path.join(ctx.projectDir, 'package.json');
   ensureFile(packageFile, 'package.json');
@@ -247,6 +260,23 @@ function runTypeScript(ctx) {
     args.push('--dry-run');
   }
   run('npm', args, { cwd: ctx.projectDir });
+}
+
+function runDart(ctx) {
+  const pubspec = path.join(ctx.projectDir, 'pubspec.yaml');
+  ensureFile(pubspec, 'pubspec.yaml');
+
+  run('dart', ['pub', 'get'], { cwd: ctx.projectDir });
+  run('dart', ['pub', 'publish', '--dry-run'], { cwd: ctx.projectDir });
+
+  if (ctx.action === 'check' || ctx.action === 'build' || ctx.dryRun) {
+    return;
+  }
+
+  if (ctx.channel === 'test') {
+    log('Dart test channel requested, but pub.dev has no dedicated test registry. Publishing to default registry.');
+  }
+  run('dart', ['pub', 'publish', '--force'], { cwd: ctx.projectDir });
 }
 
 function runPython(ctx) {
@@ -412,6 +442,33 @@ function runGo(ctx) {
   });
 }
 
+function runRust(ctx) {
+  const cargoToml = path.join(ctx.projectDir, 'Cargo.toml');
+  ensureFile(cargoToml, 'Cargo.toml');
+
+  if (ctx.action === 'check') {
+    run('cargo', ['check'], { cwd: ctx.projectDir });
+    run('cargo', ['test', '--no-run'], { cwd: ctx.projectDir });
+    return;
+  }
+
+  run('cargo', ['build', '--release'], { cwd: ctx.projectDir });
+
+  if (ctx.action === 'build') {
+    return;
+  }
+
+  if (ctx.channel === 'test') {
+    log('Rust test channel requested, but cargo publish uses the configured registry. Proceeding with the default registry.');
+  }
+
+  const publishArgs = ['publish'];
+  if (ctx.dryRun) {
+    publishArgs.push('--dry-run');
+  }
+  run('cargo', publishArgs, { cwd: ctx.projectDir });
+}
+
 function runSwift(ctx) {
   const packageSwift = path.join(ctx.projectDir, 'Package.swift');
   ensureFile(packageSwift, 'Package.swift');
@@ -525,16 +582,98 @@ function runCSharp(ctx) {
   }
 }
 
+function runPhp(ctx) {
+  const composerJson = path.join(ctx.projectDir, 'composer.json');
+  ensureFile(composerJson, 'composer.json');
+
+  const composer = resolveComposerCommand(ctx.projectDir);
+  run(composer, ['validate', '--strict'], { cwd: ctx.projectDir });
+
+  if (ctx.action === 'check' || ctx.action === 'build') {
+    return;
+  }
+
+  const releaseTag = process.env.PHP_RELEASE_TAG || process.env.SDKWORK_RELEASE_TAG || '';
+  if (!releaseTag) {
+    fail('Missing release tag. Set PHP_RELEASE_TAG or SDKWORK_RELEASE_TAG, for example: 1.0.1');
+  }
+
+  if (ctx.dryRun) {
+    log('Dry run: would create and optionally push git tag "' + releaseTag + '" for Composer/Packagist release.');
+    return;
+  }
+
+  const tagProbe = spawnSync('git', ['rev-parse', '--verify', releaseTag], {
+    cwd: ctx.projectDir,
+    stdio: 'ignore',
+    shell: false,
+  });
+  if ((tagProbe.status ?? 1) !== 0) {
+    run('git', ['tag', releaseTag], { cwd: ctx.projectDir });
+  } else {
+    log('Git tag already exists: ' + releaseTag);
+  }
+
+  if (isTrue(process.env.PHP_PUSH_TAG || process.env.SDKWORK_PUSH_TAG || 'false')) {
+    run('git', ['push', 'origin', releaseTag], { cwd: ctx.projectDir });
+  } else {
+    log('Tag push skipped. Set PHP_PUSH_TAG=true (or SDKWORK_PUSH_TAG=true) to push.');
+  }
+}
+
+function runRuby(ctx) {
+  const gemspecs = readdirSync(ctx.projectDir).filter((name) => name.toLowerCase().endsWith('.gemspec'));
+  if (gemspecs.length === 0) {
+    fail('No .gemspec file found in: ' + ctx.projectDir);
+  }
+
+  const gemspec = gemspecs[0];
+  const pkgDir = path.join(ctx.projectDir, 'pkg');
+  if (existsSync(pkgDir)) {
+    rmSync(pkgDir, { recursive: true, force: true });
+  }
+
+  run('gem', ['build', gemspec], { cwd: ctx.projectDir });
+  const builtGem = readdirSync(ctx.projectDir).find((name) => name.endsWith('.gem'));
+  if (!builtGem) {
+    fail('No built gem artifact found after gem build.');
+  }
+
+  if (ctx.action === 'check' || ctx.action === 'build') {
+    return;
+  }
+
+  if (ctx.dryRun) {
+    log('Dry run: built gem artifact "' + builtGem + '" and skipped push.');
+    return;
+  }
+
+  const host = process.env.RUBYGEMS_HOST || 'https://rubygems.org';
+  const apiKey = process.env.GEM_HOST_API_KEY || process.env.RUBYGEMS_API_KEY || '';
+  if (!apiKey) {
+    fail('Missing RubyGems API key. Set GEM_HOST_API_KEY or RUBYGEMS_API_KEY.');
+  }
+
+  run('gem', ['push', builtGem, '--host', host], {
+    cwd: ctx.projectDir,
+    env: { ...process.env, GEM_HOST_API_KEY: apiKey },
+  });
+}
+
 function dispatch(ctx) {
   const handlers = {
     typescript: runTypeScript,
+    dart: runDart,
     python: runPython,
     java: runJava,
     kotlin: runKotlin,
     go: runGo,
+    rust: runRust,
     swift: runSwift,
     flutter: runFlutter,
     csharp: runCSharp,
+    php: runPhp,
+    ruby: runRuby,
   };
 
   const handler = handlers[ctx.language];

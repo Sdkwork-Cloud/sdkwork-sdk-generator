@@ -1,8 +1,85 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { TYPESCRIPT_CONFIG, getTypeScriptType } from './config.js';
 import { buildTypeScriptTagMetadata, type TypeScriptApiTagMetadata } from './tag-metadata.js';
+
+const TYPESCRIPT_RESERVED_WORDS = new Set([
+  'abstract',
+  'any',
+  'as',
+  'asserts',
+  'async',
+  'await',
+  'bigint',
+  'boolean',
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'declare',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'enum',
+  'export',
+  'extends',
+  'false',
+  'finally',
+  'for',
+  'from',
+  'function',
+  'get',
+  'if',
+  'implements',
+  'import',
+  'in',
+  'infer',
+  'instanceof',
+  'interface',
+  'is',
+  'keyof',
+  'let',
+  'module',
+  'namespace',
+  'never',
+  'new',
+  'null',
+  'number',
+  'object',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'readonly',
+  'require',
+  'return',
+  'set',
+  'static',
+  'string',
+  'super',
+  'switch',
+  'symbol',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'type',
+  'typeof',
+  'undefined',
+  'unique',
+  'unknown',
+  'var',
+  'void',
+  'while',
+  'with',
+  'yield',
+]);
 
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -83,7 +160,7 @@ export function create${className}(client: HttpClient): ${className} {
     methodName: string,
     knownModels: Set<string>
   ): { content: string; referencedModels: Set<string> } {
-    const pathParams = this.extractPathParams(op.path);
+    const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
     const queryParams = allParameters.filter((param: any) => param?.in === 'query');
     const headerParams = allParameters.filter((param: any) => param?.in === 'header');
@@ -115,9 +192,23 @@ export function create${className}(client: HttpClient): ${className} {
       this.collectReferencedModels(responseSchema, knownModels, referencedModels);
     }
 
+    const pathParamNames = createUniqueIdentifierMap(
+      rawPathParams,
+      (value) => toSafeCamelIdentifier(value, TYPESCRIPT_RESERVED_WORDS),
+      [
+        hasBody ? 'body' : '',
+        hasQuery ? 'params' : '',
+        hasHeaders ? 'headers' : '',
+      ]
+    );
+    const pathParams = rawPathParams.map((rawName) => ({
+      rawName,
+      safeName: pathParamNames.get(rawName) || rawName,
+    }));
+
     const params: string[] = [];
     if (pathParams.length) {
-      params.push(...pathParams.map(p => `${p}: string | number`));
+      params.push(...pathParams.map((param) => `${param.safeName}: string | number`));
     }
     if (hasBody && requestType) {
       params.push(requestBodyRequired ? `body: ${requestType}` : `body?: ${requestType}`);
@@ -126,7 +217,10 @@ export function create${className}(client: HttpClient): ${className} {
     if (hasHeaders) params.push('headers?: Record<string, string>');
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
-    const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '${$1}');
+    const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
+      const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, TYPESCRIPT_RESERVED_WORDS);
+      return `\${${safeName}}`;
+    });
     const pathExpression = `${config.sdkType}ApiPath(\`${pathTemplate}\`)`;
     let call = '';
     

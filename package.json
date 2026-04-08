@@ -1,19 +1,39 @@
 {
   "name": "@sdkwork/sdk-generator",
-  "version": "1.0.3",
-  "description": "SDKWork SDK Generator - Professional SDK code generator for multiple languages",
+  "version": "1.0.4",
+  "description": "SDKWork SDK Generator - Professional SDK code generator for TypeScript, Dart, Python, Go, Java, Kotlin, Swift, C#, Flutter, Rust, PHP, and Ruby",
   "author": "SDKWork Team",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "sdkgen": "./bin/sdkgen.js"
+    "sdkgen": "bin/sdkgen.js"
   },
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./node/output-sync": {
+      "import": "./tmp-js/node/output-sync.js",
+      "types": "./dist/node/output-sync.d.ts"
+    },
+    "./node/generate": {
+      "import": "./tmp-js/node/generate.js",
+      "types": "./dist/node/generate.d.ts"
+    },
+    "./node/execution-report": {
+      "import": "./tmp-js/node/execution-report.js",
+      "types": "./dist/node/execution-report.d.ts"
+    },
+    "./node/control-plane": {
+      "import": "./tmp-js/node/control-plane.js",
+      "types": "./dist/node/control-plane.d.ts"
+    },
+    "./node/init": {
+      "import": "./tmp-js/node/init.js",
+      "types": "./dist/node/init.d.ts"
     }
   },
   "files": [
@@ -37,15 +57,18 @@
     "generator",
     "code-generator",
     "typescript",
+    "dart",
     "flutter",
     "swift",
     "java",
     "csharp",
-    "rust"
+    "rust",
+    "php",
+    "ruby"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/sdkwork/spring-ai-plus.git",
+    "url": "git+https://github.com/sdkwork/spring-ai-plus.git",
     "directory": "spring-ai-plus-business/sdk/sdkwork-sdk-generator"
   },
   "bugs": {

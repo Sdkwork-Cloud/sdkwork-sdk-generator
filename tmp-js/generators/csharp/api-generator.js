@@ -1,9 +1,89 @@
+import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
-import { CSHARP_CONFIG, getCSharpType } from './config.js';
+import { CSHARP_CONFIG, getCSharpNamespace, getCSharpType } from './config.js';
+const CSHARP_RESERVED_WORDS = new Set([
+    'abstract',
+    'as',
+    'base',
+    'bool',
+    'break',
+    'byte',
+    'case',
+    'catch',
+    'char',
+    'checked',
+    'class',
+    'const',
+    'continue',
+    'decimal',
+    'default',
+    'delegate',
+    'do',
+    'double',
+    'else',
+    'enum',
+    'event',
+    'explicit',
+    'extern',
+    'false',
+    'finally',
+    'fixed',
+    'float',
+    'for',
+    'foreach',
+    'goto',
+    'if',
+    'implicit',
+    'in',
+    'int',
+    'interface',
+    'internal',
+    'is',
+    'lock',
+    'long',
+    'namespace',
+    'new',
+    'null',
+    'object',
+    'operator',
+    'out',
+    'override',
+    'params',
+    'private',
+    'protected',
+    'public',
+    'readonly',
+    'ref',
+    'return',
+    'sbyte',
+    'sealed',
+    'short',
+    'sizeof',
+    'stackalloc',
+    'static',
+    'string',
+    'struct',
+    'switch',
+    'this',
+    'throw',
+    'true',
+    'try',
+    'typeof',
+    'uint',
+    'ulong',
+    'unchecked',
+    'unsafe',
+    'ushort',
+    'using',
+    'virtual',
+    'void',
+    'volatile',
+    'while',
+]);
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
-        const namespace = CSHARP_CONFIG.namingConventions.modelName(config.sdkType);
+        const namespace = getCSharpNamespace(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => CSHARP_CONFIG.namingConventions.modelName(schemaName)));
@@ -27,16 +107,16 @@ export class ApiGenerator {
             content: this.format(`using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using ${namespace}.Http;
 using ${namespace}.Models;
+using SdkHttpClient = ${namespace}.Http.HttpClient;
 
 namespace ${namespace}.Api
 {
     public class ${className}
     {
-        private readonly HttpClient _client;
+        private readonly SdkHttpClient _client;
 
-        public ${className}(HttpClient client)
+        public ${className}(SdkHttpClient client)
         {
             _client = client;
         }
@@ -50,7 +130,7 @@ ${methods}
         };
     }
     generateMethod(op, config, methodName, knownModels) {
-        const pathParams = this.extractPathParams(op.path);
+        const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const hasQuery = allParameters.some((param) => param?.in === 'query');
         const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -69,9 +149,18 @@ ${methods}
         const responseType = responseSchema
             ? this.ensureKnownType(getCSharpType(responseSchema, CSHARP_CONFIG), knownModels)
             : this.inferFallbackResponseType(op);
+        const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => toSafeCamelIdentifier(value, CSHARP_RESERVED_WORDS), [
+            hasBody ? 'body' : '',
+            hasQuery ? 'query' : '',
+            hasHeaders ? 'headers' : '',
+        ]);
+        const pathParams = rawPathParams.map((rawName) => ({
+            rawName,
+            safeName: pathParamNames.get(rawName) || rawName,
+        }));
         const params = [];
         if (pathParams.length) {
-            params.push(...pathParams.map((p) => `string ${p}`));
+            params.push(...pathParams.map((param) => `string ${param.safeName}`));
         }
         if (hasBody) {
             if (requestBodyRequired) {
@@ -88,7 +177,10 @@ ${methods}
             params.push('Dictionary<string, string>? headers = null');
         }
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
-        const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '{$1}');
+        const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
+            const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, CSHARP_RESERVED_WORDS);
+            return `{${safeName}}`;
+        });
         const pathExpression = pathParams.length > 0 ? `$\"${pathTemplate}\"` : `\"${pathTemplate}\"`;
         const pathCall = `ApiPaths.${CSHARP_CONFIG.namingConventions.modelName(config.sdkType)}Path(${pathExpression})`;
         let call = '';
@@ -417,7 +509,7 @@ ${methods}
     {
 ${tags.map((tag) => {
                 const resolvedTagName = resolvedTagNames.get(tag) || tag;
-                return `        public static ${CSHARP_CONFIG.namingConventions.modelName(resolvedTagName)}Api ${CSHARP_CONFIG.namingConventions.propertyName(resolvedTagName)} { get; set; }`;
+                return `        public static ${CSHARP_CONFIG.namingConventions.modelName(resolvedTagName)}Api? ${CSHARP_CONFIG.namingConventions.propertyName(resolvedTagName)} { get; set; }`;
             }).join('\n')}
     }
 }
