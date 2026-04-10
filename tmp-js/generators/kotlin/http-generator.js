@@ -1,10 +1,11 @@
 import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { KOTLIN_CONFIG } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
-        const packageName = config.sdkType.toLowerCase();
+        const identity = resolveJvmSdkIdentity(config);
         const clientName = resolveSdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
@@ -12,17 +13,19 @@ export class HttpClientGenerator {
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         const commonPkg = resolveJvmCommonPackage(config);
         return [
-            this.generateHttpClient(packageName, apiKeyHeader, apiKeyUseBearer, commonPkg.importRoot),
-            this.generateSdkClient(clientName, tags, resolvedTagNames, packageName, config, commonPkg.importRoot),
+            this.generateHttpClient(identity, apiKeyHeader, apiKeyUseBearer, commonPkg.importRoot),
+            this.generateSdkClient(clientName, tags, resolvedTagNames, identity, config, commonPkg.importRoot),
         ];
     }
     generateHttpClient(packageName, apiKeyHeader, apiKeyUseBearer, commonImportRoot) {
         return {
-            path: `src/main/kotlin/com/sdkwork/${packageName}/http/HttpClient.kt`,
-            content: this.format(`package com.sdkwork.${packageName}.http
+            path: `src/main/kotlin/${packageName.packagePath}/http/HttpClient.kt`,
+            content: this.format(`package ${packageName.packageRoot}.http
 
+import com.fasterxml.jackson.core.type.TypeReference
 import ${commonImportRoot}.SdkConfig
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import okhttp3.Headers
 import okhttp3.FormBody
 import okhttp3.HttpUrl
@@ -48,7 +51,7 @@ class HttpClient(
         .readTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
         .writeTimeout(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
         .build()
-    private val mapper = ObjectMapper()
+    private val mapper = ObjectMapper().registerKotlinModule()
     private val headers = mutableMapOf<String, String>()
 
     constructor(config: SdkConfig) : this(
@@ -188,6 +191,13 @@ class HttpClient(
         return mapper.readValue(responseBody, Any::class.java)
     }
 
+    fun <T> convertValue(value: Any?, typeReference: TypeReference<T>): T? {
+        if (value == null) {
+            return null
+        }
+        return mapper.convertValue(value, typeReference)
+    }
+
     suspend fun get(path: String, params: Map<String, Any>? = null, requestHeaders: Map<String, String>? = null): Any? {
         val request = Request.Builder()
             .url(buildUrl(path, params))
@@ -303,14 +313,14 @@ class HttpClient(
             return `        ${propName} = ${className}(httpClient)`;
         }).join('\n');
         return {
-            path: `src/main/kotlin/com/sdkwork/${packageName}/${clientName}.kt`,
-            content: this.format(`package com.sdkwork.${packageName}
+            path: `src/main/kotlin/${packageName.packagePath}/${clientName}.kt`,
+            content: this.format(`package ${packageName.packageRoot}
 
 import ${commonImportRoot}.SdkConfig
-import com.sdkwork.${packageName}.http.HttpClient
+import ${packageName.packageRoot}.http.HttpClient
 ${tags.map(tag => {
                 const resolvedTagName = resolvedTagNames.get(tag) || tag;
-                return `import com.sdkwork.${packageName}.api.${KOTLIN_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
+                return `import ${packageName.packageRoot}.api.${KOTLIN_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
             }).join('\n')}
 
 class ${clientName} {

@@ -1,5 +1,7 @@
 export * from './framework/types.js';
 export * from './framework/base.js';
+export * from './framework/sdk-metadata.js';
+export * from './language-capabilities.js';
 export * from './change-impact.js';
 export * from './execution-decision.js';
 export * from './execution-handoff.js';
@@ -18,20 +20,26 @@ import { CSharpGenerator } from './generators/csharp/index.js';
 import { RustGenerator } from './generators/rust/index.js';
 import { PhpGenerator } from './generators/php/index.js';
 import { RubyGenerator } from './generators/ruby/index.js';
+import { getLanguageRegistry } from './language-registry.js';
 const generators = new Map();
 const supportedSdkTypes = ['app', 'backend', 'ai', 'custom'];
-generators.set('typescript', new TypeScriptGenerator());
-generators.set('dart', new DartGenerator());
-generators.set('python', new PythonGenerator());
-generators.set('go', new GoGenerator());
-generators.set('java', new JavaGenerator());
-generators.set('swift', new SwiftGenerator());
-generators.set('kotlin', new KotlinGenerator());
-generators.set('flutter', new FlutterGenerator());
-generators.set('csharp', new CSharpGenerator());
-generators.set('rust', new RustGenerator());
-generators.set('php', new PhpGenerator());
-generators.set('ruby', new RubyGenerator());
+const GENERATOR_FACTORIES = {
+    typescript: () => new TypeScriptGenerator(),
+    dart: () => new DartGenerator(),
+    python: () => new PythonGenerator(),
+    go: () => new GoGenerator(),
+    java: () => new JavaGenerator(),
+    swift: () => new SwiftGenerator(),
+    kotlin: () => new KotlinGenerator(),
+    flutter: () => new FlutterGenerator(),
+    csharp: () => new CSharpGenerator(),
+    rust: () => new RustGenerator(),
+    php: () => new PhpGenerator(),
+    ruby: () => new RubyGenerator(),
+};
+for (const entry of getLanguageRegistry()) {
+    generators.set(entry.language, GENERATOR_FACTORIES[entry.language]());
+}
 export function getSupportedLanguages() {
     return Array.from(generators.keys());
 }
@@ -57,15 +65,15 @@ export async function generateSdk(config, specOrInput) {
         : specOrInput;
     return generator.generate(config, spec);
 }
-export { TypeScriptGenerator };
-export { DartGenerator };
-export { PythonGenerator };
-export { GoGenerator };
-export { JavaGenerator };
-export { SwiftGenerator };
-export { KotlinGenerator };
-export { FlutterGenerator };
-export { CSharpGenerator };
-export { RustGenerator };
-export { PhpGenerator };
-export { RubyGenerator };
+export { TypeScriptGenerator } from './generators/typescript/index.js';
+export { DartGenerator } from './generators/dart/index.js';
+export { PythonGenerator } from './generators/python/index.js';
+export { GoGenerator } from './generators/go/index.js';
+export { JavaGenerator } from './generators/java/index.js';
+export { SwiftGenerator } from './generators/swift/index.js';
+export { KotlinGenerator } from './generators/kotlin/index.js';
+export { FlutterGenerator } from './generators/flutter/index.js';
+export { CSharpGenerator } from './generators/csharp/index.js';
+export { RustGenerator } from './generators/rust/index.js';
+export { PhpGenerator } from './generators/php/index.js';
+export { RubyGenerator } from './generators/ruby/index.js';

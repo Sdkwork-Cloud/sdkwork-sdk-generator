@@ -7,12 +7,13 @@ import {
   resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { KOTLIN_CONFIG, getKotlinType } from './config.js';
 
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const files: GeneratedFile[] = [];
-    const packageName = config.sdkType.toLowerCase();
+    const identity = resolveJvmSdkIdentity(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSimplifiedTagNames(tags);
     const knownModels = new Set<string>(
@@ -22,11 +23,11 @@ export class ApiGenerator {
     for (const tag of tags) {
       const group = ctx.apiGroups[tag];
       const resolvedTagName = resolvedTagNames.get(tag) || tag;
-      files.push(this.generateApiClass(tag, resolvedTagName, group.operations, packageName, config, knownModels));
+      files.push(this.generateApiClass(tag, resolvedTagName, group.operations, identity, config, knownModels));
     }
 
-    files.push(this.generatePaths(packageName, config));
-    files.push(this.generateApiIndex(tags, resolvedTagNames, packageName, config));
+    files.push(this.generatePaths(identity, config));
+    files.push(this.generateApiIndex(tags, resolvedTagNames, identity, config));
 
     return files;
   }
@@ -35,7 +36,7 @@ export class ApiGenerator {
     tag: string,
     resolvedTagName: string,
     operations: any[],
-    packageName: string,
+    identity: ReturnType<typeof resolveJvmSdkIdentity>,
     config: GeneratorConfig,
     knownModels: Set<string>
   ): GeneratedFile {
@@ -48,11 +49,12 @@ export class ApiGenerator {
       .join('\n\n');
 
     return {
-      path: `src/main/kotlin/com/sdkwork/${packageName}/api/${className}.kt`,
-      content: this.format(`package com.sdkwork.${packageName}.api
+      path: `src/main/kotlin/${identity.packagePath}/api/${className}.kt`,
+      content: this.format(`package ${identity.packageRoot}.api
 
-import com.sdkwork.${packageName}.*
-import com.sdkwork.${packageName}.http.HttpClient
+import com.fasterxml.jackson.core.type.TypeReference
+import ${identity.packageRoot}.*
+import ${identity.packageRoot}.http.HttpClient
 
 class ${className}(private val client: HttpClient) {
 
@@ -75,8 +77,9 @@ ${methods}
     const hasBody = Boolean(requestBodyInfo);
     const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
     const requestBodySchema = requestBodyInfo?.schema;
-    const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-    const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+    const contentTypeArg = requestBodyInfo?.mediaType
+      ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+      : '';
     const requestType = requestBodySchema
       ? this.ensureKnownType(getKotlinType(requestBodySchema, KOTLIN_CONFIG), knownModels)
       : 'Any';
@@ -140,21 +143,13 @@ ${methods}
       case 'post':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, params, headers, "multipart/form-data")`
-              : `client.post(${pathCall}, body, params, headers)`;
+            call = `client.post(${pathCall}, body, params, headers${contentTypeArg})`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, params, null, "multipart/form-data")`
-              : `client.post(${pathCall}, body, params)`;
+            call = `client.post(${pathCall}, body, params, null${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, null, headers, "multipart/form-data")`
-              : `client.post(${pathCall}, body, null, headers)`;
+            call = `client.post(${pathCall}, body, null, headers${contentTypeArg})`;
           } else {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, null, null, "multipart/form-data")`
-              : `client.post(${pathCall}, body)`;
+            call = `client.post(${pathCall}, body, null, null${contentTypeArg})`;
           }
         } else if (hasQuery && hasHeaders) {
           call = `client.post(${pathCall}, null, params, headers)`;
@@ -169,21 +164,13 @@ ${methods}
       case 'put':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, params, headers, "multipart/form-data")`
-              : `client.put(${pathCall}, body, params, headers)`;
+            call = `client.put(${pathCall}, body, params, headers${contentTypeArg})`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, params, null, "multipart/form-data")`
-              : `client.put(${pathCall}, body, params)`;
+            call = `client.put(${pathCall}, body, params, null${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, null, headers, "multipart/form-data")`
-              : `client.put(${pathCall}, body, null, headers)`;
+            call = `client.put(${pathCall}, body, null, headers${contentTypeArg})`;
           } else {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, null, null, "multipart/form-data")`
-              : `client.put(${pathCall}, body)`;
+            call = `client.put(${pathCall}, body, null, null${contentTypeArg})`;
           }
         } else if (hasQuery && hasHeaders) {
           call = `client.put(${pathCall}, null, params, headers)`;
@@ -209,21 +196,13 @@ ${methods}
       case 'patch':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, params, headers, "multipart/form-data")`
-              : `client.patch(${pathCall}, body, params, headers)`;
+            call = `client.patch(${pathCall}, body, params, headers${contentTypeArg})`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, params, null, "multipart/form-data")`
-              : `client.patch(${pathCall}, body, params)`;
+            call = `client.patch(${pathCall}, body, params, null${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, null, headers, "multipart/form-data")`
-              : `client.patch(${pathCall}, body, null, headers)`;
+            call = `client.patch(${pathCall}, body, null, headers${contentTypeArg})`;
           } else {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, null, null, "multipart/form-data")`
-              : `client.patch(${pathCall}, body)`;
+            call = `client.patch(${pathCall}, body, null, null${contentTypeArg})`;
           }
         } else if (hasQuery && hasHeaders) {
           call = `client.patch(${pathCall}, null, params, headers)`;
@@ -253,7 +232,8 @@ ${methods}
     }
 
     return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): ${responseType}? {
-        return ${call} as? ${responseType}
+        val raw = ${call}
+        return client.convertValue(raw, object : TypeReference<${responseType}>() {})
     }`;
   }
 
@@ -399,10 +379,10 @@ ${methods}
     return normalizedPath;
   }
 
-  private generatePaths(packageName: string, config: GeneratorConfig): GeneratedFile {
+  private generatePaths(packageName: ReturnType<typeof resolveJvmSdkIdentity>, config: GeneratorConfig): GeneratedFile {
     return {
-      path: `src/main/kotlin/com/sdkwork/${packageName}/api/ApiPaths.kt`,
-      content: this.format(`package com.sdkwork.${packageName}.api
+      path: `src/main/kotlin/${packageName.packagePath}/api/ApiPaths.kt`,
+      content: this.format(`package ${packageName.packageRoot}.api
 
 object ApiPaths {
     const val API_PREFIX = "${config.apiPrefix}"
@@ -435,7 +415,7 @@ object ApiPaths {
   private generateApiIndex(
     tags: string[],
     resolvedTagNames: Map<string, string>,
-    packageName: string,
+    packageName: ReturnType<typeof resolveJvmSdkIdentity>,
     config: GeneratorConfig
   ): GeneratedFile {
     const moduleInits = tags.map((tag) => {
@@ -446,10 +426,10 @@ object ApiPaths {
     }).join('\n');
 
     return {
-      path: `src/main/kotlin/com/sdkwork/${packageName}/api/Api.kt`,
-      content: this.format(`package com.sdkwork.${packageName}.api
+      path: `src/main/kotlin/${packageName.packagePath}/api/Api.kt`,
+      content: this.format(`package ${packageName.packageRoot}.api
 
-import com.sdkwork.${packageName}.http.HttpClient
+import ${packageName.packageRoot}.http.HttpClient
 
 /**
  * API modules for ${config.name}

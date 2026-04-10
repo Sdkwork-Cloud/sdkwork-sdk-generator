@@ -8,7 +8,7 @@ Professional SDK code generator for multiple programming languages. Generate typ
 - **Type-safe**: Generate strongly typed models and API clients
 - **Modular Architecture**: Each generator has independent sub-modules for models, APIs, HTTP client, build config, and docs
 - **README System**: Every generated SDK always includes a top-level `README.md`
-- **Unified Metadata Manifest**: Every generated SDK also includes `sdkwork-sdk.json` for stable multi-language version governance
+- **Unified Metadata Manifest**: Every generated SDK also includes `sdkwork-sdk.json` with schema version, SDK identity, machine-readable capability flags, and generated-vs-scaffold ownership boundaries
 - **Safe Regeneration**: Generated ownership is tracked in `.sdkwork/sdkwork-generator-manifest.json`, each run writes `.sdkwork/sdkwork-generator-changes.json`, apply mode also writes a versioned `.sdkwork/sdkwork-generator-report.json`, stale generated files are pruned safely, and custom code is preserved
 - **Impact-Aware Automation**: Every generation run classifies changed files into machine-readable impact areas so verification and release automation can react to real change scope
 - **Unified Client Naming**: `Sdkwork{SdkType}Client` across all languages (for example `SdkworkAiClient`)
@@ -74,7 +74,7 @@ sdkgen init -o ./sdk -n MySDK -l typescript -t backend
 The init command creates only the stable workspace boundary:
 
 - `README.md` with the next `sdkgen generate` command
-- `sdkwork-sdk.json` with SDK metadata
+- `sdkwork-sdk.json` with SDK identity, capabilities, and ownership boundaries
 - `custom/README.md` for hand-written extensions
 - `.sdkwork/` control-plane artifacts so `sdkgen inspect` stays healthy
 
@@ -118,6 +118,7 @@ Supported inspect gate values:
 Every generated SDK now follows the same regeneration rules:
 
 - Generator-owned files are tracked in `.sdkwork/sdkwork-generator-manifest.json`
+- `sdkwork-sdk.json` also declares the SDK schema version, language capabilities, and the stable generated/scaffold boundary used by regeneration-safe workflows
 - Each generation run writes `.sdkwork/sdkwork-generator-changes.json` with created, updated, unchanged, deleted, scaffolded, preserved, and backed-up file lists
 - The change summary also includes classified impact areas such as `api-surface`, `models`, `runtime`, `build-metadata`, `publish-workflow`, `documentation`, and `custom-scaffold`
 - The change summary now also persists the resolved verification plan so CI and agent workflows can continue from a single machine-readable control-plane artifact
@@ -164,6 +165,12 @@ import { readGenerateControlPlaneSnapshot } from '@sdkwork/sdk-generator/node/co
 ```
 
 The returned snapshot includes parsed artifacts, structured `issues`, and a unified `evaluation` with `status`, `recommendedAction`, and `summary` so orchestration layers can decide whether to `generate`, `review`, `apply`, `verify`, `complete`, or `skip`.
+
+For downstream agents that want to parse the standardized SDK metadata contract itself:
+
+```typescript
+import { parseSdkMetadataManifest } from '@sdkwork/sdk-generator';
+```
 
 For programmatic Node.js callers that want to initialize a regeneration-safe SDK workspace before generation:
 
@@ -224,6 +231,12 @@ import { buildExecutionHandoff } from '@sdkwork/sdk-generator';
 sdkgen languages
 ```
 
+The `languages` command can also emit the full machine-readable capability catalog:
+
+```bash
+sdkgen languages --json
+```
+
 | Language | Flag | Description |
 |----------|------|-------------|
 | TypeScript | `typescript` | TypeScript/JavaScript with full type support |
@@ -238,6 +251,31 @@ sdkgen languages
 | Rust | `rust` | Rust 1.75+ with reqwest and serde |
 | PHP | `php` | PHP 8.1+ with Composer and Guzzle |
 | Ruby | `ruby` | Ruby 3.0+ with gem packaging and Faraday |
+
+### Language Capability Matrix
+
+Programmatic callers can read the same standardized capability profile used by `sdkwork-sdk.json`:
+
+```typescript
+import { getLanguageCapabilities, getLanguageCapability } from '@sdkwork/sdk-generator';
+```
+
+| Language | Generated Tests | README | Custom Scaffold | Publish Workflow | Distinct Build Step |
+|----------|-----------------|--------|-----------------|------------------|---------------------|
+| TypeScript | Yes | Yes | Yes | Yes | Yes |
+| Dart | Yes | Yes | Yes | Yes | No |
+| Python | Yes | Yes | Yes | Yes | No |
+| Go | Yes | Yes | Yes | Yes | No |
+| Java | Yes | Yes | Yes | Yes | No |
+| Swift | Yes | Yes | Yes | Yes | No |
+| Kotlin | Yes | Yes | Yes | Yes | No |
+| Flutter | Yes | Yes | Yes | Yes | No |
+| C# | Yes | Yes | Yes | Yes | No |
+| Rust | Yes | Yes | Yes | Yes | Yes |
+| PHP | Yes | Yes | Yes | Yes | No |
+| Ruby | Yes | Yes | Yes | Yes | No |
+
+This matrix is intentionally truthful: TypeScript, Dart, Rust, Python, Go, Java, Swift, Kotlin, Flutter, C#, PHP, and Ruby currently support generator-produced smoke tests, while every language supports standardized README generation, regeneration-safe `custom/` scaffolding, and the unified publish workflow.
 
 ## Programmatic Usage
 

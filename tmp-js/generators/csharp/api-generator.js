@@ -140,8 +140,9 @@ ${methods}
         const hasBody = Boolean(requestBodyInfo);
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestBodySchema = requestBodyInfo?.schema;
-        const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-        const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+        const contentTypeArg = requestBodyInfo?.mediaType
+            ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+            : '';
         const requestType = requestBodySchema
             ? this.ensureKnownType(getCSharpType(requestBodySchema, CSHARP_CONFIG), knownModels)
             : 'object';
@@ -202,24 +203,16 @@ ${methods}
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `await _client.PostAsync<${responseType}>(${pathCall}, body, query, headers, "multipart/form-data")`
-                            : `await _client.PostAsync<${responseType}>(${pathCall}, body, query, headers)`;
+                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, query, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `await _client.PostAsync<${responseType}>(${pathCall}, body, query, null, "multipart/form-data")`
-                            : `await _client.PostAsync<${responseType}>(${pathCall}, body, query)`;
+                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, query, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `await _client.PostAsync<${responseType}>(${pathCall}, body, null, headers, "multipart/form-data")`
-                            : `await _client.PostAsync<${responseType}>(${pathCall}, body, null, headers)`;
+                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, null, headers${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `await _client.PostAsync<${responseType}>(${pathCall}, body, null, null, "multipart/form-data")`
-                            : `await _client.PostAsync<${responseType}>(${pathCall}, body)`;
+                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -238,24 +231,16 @@ ${methods}
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `await _client.PutAsync<${responseType}>(${pathCall}, body, query, headers, "multipart/form-data")`
-                            : `await _client.PutAsync<${responseType}>(${pathCall}, body, query, headers)`;
+                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, query, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `await _client.PutAsync<${responseType}>(${pathCall}, body, query, null, "multipart/form-data")`
-                            : `await _client.PutAsync<${responseType}>(${pathCall}, body, query)`;
+                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, query, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `await _client.PutAsync<${responseType}>(${pathCall}, body, null, headers, "multipart/form-data")`
-                            : `await _client.PutAsync<${responseType}>(${pathCall}, body, null, headers)`;
+                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, null, headers${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `await _client.PutAsync<${responseType}>(${pathCall}, body, null, null, "multipart/form-data")`
-                            : `await _client.PutAsync<${responseType}>(${pathCall}, body)`;
+                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -288,24 +273,16 @@ ${methods}
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, headers, "multipart/form-data")`
-                            : `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, headers)`;
+                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, null, "multipart/form-data")`
-                            : `await _client.PatchAsync<${responseType}>(${pathCall}, body, query)`;
+                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, headers, "multipart/form-data")`
-                            : `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, headers)`;
+                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, headers${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, null, "multipart/form-data")`
-                            : `await _client.PatchAsync<${responseType}>(${pathCall}, body)`;
+                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {

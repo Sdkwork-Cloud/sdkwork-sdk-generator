@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { getSupportedLanguages, getSupportedSdkTypes } from './index.js';
+import { formatLanguageCatalogOutput } from './cli-languages.js';
 import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { formatInspectFailure, formatInspectSuccess, resolveInspectGate, runInspectCommand, } from './cli-inspect.js';
@@ -153,22 +154,23 @@ program
         process.exit(1);
     }
 });
-const printLanguages = () => {
-    console.log('\nSupported languages:\n');
-    getSupportedLanguages().forEach((lang) => console.log(`   - ${lang}`));
-    console.log('');
-};
 program
     .command('list')
     .description('List supported languages')
-    .action(() => {
-    printLanguages();
+    .option('--json', 'Emit machine-readable JSON output')
+    .action((options) => {
+    process.stdout.write(formatLanguageCatalogOutput({
+        json: options.json,
+    }));
 });
 program
     .command('languages')
     .description('List supported languages')
-    .action(() => {
-    printLanguages();
+    .option('--json', 'Emit machine-readable JSON output')
+    .action((options) => {
+    process.stdout.write(formatLanguageCatalogOutput({
+        json: options.json,
+    }));
 });
 program
     .command('inspect')

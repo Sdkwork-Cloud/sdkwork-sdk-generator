@@ -1,8 +1,9 @@
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { KOTLIN_CONFIG, getKotlinType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
         const files = [];
-        const packageName = config.sdkType.toLowerCase();
+        const packageName = resolveJvmSdkIdentity(config);
         for (const [name, schema] of Object.entries(ctx.schemas)) {
             files.push(this.generateDataClass(name, schema, packageName));
         }
@@ -17,8 +18,8 @@ export class ModelGenerator {
             return `    val ${fieldName}: ${fieldType}? = null`;
         }).join(',\n');
         return {
-            path: `src/main/kotlin/com/sdkwork/${packageName}/${className}.kt`,
-            content: this.format(`package com.sdkwork.${packageName}
+            path: `src/main/kotlin/${packageName.packagePath}/${className}.kt`,
+            content: this.format(`package ${packageName.packageRoot}
 
 data class ${className}(
 ${fields}

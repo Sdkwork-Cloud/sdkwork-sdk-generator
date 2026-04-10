@@ -1,7 +1,7 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { TYPESCRIPT_CONFIG, getTypeScriptType } from './config.js';
 import { buildTypeScriptTagMetadata } from './tag-metadata.js';
+import { resolveTypeScriptMethodNames } from './usage-planner.js';
 const TYPESCRIPT_RESERVED_WORDS = new Set([
     'abstract',
     'any',
@@ -158,6 +158,9 @@ export function create${className}(client: HttpClient): ${className} {
             : requestBodySchema
                 ? getTypeScriptType(requestBodySchema, TYPESCRIPT_CONFIG, knownModels)
                 : undefined;
+        const contentTypeArg = requestBodyInfo?.mediaType
+            ? `, '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+            : '';
         const responseSchema = this.extractResponseSchema(op);
         const responseType = responseSchema
             ? getTypeScriptType(responseSchema, TYPESCRIPT_CONFIG, knownModels)
@@ -214,16 +217,16 @@ export function create${className}(client: HttpClient): ${className} {
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body, params, headers)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body, params)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, params, undefined${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, headers)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg})`;
                     }
                     else {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, undefined${contentTypeArg})`;
                     }
                 }
                 else {
@@ -244,16 +247,16 @@ export function create${className}(client: HttpClient): ${className} {
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body, params, headers)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body, params)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, params, undefined${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, headers)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg})`;
                     }
                     else {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, undefined${contentTypeArg})`;
                     }
                 }
                 else {
@@ -288,16 +291,16 @@ export function create${className}(client: HttpClient): ${className} {
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params, headers)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params, undefined${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, headers)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg})`;
                     }
                     else {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, undefined${contentTypeArg})`;
                     }
                 }
                 else {
@@ -435,23 +438,7 @@ export function create${className}(client: HttpClient): ${className} {
         }
     }
     resolveMethodNames(operations, tag) {
-        return resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
-    }
-    generateOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return TYPESCRIPT_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-        };
-        return `${actionMap[method] || method}${TYPESCRIPT_CONFIG.namingConventions.modelName(resource)}`;
+        return resolveTypeScriptMethodNames(tag, operations);
     }
     extractPathParams(path) {
         const matches = path.match(/\{([^}]+)\}/g) || [];
@@ -493,20 +480,38 @@ export abstract class BaseApi {
     return this.http.get<T>(\`\${this.basePath}\${path}\`, params, headers);
   }
 
-  protected async post<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.http.post<T>(\`\${this.basePath}\${path}\`, body, params, headers);
+  protected async post<T>(
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.http.post<T>(\`\${this.basePath}\${path}\`, body, params, headers, contentType);
   }
 
-  protected async put<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.http.put<T>(\`\${this.basePath}\${path}\`, body, params, headers);
+  protected async put<T>(
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.http.put<T>(\`\${this.basePath}\${path}\`, body, params, headers, contentType);
   }
 
   protected async delete<T>(path: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
     return this.http.delete<T>(\`\${this.basePath}\${path}\`, params, headers);
   }
 
-  protected async patch<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.http.patch<T>(\`\${this.basePath}\${path}\`, body, params, headers);
+  protected async patch<T>(
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.http.patch<T>(\`\${this.basePath}\${path}\`, body, params, headers, contentType);
   }
 }
 `),

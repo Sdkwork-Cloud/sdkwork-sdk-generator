@@ -26,6 +26,12 @@ import type { RequestOptions, QueryParams } from '${commonImportPath}';
 import type { AuthTokenManager } from '${commonImportPath}';
 import { BaseHttpClient, withRetry } from '${commonImportPath}';
 
+type HttpRequestOptions = RequestOptions & {
+  body?: unknown;
+  headers?: Record<string, string>;
+  contentType?: string;
+};
+
 export class HttpClient extends BaseHttpClient {
   private static readonly API_KEY_HEADER = '${apiKeyHeader}';
   private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
@@ -45,6 +51,79 @@ export class HttpClient extends BaseHttpClient {
     self.config = self.config || {};
     self.config.headers = self.config.headers || {};
     return self.config.headers;
+  }
+
+  private buildRequestHeaders(
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Record<string, string> | undefined {
+    const mergedHeaders = {
+      ...(headers ?? {}),
+    };
+
+    if (contentType && contentType.toLowerCase() !== 'multipart/form-data') {
+      mergedHeaders['Content-Type'] = contentType;
+    }
+
+    return Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined;
+  }
+
+  private buildRequestBody(body: unknown, contentType?: string): unknown {
+    if (body == null) {
+      return body;
+    }
+
+    const normalizedContentType = (contentType ?? '').toLowerCase();
+    if (normalizedContentType === 'application/x-www-form-urlencoded') {
+      return this.encodeFormBody(body);
+    }
+
+    return body;
+  }
+
+  private encodeFormBody(body: unknown): string {
+    if (body instanceof URLSearchParams) {
+      return body.toString();
+    }
+    if (typeof body === 'string') {
+      return body;
+    }
+
+    const params = new URLSearchParams();
+    if (body instanceof Map) {
+      for (const [key, value] of body.entries()) {
+        this.appendFormValue(params, String(key), value);
+      }
+      return params.toString();
+    }
+    if (typeof body === 'object') {
+      for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+        this.appendFormValue(params, key, value);
+      }
+      return params.toString();
+    }
+
+    params.append('value', String(body));
+    return params.toString();
+  }
+
+  private appendFormValue(params: URLSearchParams, key: string, value: unknown): void {
+    if (value == null) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => this.appendFormValue(params, key, item));
+      return;
+    }
+    if (value instanceof Date) {
+      params.append(key, value.toISOString());
+      return;
+    }
+    if (typeof value === 'object') {
+      params.append(key, JSON.stringify(value));
+      return;
+    }
+    params.append(key, String(value));
   }
 
   setApiKey(apiKey: string): void {
@@ -97,16 +176,19 @@ export class HttpClient extends BaseHttpClient {
     this.getInternalAuthConfig().tokenManager = manager;
   }
 
-  async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  async request<T>(path: string, options: HttpRequestOptions = {}): Promise<T> {
     const execute = (this as any).execute;
     if (typeof execute !== 'function') {
       throw new Error('BaseHttpClient execute method is not available');
     }
+    const { body, headers, contentType, method = 'GET', ...rest } = options;
     return withRetry(
       () => execute.call(this, { 
         url: path, 
-        method: options.method ?? 'GET', 
-        ...options 
+        method,
+        ...rest,
+        body: this.buildRequestBody(body, contentType),
+        headers: this.buildRequestHeaders(headers, body == null ? undefined : contentType),
       }),
       { maxRetries: 3 }
     );
@@ -116,20 +198,38 @@ export class HttpClient extends BaseHttpClient {
     return this.request<T>(path, { method: 'GET', params, headers });
   }
 
-  async post<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>(path, { method: 'POST', body, params, headers });
+  async post<T>(
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.request<T>(path, { method: 'POST', body, params, headers, contentType });
   }
 
-  async put<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>(path, { method: 'PUT', body, params, headers });
+  async put<T>(
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.request<T>(path, { method: 'PUT', body, params, headers, contentType });
   }
 
   async delete<T>(path: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
     return this.request<T>(path, { method: 'DELETE', params, headers });
   }
 
-  async patch<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>(path, { method: 'PATCH', body, params, headers });
+  async patch<T>(
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.request<T>(path, { method: 'PATCH', body, params, headers, contentType });
   }
 }
 

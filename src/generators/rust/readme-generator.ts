@@ -6,9 +6,9 @@ import {
   buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { RUST_CONFIG, getRustCrateName, getRustPackageName } from './config.js';
+import { getRustCrateName, getRustPackageName } from './config.js';
+import { RustUsagePlanner, renderRustUsageSnippet, type RustUsagePlan } from './usage-planner.js';
 
 export class ReadmeGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
@@ -16,24 +16,19 @@ export class ReadmeGenerator {
     const packageName = getRustPackageName(config);
     const crateName = getRustCrateName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
-    const allGroups = Object.entries(ctx.apiGroups);
-    const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-    const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-      || allGroups[0]?.[0];
-    const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-    const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-    const quickStartModule = quickStartTag
-      ? RUST_CONFIG.namingConventions.propertyName(resolvedTagNames.get(quickStartTag) || quickStartTag)
-      : 'example';
-    const quickStartMethod = quickStartOperation
-      ? this.generateOperationId(
-        quickStartOperation.method,
-        quickStartOperation.path,
-        quickStartOperation,
-        quickStartTag || ''
-      )
-      : 'list';
+    const planner = new RustUsagePlanner(ctx);
+    const quickStartPlan = planner.selectQuickStartPlan();
+    const quickStartImports = this.buildSupportImports(crateName, quickStartPlan);
+    const quickStartSnippet = quickStartPlan
+      ? renderRustUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+      : 'let result = client.example().list().await?;';
+    const quickStartOutput = quickStartPlan?.hasReturnValue
+      ? '\n    println!("{result:?}");'
+      : '\n    println!("Request completed");';
+    const errorHandlingImports = this.buildSupportImports(crateName, quickStartPlan);
+    const errorHandlingSnippet = quickStartPlan
+      ? renderRustUsageSnippet(quickStartPlan, 'readme', { assignResult: false })
+      : 'client.example().list().await?;';
     const readmeTitle = buildLanguageReadmeTitle(config.name, 'Rust');
     const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
     const authSection = buildMutuallyExclusiveAuthSection({
@@ -52,11 +47,8 @@ client.set_access_token("your-access-token");
       accessTokenCall: 'set_access_token(...)',
     });
     const publishSection = buildPublishSection('rust');
-    const modules = tags.map((tag) => {
-      const resolvedTagName = resolvedTagNames.get(tag) || tag;
-      const getter = RUST_CONFIG.namingConventions.propertyName(resolvedTagName);
-      return `- \`client.${getter}()\` - ${tag} API`;
-    }).join('\n');
+    const modules = tags.map((tag) => `- \`client.${planner.getModuleName(tag)}()\` - ${tag} API`).join('\n');
+    const examples = this.generateExamples(ctx, crateName, planner);
 
     return {
       path: 'README.md',
@@ -74,14 +66,14 @@ cargo add ${packageName}
 
 \`\`\`rust
 use ${crateName}::{${clientName}, SdkworkConfig};
+${quickStartImports}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = ${clientName}::new(SdkworkConfig::new("${config.baseUrl}"))?;
     client.set_api_key("your-api-key");
 
-    let result = client.${quickStartModule}().${quickStartMethod}().await?;
-    println!("{result:?}");
+${this.indent(quickStartSnippet, 4)}${quickStartOutput}
     Ok(())
 }
 \`\`\`
@@ -99,11 +91,25 @@ client.set_header("X-Custom-Header", "value");
 
 ${modules}
 
+## Usage Examples
+
+${examples}
+
 ## Error Handling
 
 \`\`\`rust
-match client.${quickStartModule}().${quickStartMethod}().await {
-    Ok(result) => println!("{result:?}"),
+use ${crateName}::{${clientName}, SdkworkConfig};
+${errorHandlingImports}
+
+let client = ${clientName}::new(SdkworkConfig::new("${config.baseUrl}"))?;
+
+let outcome: Result<(), _> = async {
+${this.indent(errorHandlingSnippet, 4)}
+    Ok(())
+}.await;
+
+match outcome {
+    Ok(()) => println!("request completed"),
     Err(error) => eprintln!("request failed: {error}"),
 }
 \`\`\`
@@ -119,48 +125,52 @@ ${config.license || 'MIT'}
     };
   }
 
-  private selectQuickStartOperation(operations: any[]): any | undefined {
-    if (!Array.isArray(operations) || operations.length === 0) {
-      return undefined;
-    }
-    const getWithoutPathParam = operations.find(
-      (op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{')
-    );
-    if (getWithoutPathParam) {
-      return getWithoutPathParam;
-    }
-    return operations[0];
-  }
-
-  private generateOperationId(method: string, path: string, op: any, tag: string): string {
-    if (op.operationId) {
-      const normalized = normalizeOperationId(op.operationId);
-      return toSnakeCase(stripTagPrefixFromOperationId(normalized, tag));
-    }
-
-    const pathParts = path.split('/').filter(Boolean);
-    const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-    const actionMap: Record<string, string> = {
-      get: path.includes('{') ? 'get' : 'list',
-      post: 'create',
-      put: 'update',
-      patch: 'patch',
-      delete: 'delete',
-    };
-
-    return toSnakeCase(`${actionMap[method] || method}_${resource}`);
-  }
-
   private format(content: string): string {
     return `${content.trim()}\n`;
   }
-}
 
-function toSnakeCase(value: string): string {
-  return String(value || '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/[^a-zA-Z0-9]+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .toLowerCase();
+  private buildSupportImports(crateName: string, plan: RustUsagePlan | undefined): string {
+    if (!plan) {
+      return '';
+    }
+
+    const lines: string[] = [];
+    if (plan.needsModelImport) {
+      lines.push(`use ${crateName}::*;`);
+    }
+    if (plan.needsHashMapImport) {
+      lines.push('use std::collections::HashMap;');
+    }
+
+    return lines.length > 0 ? `${lines.join('\n')}\n` : '';
+  }
+
+  private generateExamples(ctx: SchemaContext, crateName: string, planner: RustUsagePlanner): string {
+    const examples: string[] = [];
+
+    for (const tag of Object.keys(ctx.apiGroups)) {
+      const plan = planner.selectPlanForTag(tag);
+      if (!plan) {
+        continue;
+      }
+
+      const supportImports = this.buildSupportImports(crateName, plan);
+      const outputLine = plan.hasReturnValue
+        ? '\nprintln!("{result:?}");'
+        : '\nprintln!("Request completed");';
+      examples.push(`### ${tag}
+
+\`\`\`rust
+${supportImports}// ${plan.operation.summary || `${String(plan.operation.method || '').toUpperCase()} ${plan.operation.path}`}
+${renderRustUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue })}${outputLine}
+\`\`\``);
+    }
+
+    return examples.join('\n\n') || 'No examples available.';
+  }
+
+  private indent(content: string, spaces: number): string {
+    const prefix = ' '.repeat(Math.max(0, spaces));
+    return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
+  }
 }

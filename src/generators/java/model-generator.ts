@@ -1,20 +1,21 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 
 export class ModelGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const files: GeneratedFile[] = [];
-    const packageName = config.sdkType.toLowerCase();
+    const identity = resolveJvmSdkIdentity(config);
     
     for (const [name, schema] of Object.entries(ctx.schemas)) {
-      files.push(this.generateClass(name, schema, packageName));
+      files.push(this.generateClass(name, schema, identity));
     }
 
     return files;
   }
 
-  private generateClass(name: string, schema: any, packageName: string): GeneratedFile {
+  private generateClass(name: string, schema: any, packageName: ReturnType<typeof resolveJvmSdkIdentity>): GeneratedFile {
     const className = JAVA_CONFIG.namingConventions.modelName(name);
     const props = schema.properties || {};
     const imports = new Set<string>();
@@ -42,8 +43,8 @@ export class ModelGenerator {
     }).join('\n');
 
     return {
-      path: `src/main/java/com/sdkwork/${packageName}/model/${className}.java`,
-      content: this.format(`package com.sdkwork.${packageName}.model;
+      path: `src/main/java/${packageName.packagePath}/model/${className}.java`,
+      content: this.format(`package ${packageName.packageRoot}.model;
 
 ${this.renderImports(imports)}
 public class ${className} {

@@ -24,15 +24,32 @@ ${models.join('\n\n')}
   private generateStruct(name: string, schema: any): string {
     const structName = SWIFT_CONFIG.namingConventions.modelName(name);
     const props = schema.properties || {};
-    
-    const fields = Object.entries(props).map(([propName, propSchema]: [string, any]) => {
+    const entries = Object.entries(props);
+
+    const fields = entries.map(([propName, propSchema]: [string, any]) => {
       const fieldName = SWIFT_CONFIG.namingConventions.propertyName(propName);
       const fieldType = getSwiftType(propSchema, SWIFT_CONFIG);
-      return `    let ${fieldName}: ${fieldType}?`;
+      return `    public let ${fieldName}: ${fieldType}?`;
     }).join('\n');
 
-    return `struct ${structName}: Codable {
-${fields}
+    const initializer = entries.length === 0
+      ? '    public init() {}'
+      : [
+        `    public init(${entries.map(([propName, propSchema]: [string, any]) => {
+          const fieldName = SWIFT_CONFIG.namingConventions.propertyName(propName);
+          const fieldType = getSwiftType(propSchema, SWIFT_CONFIG);
+          return `${fieldName}: ${fieldType}? = nil`;
+        }).join(', ')}) {`,
+        ...entries.map(([propName]: [string, any]) => {
+          const fieldName = SWIFT_CONFIG.namingConventions.propertyName(propName);
+          return `        self.${fieldName} = ${fieldName}`;
+        }),
+        '    }',
+      ].join('\n');
+
+    return `public struct ${structName}: Codable {
+${fields}${fields ? '\n\n' : ''}
+${initializer}
 }`;
   }
 

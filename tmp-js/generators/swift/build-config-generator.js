@@ -1,5 +1,11 @@
 import { SWIFT_CONFIG } from './config.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
+export function resolveSwiftPackageTargetName(config) {
+    return `${SWIFT_CONFIG.namingConventions.modelName(config.sdkType)}SDK`;
+}
+export function resolveSwiftTestTargetName(config) {
+    return `${resolveSwiftPackageTargetName(config)}Tests`;
+}
 export class BuildConfigGenerator {
     generate(config) {
         return [
@@ -7,8 +13,17 @@ export class BuildConfigGenerator {
         ];
     }
     generatePackageSwift(config) {
-        const sdkName = `${SWIFT_CONFIG.namingConventions.modelName(config.sdkType)}SDK`;
+        const sdkName = resolveSwiftPackageTargetName(config);
+        const testTargetName = resolveSwiftTestTargetName(config);
         const commonPkg = resolveSwiftCommonPackage(config);
+        const testTarget = config.generateTests === true
+            ? `,
+        .testTarget(
+            name: "${testTargetName}",
+            dependencies: ["${sdkName}", "${commonPkg.productName}"],
+            path: "Tests/${testTargetName}"
+        )`
+            : '';
         return {
             path: 'Package.swift',
             content: this.format(`// swift-tools-version:5.7
@@ -34,7 +49,7 @@ let package = Package(
             name: "${sdkName}",
             dependencies: ["${commonPkg.productName}"],
             path: "Sources"
-        ),
+        )${testTarget}
     ]
 )
 `),

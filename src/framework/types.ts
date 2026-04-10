@@ -184,6 +184,48 @@ export type GeneratedFileOwnership = 'generated' | 'scaffold';
 
 export type GeneratedFileOverwriteStrategy = 'always' | 'if-missing';
 
+export interface LanguageCapability {
+  language: Language;
+  supportsGeneratedTests: boolean;
+  supportsReadme: boolean;
+  supportsCustomScaffold: boolean;
+  supportsPublishWorkflow: boolean;
+  hasDistinctBuildStep: boolean;
+}
+
+export interface SdkMetadataCapabilities {
+  supportsGeneratedTests: boolean;
+  supportsReadme: boolean;
+  supportsCustomScaffold: boolean;
+  supportsPublishWorkflow: boolean;
+  hasDistinctBuildStep: boolean;
+}
+
+export interface SdkMetadataGeneration {
+  readme: boolean;
+  tests: boolean;
+}
+
+export interface SdkMetadataOwnership {
+  generatedOwnership: GeneratedFileOwnership;
+  scaffoldOwnership: GeneratedFileOwnership;
+  scaffoldRoots: string[];
+  stateRoots: string[];
+}
+
+export interface SdkMetadataManifest {
+  schemaVersion: 1;
+  name: string;
+  version: string;
+  language: Language;
+  sdkType: SdkType;
+  packageName: string | null;
+  generator: string;
+  capabilities: SdkMetadataCapabilities;
+  generation: SdkMetadataGeneration;
+  ownership: SdkMetadataOwnership;
+}
+
 export interface GeneratorResult {
   files: GeneratedFile[];
   errors: GeneratorError[];

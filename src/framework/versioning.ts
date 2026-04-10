@@ -2,8 +2,8 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 
 import type { Language, SdkType } from './types.js';
+import { parseSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.js';
 
-const SDKWORK_METADATA_FILE = 'sdkwork-sdk.json';
 const SUPPORTED_WORKSPACE_LANGUAGES = [
   'typescript',
   'dart',
@@ -142,6 +142,10 @@ function readVersionFromSdkworkMetadata(projectDir: string): string | undefined 
     const payload = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
       version?: string;
     };
+    const parsed = parseSdkMetadataManifest(payload);
+    if (parsed) {
+      return normalizeVersion(parsed.version);
+    }
     return normalizeVersion(payload.version);
   } catch {
     return undefined;

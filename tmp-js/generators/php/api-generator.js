@@ -152,6 +152,9 @@ ${returnLine}
         if (type === 'array') {
             return required ? 'array $body' : '?array $body = null';
         }
+        if (isTypedPhpScalar(type)) {
+            return required ? `${type} $body` : `?${type} $body = null`;
+        }
         return required ? 'mixed $body' : 'mixed $body = null';
     }
     resolveReturnType(op, responseSchema) {
@@ -164,6 +167,9 @@ ${returnLine}
         const baseType = getPhpType(responseSchema, PHP_CONFIG);
         if (baseType === 'array') {
             return 'array';
+        }
+        if (isTypedPhpScalar(baseType)) {
+            return baseType;
         }
         if (baseType === 'mixed') {
             return this.isVoidResponse(op) ? 'void' : 'mixed';
@@ -446,4 +452,10 @@ function escapePhpString(value) {
 }
 function sanitizeDocComment(value) {
     return String(value || '').replace(/\*\//g, '* /').trim();
+}
+function isTypedPhpScalar(type) {
+    return type === 'string'
+        || type === 'int'
+        || type === 'float'
+        || type === 'bool';
 }

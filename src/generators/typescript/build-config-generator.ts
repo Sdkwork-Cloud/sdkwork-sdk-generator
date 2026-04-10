@@ -18,6 +18,16 @@ export class BuildConfigGenerator {
     const trimmedName = (config.name || '').trim();
     const inferredDescription = /sdk$/i.test(trimmedName) ? trimmedName : `${trimmedName} SDK`;
     
+    const scripts: Record<string, string> = {
+      build: 'tsc --emitDeclarationOnly && vite build',
+      dev: 'vite build --watch',
+      prepublishOnly: 'npm run build',
+    };
+
+    if (config.generateTests === true) {
+      scripts.test = 'npm run build && node --test ./test/**/*.test.mjs';
+    }
+
     const pkg = {
       name: pkgName,
       version: config.version,
@@ -36,11 +46,7 @@ export class BuildConfigGenerator {
           require: './dist/index.cjs',
         },
       },
-      scripts: {
-        build: 'tsc --emitDeclarationOnly && vite build',
-        dev: 'vite build --watch',
-        prepublishOnly: 'npm run build',
-      },
+      scripts,
       dependencies: {
         [commonPkg.dependencyName]: commonPkg.dependencyVersion,
       },

@@ -6,6 +6,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { ReadmeGenerator } from './readme-generator.js';
+import { TestGenerator } from './test-generator.js';
 import { generatePublishBinScripts, generateTypeScriptBuildBinScripts } from '../../framework/publish.js';
 
 export class TypeScriptGenerator extends BaseGenerator {
@@ -14,6 +15,7 @@ export class TypeScriptGenerator extends BaseGenerator {
   private httpClientGenerator: HttpClientGenerator;
   private buildConfigGenerator: BuildConfigGenerator;
   private readmeGenerator: ReadmeGenerator;
+  private testGenerator: TestGenerator;
 
   constructor() {
     super(TYPESCRIPT_CONFIG);
@@ -22,6 +24,7 @@ export class TypeScriptGenerator extends BaseGenerator {
     this.httpClientGenerator = new HttpClientGenerator();
     this.buildConfigGenerator = new BuildConfigGenerator();
     this.readmeGenerator = new ReadmeGenerator();
+    this.testGenerator = new TestGenerator();
   }
 
   generateModels(ctx: SchemaContext): GeneratedFile[] {
@@ -51,7 +54,15 @@ export class TypeScriptGenerator extends BaseGenerator {
     return this.readmeGenerator.generate(ctx, config);
   }
 
+  protected generateTests(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
+    return this.testGenerator.generate(ctx, config);
+  }
+
   protected supportsHeaderCookieParameters(): boolean {
+    return true;
+  }
+
+  protected preservesNamedNonObjectSchemas(): boolean {
     return true;
   }
 
@@ -59,7 +70,11 @@ export class TypeScriptGenerator extends BaseGenerator {
     if (!Array.isArray(mediaTypes) || mediaTypes.length === 0) {
       return false;
     }
-    return mediaTypes.every((mediaType) => mediaType.toLowerCase() === 'multipart/form-data');
+    const supported = new Set([
+      'multipart/form-data',
+      'application/x-www-form-urlencoded',
+    ]);
+    return mediaTypes.every((mediaType) => supported.has(mediaType.toLowerCase()));
   }
 }
 
@@ -69,3 +84,4 @@ export { ApiGenerator } from './api-generator.js';
 export { HttpClientGenerator } from './http-generator.js';
 export { BuildConfigGenerator } from './build-config-generator.js';
 export { ReadmeGenerator } from './readme-generator.js';
+export { TestGenerator } from './test-generator.js';

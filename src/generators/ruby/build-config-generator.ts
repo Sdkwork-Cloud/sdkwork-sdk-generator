@@ -4,10 +4,14 @@ import { getRubyGemName, getRubyRootRequirePath } from './config.js';
 
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
-    return [
+    const files = [
       this.generateGemspec(config),
       this.generateGemfile(),
     ];
+    if (config.generateTests === true) {
+      files.push(this.generateRakefile());
+    }
+    return files;
   }
 
   private generateGemspec(config: GeneratorConfig): GeneratedFile {
@@ -30,7 +34,9 @@ Gem::Specification.new do |spec|
   spec.files = Dir.glob('lib/**/*') + ['README.md', '${escapeRubyString(gemName)}.gemspec']
   spec.require_paths = ['lib']
   spec.add_dependency 'faraday', '~> 2.9'
-  spec.metadata['homepage_uri'] = 'https://github.com/sdkwork/spring-ai-plus'
+${config.generateTests === true
+  ? "  spec.add_development_dependency 'minitest', '~> 5.22'\n  spec.add_development_dependency 'rake', '~> 13.2'\n"
+  : ''}  spec.metadata['homepage_uri'] = 'https://github.com/sdkwork/spring-ai-plus'
   spec.metadata['source_code_uri'] = 'https://github.com/sdkwork/spring-ai-plus'
 end
 `),
@@ -48,6 +54,23 @@ gemspec
 `),
       language: 'ruby',
       description: 'Gemfile',
+    };
+  }
+
+  private generateRakefile(): GeneratedFile {
+    return {
+      path: 'Rakefile',
+      content: this.format(`require 'rake/testtask'
+
+Rake::TestTask.new(:test) do |test|
+  test.libs << 'test'
+  test.pattern = 'test/**/*_test.rb'
+end
+
+task default: :test
+`),
+      language: 'ruby',
+      description: 'Rake test task',
     };
   }
 

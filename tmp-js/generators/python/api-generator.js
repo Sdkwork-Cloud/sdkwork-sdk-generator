@@ -65,7 +65,8 @@ ${methods}
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestBodySchema = requestBodyInfo?.schema;
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-        const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+        const useDataArgument = requestBodyMediaType === 'multipart/form-data'
+            || requestBodyMediaType === 'application/x-www-form-urlencoded';
         const requestType = requestBodySchema
             ? getPythonType(requestBodySchema, PYTHON_CONFIG)
             : 'Any';
@@ -122,16 +123,16 @@ ${methods}
                 call = `self._client.get(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             case 'post':
-                call = `self._client.post(f"${pathTemplate}"${hasBody ? (isMultipartBody ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+                call = `self._client.post(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             case 'put':
-                call = `self._client.put(f"${pathTemplate}"${hasBody ? (isMultipartBody ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+                call = `self._client.put(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             case 'delete':
                 call = `self._client.delete(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             case 'patch':
-                call = `self._client.patch(f"${pathTemplate}"${hasBody ? (isMultipartBody ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+                call = `self._client.patch(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             default:
                 call = `self._client.get(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;

@@ -75,8 +75,9 @@ ${methods}
     const hasBody = Boolean(requestBodyInfo);
     const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
     const requestBodySchema = requestBodyInfo?.schema;
-    const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-    const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+    const contentTypeArg = requestBodyInfo?.mediaType
+      ? `, contentType: "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+      : '';
     const requestType = requestBodySchema
       ? this.ensureKnownType(getSwiftType(requestBodySchema, SWIFT_CONFIG), knownModels)
       : 'Any';
@@ -84,6 +85,9 @@ ${methods}
     const responseType = responseSchema
       ? this.ensureKnownType(getSwiftType(responseSchema, SWIFT_CONFIG), knownModels)
       : this.inferFallbackResponseType(op);
+    const typedResponseArg = responseType !== 'Any' && responseType !== 'Void'
+      ? `, responseType: ${responseType}.self`
+      : '';
 
     const pathParamNames = createUniqueIdentifierMap(
       rawPathParams,
@@ -128,115 +132,91 @@ ${methods}
     switch (method) {
       case 'get':
         if (hasQuery && hasHeaders) {
-          call = `try await client.get(${pathCall}, params: params, headers: headers)`;
+          call = `try await client.get(${pathCall}, params: params, headers: headers${typedResponseArg})`;
         } else if (hasQuery) {
-          call = `try await client.get(${pathCall}, params: params)`;
+          call = `try await client.get(${pathCall}, params: params${typedResponseArg})`;
         } else if (hasHeaders) {
-          call = `try await client.get(${pathCall}, params: nil, headers: headers)`;
+          call = `try await client.get(${pathCall}, params: nil, headers: headers${typedResponseArg})`;
         } else {
-          call = `try await client.get(${pathCall})`;
+          call = `try await client.get(${pathCall}${typedResponseArg})`;
         }
         break;
       case 'post':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `try await client.post(${pathCall}, body: body, params: params, headers: headers, contentType: "multipart/form-data")`
-              : `try await client.post(${pathCall}, body: body, params: params, headers: headers)`;
+            call = `try await client.post(${pathCall}, body: body, params: params, headers: headers${contentTypeArg}${typedResponseArg})`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `try await client.post(${pathCall}, body: body, params: params, headers: nil, contentType: "multipart/form-data")`
-              : `try await client.post(${pathCall}, body: body, params: params)`;
+            call = `try await client.post(${pathCall}, body: body, params: params, headers: nil${contentTypeArg}${typedResponseArg})`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `try await client.post(${pathCall}, body: body, params: nil, headers: headers, contentType: "multipart/form-data")`
-              : `try await client.post(${pathCall}, body: body, params: nil, headers: headers)`;
+            call = `try await client.post(${pathCall}, body: body, params: nil, headers: headers${contentTypeArg}${typedResponseArg})`;
           } else {
-            call = isMultipartBody
-              ? `try await client.post(${pathCall}, body: body, params: nil, headers: nil, contentType: "multipart/form-data")`
-              : `try await client.post(${pathCall}, body: body)`;
+            call = `try await client.post(${pathCall}, body: body, params: nil, headers: nil${contentTypeArg}${typedResponseArg})`;
           }
         } else if (hasQuery && hasHeaders) {
-          call = `try await client.post(${pathCall}, body: nil, params: params, headers: headers)`;
+          call = `try await client.post(${pathCall}, body: nil, params: params, headers: headers${typedResponseArg})`;
         } else if (hasQuery) {
-          call = `try await client.post(${pathCall}, body: nil, params: params)`;
+          call = `try await client.post(${pathCall}, body: nil, params: params${typedResponseArg})`;
         } else if (hasHeaders) {
-          call = `try await client.post(${pathCall}, body: nil, params: nil, headers: headers)`;
+          call = `try await client.post(${pathCall}, body: nil, params: nil, headers: headers${typedResponseArg})`;
         } else {
-          call = `try await client.post(${pathCall}, body: nil)`;
+          call = `try await client.post(${pathCall}, body: nil${typedResponseArg})`;
         }
         break;
       case 'put':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `try await client.put(${pathCall}, body: body, params: params, headers: headers, contentType: "multipart/form-data")`
-              : `try await client.put(${pathCall}, body: body, params: params, headers: headers)`;
+            call = `try await client.put(${pathCall}, body: body, params: params, headers: headers${contentTypeArg}${typedResponseArg})`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `try await client.put(${pathCall}, body: body, params: params, headers: nil, contentType: "multipart/form-data")`
-              : `try await client.put(${pathCall}, body: body, params: params)`;
+            call = `try await client.put(${pathCall}, body: body, params: params, headers: nil${contentTypeArg}${typedResponseArg})`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `try await client.put(${pathCall}, body: body, params: nil, headers: headers, contentType: "multipart/form-data")`
-              : `try await client.put(${pathCall}, body: body, params: nil, headers: headers)`;
+            call = `try await client.put(${pathCall}, body: body, params: nil, headers: headers${contentTypeArg}${typedResponseArg})`;
           } else {
-            call = isMultipartBody
-              ? `try await client.put(${pathCall}, body: body, params: nil, headers: nil, contentType: "multipart/form-data")`
-              : `try await client.put(${pathCall}, body: body)`;
+            call = `try await client.put(${pathCall}, body: body, params: nil, headers: nil${contentTypeArg}${typedResponseArg})`;
           }
         } else if (hasQuery && hasHeaders) {
-          call = `try await client.put(${pathCall}, body: nil, params: params, headers: headers)`;
+          call = `try await client.put(${pathCall}, body: nil, params: params, headers: headers${typedResponseArg})`;
         } else if (hasQuery) {
-          call = `try await client.put(${pathCall}, body: nil, params: params)`;
+          call = `try await client.put(${pathCall}, body: nil, params: params${typedResponseArg})`;
         } else if (hasHeaders) {
-          call = `try await client.put(${pathCall}, body: nil, params: nil, headers: headers)`;
+          call = `try await client.put(${pathCall}, body: nil, params: nil, headers: headers${typedResponseArg})`;
         } else {
-          call = `try await client.put(${pathCall}, body: nil)`;
+          call = `try await client.put(${pathCall}, body: nil${typedResponseArg})`;
         }
         break;
       case 'delete':
         if (hasQuery && hasHeaders) {
-          call = `try await client.delete(${pathCall}, params: params, headers: headers)`;
+          call = `try await client.delete(${pathCall}, params: params, headers: headers${typedResponseArg})`;
         } else if (hasQuery) {
-          call = `try await client.delete(${pathCall}, params: params)`;
+          call = `try await client.delete(${pathCall}, params: params${typedResponseArg})`;
         } else if (hasHeaders) {
-          call = `try await client.delete(${pathCall}, params: nil, headers: headers)`;
+          call = `try await client.delete(${pathCall}, params: nil, headers: headers${typedResponseArg})`;
         } else {
-          call = `try await client.delete(${pathCall})`;
+          call = `try await client.delete(${pathCall}${typedResponseArg})`;
         }
         break;
       case 'patch':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `try await client.patch(${pathCall}, body: body, params: params, headers: headers, contentType: "multipart/form-data")`
-              : `try await client.patch(${pathCall}, body: body, params: params, headers: headers)`;
+            call = `try await client.patch(${pathCall}, body: body, params: params, headers: headers${contentTypeArg}${typedResponseArg})`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `try await client.patch(${pathCall}, body: body, params: params, headers: nil, contentType: "multipart/form-data")`
-              : `try await client.patch(${pathCall}, body: body, params: params)`;
+            call = `try await client.patch(${pathCall}, body: body, params: params, headers: nil${contentTypeArg}${typedResponseArg})`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `try await client.patch(${pathCall}, body: body, params: nil, headers: headers, contentType: "multipart/form-data")`
-              : `try await client.patch(${pathCall}, body: body, params: nil, headers: headers)`;
+            call = `try await client.patch(${pathCall}, body: body, params: nil, headers: headers${contentTypeArg}${typedResponseArg})`;
           } else {
-            call = isMultipartBody
-              ? `try await client.patch(${pathCall}, body: body, params: nil, headers: nil, contentType: "multipart/form-data")`
-              : `try await client.patch(${pathCall}, body: body)`;
+            call = `try await client.patch(${pathCall}, body: body, params: nil, headers: nil${contentTypeArg}${typedResponseArg})`;
           }
         } else if (hasQuery && hasHeaders) {
-          call = `try await client.patch(${pathCall}, body: nil, params: params, headers: headers)`;
+          call = `try await client.patch(${pathCall}, body: nil, params: params, headers: headers${typedResponseArg})`;
         } else if (hasQuery) {
-          call = `try await client.patch(${pathCall}, body: nil, params: params)`;
+          call = `try await client.patch(${pathCall}, body: nil, params: params${typedResponseArg})`;
         } else if (hasHeaders) {
-          call = `try await client.patch(${pathCall}, body: nil, params: nil, headers: headers)`;
+          call = `try await client.patch(${pathCall}, body: nil, params: nil, headers: headers${typedResponseArg})`;
         } else {
-          call = `try await client.patch(${pathCall}, body: nil)`;
+          call = `try await client.patch(${pathCall}, body: nil${typedResponseArg})`;
         }
         break;
       default:
-        call = `try await client.get(${pathCall})`;
+        call = `try await client.get(${pathCall}${typedResponseArg})`;
     }
 
     const docComment = op.summary ? `    /// ${op.summary}\n` : '';
@@ -253,8 +233,7 @@ ${methods}
     }
 
     return `${docComment}    public func ${methodName}(${params.join(', ')}) async throws -> ${responseType}? {
-        let response = ${call}
-        return response as? ${responseType}
+        return ${call}
     }`;
   }
 

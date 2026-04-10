@@ -25,10 +25,24 @@ public class HttpClient {
     private static let apiKeyHeader = "${apiKeyHeader}"
     private static let apiKeyUseBearer = ${apiKeyUseBearer ? 'true' : 'false'}
 
+    private struct AnyEncodable: Encodable {
+        private let encodeClosure: (Encoder) throws -> Void
+
+        init(_ value: any Encodable) {
+            self.encodeClosure = value.encode(to:)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            try encodeClosure(encoder)
+        }
+    }
+
     private let baseURL: String
     private let session: URLSession
     private let timeout: TimeInterval
     private var headers: [String: String]
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
 
     public init(baseURL: String, timeout: Int = 30000, headers: [String: String] = [:]) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
@@ -184,6 +198,9 @@ public class HttpClient {
         if JSONSerialization.isValidJSONObject(body) {
             return (try JSONSerialization.data(withJSONObject: body), "application/json")
         }
+        if let encodableBody = body as? any Encodable {
+            return (try encoder.encode(AnyEncodable(encodableBody)), "application/json")
+        }
         return (Data("\\(body)".utf8), contentType ?? "text/plain; charset=utf-8")
     }
 
@@ -199,6 +216,18 @@ public class HttpClient {
         return try JSONSerialization.jsonObject(with: data)
     }
 
+    private func parseResponse<T: Decodable>(_ data: Data, _ response: URLResponse, as type: T.Type) throws -> T? {
+        if let httpResp = response as? HTTPURLResponse, !(200...299).contains(httpResp.statusCode) {
+            throw URLError(.badServerResponse)
+        }
+
+        if data.isEmpty {
+            return nil
+        }
+
+        return try decoder.decode(T.self, from: data)
+    }
+
     public func get(
         _ path: String,
         params: [String: Any]? = nil,
@@ -211,6 +240,21 @@ public class HttpClient {
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response)
+    }
+
+    public func get<T: Decodable>(
+        _ path: String,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        responseType: T.Type
+    ) async throws -> T? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        applyHeaders(&request, requestHeaders: requestHeaders)
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response, as: responseType)
     }
 
     public func post(
@@ -231,6 +275,25 @@ public class HttpClient {
         return try parseResponse(data, response)
     }
 
+    public func post<T: Decodable>(
+        _ path: String,
+        body: Any? = nil,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        contentType: String? = nil,
+        responseType: T.Type
+    ) async throws -> T? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        let requestBody = try createRequestBody(body: body, contentType: contentType)
+        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType)
+        request.httpBody = requestBody.bodyData
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response, as: responseType)
+    }
+
     public func put(
         _ path: String,
         body: Any? = nil,
@@ -249,6 +312,25 @@ public class HttpClient {
         return try parseResponse(data, response)
     }
 
+    public func put<T: Decodable>(
+        _ path: String,
+        body: Any? = nil,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        contentType: String? = nil,
+        responseType: T.Type
+    ) async throws -> T? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = "PUT"
+        request.timeoutInterval = timeout
+        let requestBody = try createRequestBody(body: body, contentType: contentType)
+        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType)
+        request.httpBody = requestBody.bodyData
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response, as: responseType)
+    }
+
     public func delete(
         _ path: String,
         params: [String: Any]? = nil,
@@ -261,6 +343,21 @@ public class HttpClient {
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response)
+    }
+
+    public func delete<T: Decodable>(
+        _ path: String,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        responseType: T.Type
+    ) async throws -> T? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = "DELETE"
+        request.timeoutInterval = timeout
+        applyHeaders(&request, requestHeaders: requestHeaders)
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response, as: responseType)
     }
 
     public func patch(
@@ -279,6 +376,25 @@ public class HttpClient {
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response)
+    }
+
+    public func patch<T: Decodable>(
+        _ path: String,
+        body: Any? = nil,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        contentType: String? = nil,
+        responseType: T.Type
+    ) async throws -> T? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = "PATCH"
+        request.timeoutInterval = timeout
+        let requestBody = try createRequestBody(body: body, contentType: contentType)
+        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType)
+        request.httpBody = requestBody.bodyData
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response, as: responseType)
     }
 }
 `),

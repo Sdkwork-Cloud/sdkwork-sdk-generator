@@ -65,6 +65,95 @@ const csharpSpec: ApiSpec = {
   },
 };
 
+const typedResponseSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: {
+    title: 'CSharp Typed Response Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/user/profile': {
+      get: {
+        summary: 'Get user profile',
+        operationId: 'getUserProfile',
+        tags: ['User'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/UserProfile',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      UserProfile: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+const wrappedTypedResponseSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: {
+    title: 'CSharp Wrapped Typed Response Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/user/profile': {
+      get: {
+        summary: 'Get wrapped user profile',
+        operationId: 'getWrappedUserProfile',
+        tags: ['User'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PlusApiResultUserProfile',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      UserProfile: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      PlusApiResultUserProfile: {
+        type: 'object',
+        properties: {
+          data: {
+            $ref: '#/components/schemas/UserProfile',
+          },
+          code: {
+            type: 'string',
+          },
+        },
+      },
+    },
+  },
+};
+
 describe('CSharp generator regressions', () => {
   it('prefers a local common project when generated inside the repository', async () => {
     const generator = getGenerator('csharp' as any);
@@ -147,5 +236,46 @@ describe('CSharp generator regressions', () => {
     expect(readmeFile!.content).toContain('dotnet add package Acme.App.Sdk');
     expect(readmeFile!.content).toContain('<PackageReference Include="Acme.App.Sdk" Version="1.0.0" />');
     expect(readmeFile!.content).toContain('using Acme.App.Client;');
+  });
+
+  it('emits C# smoke tests and xUnit test-project support when generateTests is enabled', async () => {
+    const generator = getGenerator('csharp' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate({ ...csharpConfig, generateTests: true }, typedResponseSpec);
+    const projectFile = result.files.find((file) => file.path === 'App.csproj');
+    const testProjectFile = result.files.find((file) => file.path === 'Tests/App.Tests.csproj');
+    const smokeTestFile = result.files.find((file) => file.path === 'Tests/GeneratedSdkSmokeTests.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(projectFile).toBeDefined();
+    expect(testProjectFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+
+    expect(testProjectFile!.content).toContain('<ProjectReference Include="../App.csproj" />');
+    expect(testProjectFile!.content).toContain('<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />');
+    expect(testProjectFile!.content).toContain('<PackageReference Include="xunit" Version="2.9.0" />');
+    expect(testProjectFile!.content).toContain('<PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">');
+
+    expect(smokeTestFile!.content).toContain('using Xunit;');
+    expect(smokeTestFile!.content).toContain('using App;');
+    expect(smokeTestFile!.content).toContain('using App.Models;');
+    expect(smokeTestFile!.content).toContain('var client = new SdkworkAppClient(config);');
+    expect(smokeTestFile!.content).toContain('var result = await client.User.GetUserProfileAsync();');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("1", result!.Id);');
+  });
+
+  it('asserts wrapped C# `$ref` response properties as non-null in generated smoke tests', async () => {
+    const generator = getGenerator('csharp' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate({ ...csharpConfig, generateTests: true }, wrappedTypedResponseSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'Tests/GeneratedSdkSmokeTests.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('var result = await client.User.GetWrappedUserProfileAsync();');
+    expect(smokeTestFile!.content).toContain('Assert.NotNull(result!.Data);');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("ok", result!.Code);');
   });
 });

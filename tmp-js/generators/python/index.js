@@ -4,10 +4,12 @@ import { ModelGenerator } from './model-generator.js';
 import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
+import { TestGenerator } from './test-generator.js';
+import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { generatePublishBinScripts } from '../../framework/publish.js';
+import { PythonUsagePlanner, renderPythonUsageSnippet } from './usage-planner.js';
 export class PythonGenerator extends BaseGenerator {
     constructor() {
         super(PYTHON_CONFIG);
@@ -15,6 +17,7 @@ export class PythonGenerator extends BaseGenerator {
         this.apiGenerator = new ApiGenerator();
         this.httpClientGenerator = new HttpClientGenerator();
         this.buildConfigGenerator = new BuildConfigGenerator();
+        this.testGenerator = new TestGenerator();
     }
     generateModels(ctx) {
         return this.modelGenerator.generate(ctx, this.config);
@@ -31,24 +34,24 @@ export class PythonGenerator extends BaseGenerator {
     generateBinScripts(_config) {
         return generatePublishBinScripts('python');
     }
+    generateTests(ctx, config) {
+        return this.testGenerator.generate(ctx, config);
+    }
     generateReadme(ctx, config) {
         const clientName = resolveSdkClientName(config);
         const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
         const packageRoot = getPythonPackageRoot(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const allGroups = Object.entries(ctx.apiGroups);
-        const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-        const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-            || allGroups[0]?.[0];
-        const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-        const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-        const quickStartModule = quickStartTag
-            ? PYTHON_CONFIG.namingConventions.propertyName(resolvedTagNames.get(quickStartTag) || quickStartTag)
-            : 'example';
-        const quickStartMethod = quickStartOperation
-            ? this.generateReadmeOperationId(quickStartOperation.method, quickStartOperation.path, quickStartOperation, quickStartTag || '')
-            : 'list';
+        const planner = new PythonUsagePlanner(ctx);
+        const quickStartPlan = planner.selectQuickStartPlan();
+        const quickStartSnippet = quickStartPlan
+            ? renderPythonUsageSnippet(quickStartPlan, 'readme')
+            : 'result = client.example.list()';
+        const errorHandlingSnippet = quickStartPlan
+            ? renderPythonUsageSnippet(quickStartPlan, 'readme', { assignResult: false })
+            : 'client.example.list()';
+        const examples = this.generateReadmeExamples(ctx, planner);
         const modules = tags.map(tag => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
             const propName = PYTHON_CONFIG.namingConventions.propertyName(resolvedTagName);
@@ -99,14 +102,40 @@ client = ${clientName}(config)
 client.set_api_key("your-api-key")
 
 # Use the SDK
-result = client.${quickStartModule}.${quickStartMethod}()
+${quickStartSnippet}
 \`\`\`
 
 ${authSection}
 
+## Configuration (Non-Auth)
+
+\`\`\`python
+from ${packageRoot} import ${clientName}, SdkConfig
+
+config = SdkConfig(
+    base_url="${config.baseUrl}",
+)
+
+client = ${clientName}(config)
+client.set_header('X-Custom-Header', 'value')
+\`\`\`
+
 ## API Modules
 
 ${modules}
+
+## Usage Examples
+
+${examples}
+
+## Error Handling
+
+\`\`\`python
+try:
+${this.indent(errorHandlingSnippet, 4)}
+except Exception as error:
+    print(f"Error: {error}")
+\`\`\`
 
 ${publishSection}
 
@@ -121,6 +150,23 @@ ${config.license || 'MIT'}
     format(content) {
         return content.trim() + '\n';
     }
+    generateReadmeExamples(ctx, planner) {
+        const examples = [];
+        for (const tag of Object.keys(ctx.apiGroups)) {
+            const plan = planner.selectPlanForTag(tag);
+            if (!plan) {
+                continue;
+            }
+            const outputLine = '\nprint(result)';
+            examples.push(`### ${tag}
+
+\`\`\`python
+# ${plan.operation.summary || `${String(plan.operation.method || '').toUpperCase()} ${plan.operation.path}`}
+${renderPythonUsageSnippet(plan, 'readme')}${outputLine}
+\`\`\``);
+        }
+        return examples.join('\n\n') || 'No examples available.';
+    }
     supportsHeaderCookieParameters() {
         return true;
     }
@@ -128,33 +174,11 @@ ${config.license || 'MIT'}
         if (!Array.isArray(mediaTypes) || mediaTypes.length === 0) {
             return false;
         }
-        return mediaTypes.every((mediaType) => mediaType.toLowerCase() === 'multipart/form-data');
-    }
-    selectQuickStartOperation(operations) {
-        if (!Array.isArray(operations) || operations.length === 0) {
-            return undefined;
-        }
-        const getWithoutPathParam = operations.find((op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'));
-        if (getWithoutPathParam) {
-            return getWithoutPathParam;
-        }
-        return operations[0];
-    }
-    generateReadmeOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return PYTHON_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-        };
-        return PYTHON_CONFIG.namingConventions.methodName(`${actionMap[method] || method}_${resource}`);
+        const supported = new Set([
+            'multipart/form-data',
+            'application/x-www-form-urlencoded',
+        ]);
+        return mediaTypes.every((mediaType) => supported.has(mediaType.toLowerCase()));
     }
 }
 export { PYTHON_CONFIG } from './config.js';
@@ -163,3 +187,4 @@ export { ModelGenerator } from './model-generator.js';
 export { ApiGenerator } from './api-generator.js';
 export { HttpClientGenerator } from './http-generator.js';
 export { BuildConfigGenerator } from './build-config-generator.js';
+export { TestGenerator } from './test-generator.js';

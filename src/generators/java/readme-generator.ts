@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
+import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import {
   buildLanguageReadmeTitle,
@@ -8,36 +8,32 @@ import {
   buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JAVA_CONFIG } from './config.js';
+import { JavaUsagePlanner, renderJavaUsageSnippet } from './usage-planner.js';
 
 export class ReadmeGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
     const clientName = resolveSdkClientName(config);
-    const artifactId = `${config.sdkType}-sdk`;
+    const identity = resolveJvmSdkIdentity(config);
     const commonPkg = resolveJvmCommonPackage(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSimplifiedTagNames(tags);
-    const allGroups = Object.entries(ctx.apiGroups);
-    const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-    const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-      || allGroups[0]?.[0];
-    const quickStartGroup = quickStartTag ? (ctx.apiGroups as any)[quickStartTag] : undefined;
-    const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-    const quickStartResolvedTagName = quickStartTag
-      ? (resolvedTagNames.get(quickStartTag) || quickStartTag)
-      : 'Example';
-    const quickStartModuleAccessor = `get${JAVA_CONFIG.namingConventions.modelName(quickStartResolvedTagName)}()`;
-    const quickStartMethod = quickStartOperation
-      ? this.generateOperationId(
-        quickStartOperation.method,
-        quickStartOperation.path,
-        quickStartOperation,
-        quickStartTag || '',
-      )
-      : 'list';
-    
-    const modules = tags.map(tag => {
+    const planner = new JavaUsagePlanner(ctx);
+    const quickStartPlan = planner.selectQuickStartPlan();
+    const quickStartImports = this.renderImports(identity.packageRoot, commonPkg.importRoot, clientName, quickStartPlan);
+    const quickStartSnippet = quickStartPlan
+      ? renderJavaUsageSnippet(quickStartPlan, 'readme')
+      : 'client.getExample().list();';
+    const quickStartOutput = quickStartPlan?.hasReturnValue
+      ? 'System.out.println(result);'
+      : 'System.out.println("Request completed");';
+    const errorHandlingSnippet = quickStartPlan
+      ? renderJavaUsageSnippet(quickStartPlan, 'readme')
+      : 'client.getExample().list();';
+
+    const modules = tags.map((tag) => {
       const resolvedTagName = resolvedTagNames.get(tag) || tag;
       return `- \`client.get${JAVA_CONFIG.namingConventions.modelName(resolvedTagName)}()\` - ${tag} API`;
     }).join('\n');
@@ -62,8 +58,7 @@ client.setAccessToken("your-access-token");
       accessTokenCall: 'setAccessToken(...)',
     });
     const publishSection = buildPublishSection('java');
-
-    const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
+    const examples = this.generateExamples(ctx, planner);
 
     return {
       path: 'README.md',
@@ -77,33 +72,32 @@ Add to your \`pom.xml\`:
 
 \`\`\`xml
 <dependency>
-    <groupId>com.sdkwork</groupId>
-    <artifactId>${artifactId}</artifactId>
-    <version>${config.version}</version>
+    <groupId>${identity.groupId}</groupId>
+    <artifactId>${identity.artifactId}</artifactId>
+    <version>${identity.version}</version>
 </dependency>
 \`\`\`
 
 Or with Gradle:
 
 \`\`\`groovy
-implementation 'com.sdkwork:${artifactId}:${config.version}'
+implementation '${identity.groupId}:${identity.artifactId}:${identity.version}'
 \`\`\`
 
 ## Quick Start
 
 \`\`\`java
-import com.sdkwork.${config.sdkType.toLowerCase()}.${clientName};
-import ${commonPkg.importRoot}.Types;
+${quickStartImports}
 
 public class Main {
     public static void main(String[] args) throws Exception {
         Types.SdkConfig config = new Types.SdkConfig("${config.baseUrl}");
         ${clientName} client = new ${clientName}(config);
         client.setApiKey("your-api-key");
-        
+
         // Use the SDK
-        Object result = client.${quickStartModuleAccessor}.${quickStartMethod}();
-        System.out.println(result);
+${this.indent(quickStartSnippet, 8)}
+        ${quickStartOutput}
     }
 }
 \`\`\`
@@ -132,7 +126,8 @@ ${examples}
 
 \`\`\`java
 try {
-    Object result = client.${quickStartModuleAccessor}.${quickStartMethod}();
+${this.indent(errorHandlingSnippet, 4)}
+    ${quickStartOutput}
 } catch (Exception e) {
     System.err.println("Error: " + e.getMessage());
 }
@@ -149,69 +144,54 @@ ${config.license || 'MIT'}
     };
   }
 
-  private generateExamples(
-    ctx: SchemaContext,
-    config: GeneratorConfig,
-    clientName: string,
-    resolvedTagNames: Map<string, string>
-  ): string {
+  private generateExamples(ctx: SchemaContext, planner: JavaUsagePlanner): string {
     const examples: string[] = [];
-    
-    for (const [tag, group] of Object.entries(ctx.apiGroups)) {
-      const operations = (group as any).operations || [];
-      
-      if (operations.length > 0) {
-        const op = operations[0];
-        const methodName = this.generateOperationId(op.method, op.path, op, tag);
-        const resolvedTagName = resolvedTagNames.get(tag) || tag;
-        
-        examples.push(`### ${tag}
+
+    for (const tag of Object.keys(ctx.apiGroups)) {
+      const plan = planner.selectPlanForTag(tag);
+      const operation = plan?.operation;
+      if (!plan || !operation) {
+        continue;
+      }
+
+      const outputLine = plan.hasReturnValue
+        ? 'System.out.println(result);'
+        : 'System.out.println("Request completed");';
+      examples.push(`### ${tag}
 
 \`\`\`java
-// ${op.summary || `${op.method.toUpperCase()} ${op.path}`}
-Object result = client.get${JAVA_CONFIG.namingConventions.modelName(resolvedTagName)}().${methodName}();
-System.out.println(result);
+// ${operation.summary || `${String(operation.method || '').toUpperCase()} ${operation.path}`}
+${renderJavaUsageSnippet(plan, 'readme')}
+${outputLine}
 \`\`\``);
-      }
     }
 
     return examples.join('\n\n') || 'No examples available.';
   }
 
-  private selectQuickStartOperation(operations: any[]): any | undefined {
-    if (!Array.isArray(operations) || operations.length === 0) {
-      return undefined;
-    }
-    const getWithoutPathParam = operations.find(
-      (op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'),
-    );
-    if (getWithoutPathParam) {
-      return getWithoutPathParam;
-    }
-    return operations[0];
-  }
-
-  private generateOperationId(method: string, path: string, op: any, tag: string): string {
-    if (op.operationId) {
-      const normalized = normalizeOperationId(op.operationId);
-      return JAVA_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-    }
-    
-    const pathParts = path.split('/').filter(Boolean);
-    const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-    
-    const actionMap: Record<string, string> = {
-      get: path.includes('{') ? 'get' : 'list',
-      post: 'create',
-      put: 'update',
-      patch: 'patch',
-      delete: 'delete',
-    };
-    
-    return `${actionMap[method] || method}${JAVA_CONFIG.namingConventions.modelName(resource)}`;
+  private renderImports(
+    packageRoot: string,
+    commonImportRoot: string,
+    clientName: string,
+    plan: ReturnType<JavaUsagePlanner['selectQuickStartPlan']>,
+  ): string {
+    return [
+      `import ${packageRoot}.${clientName};`,
+      `import ${commonImportRoot}.Types;`,
+      plan?.usesModelPackage ? `import ${packageRoot}.model.*;` : '',
+      plan?.usesArrayList ? 'import java.util.ArrayList;' : '',
+      plan?.usesLinkedHashMap ? 'import java.util.LinkedHashMap;' : '',
+      plan?.usesList ? 'import java.util.List;' : '',
+      plan?.usesMap ? 'import java.util.Map;' : '',
+    ].filter(Boolean).join('\n');
   }
 
   private format(content: string): string {
     return content.trim() + '\n';
+  }
+
+  private indent(content: string, spaces: number): string {
+    const prefix = ' '.repeat(Math.max(0, spaces));
+    return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
   }
 }

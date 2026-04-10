@@ -12,6 +12,7 @@ import type {
   ApiOperationGroup
 } from './types.js';
 import { normalizeReadmeFile } from './readme.js';
+import { buildSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.js';
 import { normalizeOperationId, normalizeTagName } from './naming.js';
 
 export * from './types.js';
@@ -148,6 +149,12 @@ export abstract class BaseGenerator {
     const warnings: string[] = [];
 
     try {
+      if (config.generateTests === true && !this.supportsTests) {
+        throw new Error(
+          `The ${this.language} generator does not support generateTests=true yet. Disable generateTests or implement generator-backed test scaffolding for ${this.language}.`
+        );
+      }
+
       const openapiVersion = typeof spec.openapi === 'string' ? spec.openapi : '';
       if (!openapiVersion.startsWith('3.')) {
         const sourceErrorCode = (spec as any)?.code;
@@ -167,7 +174,10 @@ export abstract class BaseGenerator {
         );
       }
 
-      warnings.push(...this.analyzeSpecCapabilities(spec));
+      const compatibilityIssues = this.analyzeSpecCapabilities(spec);
+      if (compatibilityIssues.length > 0) {
+        throw new Error(this.formatCompatibilityIssues(compatibilityIssues));
+      }
       this.ctx = this.createSchemaContext(spec);
 
       files.push(...this.generateModels(this.ctx));
@@ -182,6 +192,9 @@ export abstract class BaseGenerator {
 
       const normalizedReadme = normalizeReadmeFile(this.generateReadme(this.ctx, this.config));
       files.push(normalizedReadme.file);
+      if (config.generateTests === true) {
+        files.push(...this.generateTests(this.ctx, this.config));
+      }
       files.push(...this.generateCustomScaffolding(this.config));
       if (normalizedReadme.warning) {
         warnings.push(normalizedReadme.warning);
@@ -213,7 +226,9 @@ export abstract class BaseGenerator {
   }
 
   protected createSchemaContext(spec: ApiSpec): SchemaContext {
-    const schemas: Record<string, any> = { ...(spec.components?.schemas || {}) };
+    const schemas: Record<string, any> = Object.fromEntries(
+      Object.entries(spec.components?.schemas || {}).map(([name, schema]) => [name, this.cloneSchema(schema)])
+    );
     const schemaFileMap = new Map<string, string>();
     const auth = this.deriveAuthContext(spec);
     const inlineSchemaNameByObject = new WeakMap<object, string>();
@@ -305,11 +320,246 @@ export abstract class BaseGenerator {
       }
     }
 
+    if (!this.preservesNamedNonObjectSchemas()) {
+      this.inlineNamedNonObjectSchemaRefs(schemas, apiGroups);
+    }
+
     for (const name of Object.keys(schemas)) {
       schemaFileMap.set(this.toPascalCase(name), this.toFileName(name));
     }
 
     return { schemas, schemaFileMap, apiGroups, auth };
+  }
+
+  protected preservesNamedNonObjectSchemas(): boolean {
+    return false;
+  }
+
+  private inlineNamedNonObjectSchemaRefs(
+    schemas: Record<string, any>,
+    apiGroups: Record<string, ApiOperationGroup>
+  ): void {
+    const sourceSchemas: Record<string, any> = { ...schemas };
+    const preservedSchemas: Record<string, any> = {};
+
+    for (const [name, schema] of Object.entries(sourceSchemas)) {
+      if (!this.shouldPreserveComponentSchema(name, schema, sourceSchemas)) {
+        continue;
+      }
+      preservedSchemas[name] = this.rewriteSchemaForNamedNonObjectRefs(schema, sourceSchemas, new Set([name]));
+    }
+
+    for (const group of Object.values(apiGroups)) {
+      group.operations = group.operations.map((operation) => ({
+        ...operation,
+        parameters: this.rewriteParameters(operation.parameters, sourceSchemas),
+        allParameters: this.rewriteParameters(operation.allParameters, sourceSchemas),
+        requestBody: this.rewriteRequestBody(operation.requestBody, sourceSchemas),
+        responses: this.rewriteResponses(operation.responses, sourceSchemas),
+      }));
+    }
+
+    for (const key of Object.keys(schemas)) {
+      delete schemas[key];
+    }
+    Object.assign(schemas, preservedSchemas);
+  }
+
+  private rewriteParameters(parameters: any[] | undefined, schemas: Record<string, any>): any[] | undefined {
+    if (!Array.isArray(parameters)) {
+      return parameters;
+    }
+
+    return parameters.map((parameter) => {
+      if (!parameter || typeof parameter !== 'object') {
+        return parameter;
+      }
+      if (!('schema' in parameter)) {
+        return { ...parameter };
+      }
+      return {
+        ...parameter,
+        schema: this.rewriteSchemaForNamedNonObjectRefs((parameter as Record<string, any>).schema, schemas),
+      };
+    });
+  }
+
+  private rewriteRequestBody(requestBody: any, schemas: Record<string, any>): any {
+    if (!requestBody || typeof requestBody !== 'object' || !requestBody.content || typeof requestBody.content !== 'object') {
+      return requestBody;
+    }
+
+    const nextContent = Object.fromEntries(
+      Object.entries(requestBody.content).map(([mediaType, mediaValue]) => {
+        const current = mediaValue as Record<string, any>;
+        if (!current || typeof current !== 'object') {
+          return [mediaType, mediaValue];
+        }
+        return [
+          mediaType,
+          {
+            ...current,
+            schema: this.rewriteSchemaForNamedNonObjectRefs(current.schema, schemas),
+          },
+        ];
+      })
+    );
+
+    return { ...requestBody, content: nextContent };
+  }
+
+  private rewriteResponses(responses: Record<string, any>, schemas: Record<string, any>): Record<string, any> {
+    const nextResponses: Record<string, any> = {};
+
+    for (const [statusCode, response] of Object.entries(responses || {})) {
+      if (!response || typeof response !== 'object' || !response.content || typeof response.content !== 'object') {
+        nextResponses[statusCode] = response;
+        continue;
+      }
+
+      nextResponses[statusCode] = {
+        ...response,
+        content: Object.fromEntries(
+          Object.entries(response.content).map(([mediaType, mediaValue]) => {
+            const current = mediaValue as Record<string, any>;
+            if (!current || typeof current !== 'object') {
+              return [mediaType, mediaValue];
+            }
+            return [
+              mediaType,
+              {
+                ...current,
+                schema: this.rewriteSchemaForNamedNonObjectRefs(current.schema, schemas),
+              },
+            ];
+          })
+        ),
+      };
+    }
+
+    return nextResponses;
+  }
+
+  private rewriteSchemaForNamedNonObjectRefs(
+    schema: any,
+    schemas: Record<string, any>,
+    trail: Set<string> = new Set<string>()
+  ): any {
+    if (!schema || typeof schema !== 'object') {
+      return schema;
+    }
+
+    if (Array.isArray(schema)) {
+      return schema.map((entry) => this.rewriteSchemaForNamedNonObjectRefs(entry, schemas, trail));
+    }
+
+    if (schema.$ref) {
+      const refName = this.extractSchemaRefName(schema.$ref);
+      if (!refName) {
+        return { ...schema };
+      }
+
+      const target = schemas[refName];
+      if (!target || this.shouldPreserveComponentSchema(refName, target, schemas) || trail.has(refName)) {
+        return { ...schema };
+      }
+
+      return this.rewriteSchemaForNamedNonObjectRefs(this.cloneSchema(target), schemas, new Set([...trail, refName]));
+    }
+
+    const rewritten = { ...schema } as Record<string, any>;
+    if (schema.items) {
+      rewritten.items = this.rewriteSchemaForNamedNonObjectRefs(schema.items, schemas, trail);
+    }
+    if (schema.properties && typeof schema.properties === 'object') {
+      rewritten.properties = Object.fromEntries(
+        Object.entries(schema.properties).map(([propName, propSchema]) => [
+          propName,
+          this.rewriteSchemaForNamedNonObjectRefs(propSchema, schemas, trail),
+        ])
+      );
+    }
+    if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+      rewritten.additionalProperties = this.rewriteSchemaForNamedNonObjectRefs(
+        schema.additionalProperties,
+        schemas,
+        trail,
+      );
+    }
+    for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
+      if (Array.isArray(schema[key])) {
+        rewritten[key] = schema[key].map((entry: any) => this.rewriteSchemaForNamedNonObjectRefs(entry, schemas, trail));
+      }
+    }
+    if (schema.not && typeof schema.not === 'object') {
+      rewritten.not = this.rewriteSchemaForNamedNonObjectRefs(schema.not, schemas, trail);
+    }
+    return rewritten;
+  }
+
+  private shouldPreserveComponentSchema(
+    schemaName: string,
+    schema: any,
+    schemas: Record<string, any>
+  ): boolean {
+    return this.preservesNamedNonObjectSchemas()
+      || this.isObjectLikeSchema(schema, schemas, new Set([schemaName]));
+  }
+
+  private isObjectLikeSchema(
+    schema: any,
+    schemas: Record<string, any>,
+    trail: Set<string> = new Set<string>()
+  ): boolean {
+    if (!schema || typeof schema !== 'object') {
+      return false;
+    }
+
+    if (schema.$ref) {
+      const refName = this.extractSchemaRefName(schema.$ref);
+      if (!refName || trail.has(refName)) {
+        return true;
+      }
+      const target = schemas[refName];
+      if (!target) {
+        return true;
+      }
+      return this.isObjectLikeSchema(target, schemas, new Set([...trail, refName]));
+    }
+
+    if (schema.properties && typeof schema.properties === 'object') {
+      return true;
+    }
+
+    const schemaType = normalizeSchemaTypeValue(schema.type);
+    if (schema.items || schemaType === 'array') {
+      return false;
+    }
+    if (schema.additionalProperties && !schema.properties) {
+      return false;
+    }
+    if (schemaType === 'object') {
+      return true;
+    }
+
+    for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
+      const values = schema[key];
+      if (!Array.isArray(values) || values.length === 0) {
+        continue;
+      }
+      if (values.some((entry: any) => this.isObjectLikeSchema(entry, schemas, new Set(trail)))) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private extractSchemaRefName(ref: string): string {
+    if (typeof ref !== 'string' || !ref.startsWith('#/components/schemas/')) {
+      return '';
+    }
+    return ref.split('/').pop() || '';
   }
 
   private resolveOperationGroup(
@@ -640,13 +890,15 @@ export abstract class BaseGenerator {
   }
 
   private analyzeSpecCapabilities(spec: ApiSpec): string[] {
-    const warnings = new Set<string>();
+    const issues = new Set<string>();
     const paths = spec.paths || {};
     const securitySchemes = spec.components?.securitySchemes || {};
 
     for (const [name, scheme] of Object.entries(securitySchemes)) {
       if (scheme?.type === 'apiKey' && scheme.in && scheme.in !== 'header') {
-        warnings.add(`Security scheme "${name}" uses apiKey in "${scheme.in}". Generated SDK clients currently apply API key auth through headers.`);
+        issues.add(
+          `Security scheme "${name}" uses apiKey in "${scheme.in}". Generated SDK clients currently apply API key auth through headers only.`
+        );
       }
     }
 
@@ -655,7 +907,7 @@ export abstract class BaseGenerator {
 
       const pathLevelParameters = item.parameters;
       if (this.hasExternalRef(pathLevelParameters)) {
-        warnings.add(`Path "${path}" contains external $ref references. Only local "#/" refs are resolved.`);
+        issues.add(`Path "${path}" contains external $ref references. Only local "#/" refs are resolved.`);
       }
 
       for (const [method, rawOperation] of Object.entries(item)) {
@@ -683,17 +935,19 @@ export abstract class BaseGenerator {
           return paramIn === 'header' || paramIn === 'cookie';
         });
         if (hasHeaderOrCookieParams && !this.supportsHeaderCookieParameters()) {
-          warnings.add(`${operationLabel} defines header/cookie parameters. Generated methods currently model query/path/body by default.`);
+          issues.add(
+            `${operationLabel} defines header/cookie parameters. Generated methods currently model query/path/body by default.`
+          );
         }
 
         if (this.hasExternalRef(operation.parameters)) {
-          warnings.add(`${operationLabel} contains external parameter $ref references. Only local "#/" refs are resolved.`);
+          issues.add(`${operationLabel} contains external parameter $ref references. Only local "#/" refs are resolved.`);
         }
         if (this.hasExternalRef(operation.requestBody)) {
-          warnings.add(`${operationLabel} contains external requestBody $ref references. Only local "#/" refs are resolved.`);
+          issues.add(`${operationLabel} contains external requestBody $ref references. Only local "#/" refs are resolved.`);
         }
         if (this.hasExternalRef(operation.responses)) {
-          warnings.add(`${operationLabel} contains external response $ref references. Only local "#/" refs are resolved.`);
+          issues.add(`${operationLabel} contains external response $ref references. Only local "#/" refs are resolved.`);
         }
 
         const requestBody = this.resolveRef<any>(spec, operation.requestBody) || operation.requestBody;
@@ -712,13 +966,22 @@ export abstract class BaseGenerator {
             mediaTypes.length > 0 &&
             !this.supportsNonJsonRequestBodyMediaTypes(mediaTypes)
           ) {
-            warnings.add(`${operationLabel} requestBody uses non-JSON media types (${mediaTypes.join(', ')}). Generator sends JSON payloads by default.`);
+            issues.add(
+              `${operationLabel} requestBody uses unsupported non-JSON media types (${mediaTypes.join(', ')}).`
+            );
           }
         }
       }
     }
 
-    return Array.from(warnings);
+    return Array.from(issues);
+  }
+
+  private formatCompatibilityIssues(issues: string[]): string {
+    return [
+      `OpenAPI document uses unsupported features for ${this.language} generation:`,
+      ...issues.map((issue) => `- ${issue}`),
+    ].join('\n');
   }
 
   protected supportsHeaderCookieParameters(): boolean {
@@ -1133,6 +1396,10 @@ export abstract class BaseGenerator {
     ];
   }
 
+  protected generateTests(_ctx: SchemaContext, _config: GeneratorConfig): GeneratedFile[] {
+    return [];
+  }
+
   private finalizeGeneratedFiles(files: GeneratedFile[]): GeneratedFile[] {
     return files.map((file) => {
       const ownership = file.ownership || 'generated';
@@ -1147,15 +1414,8 @@ export abstract class BaseGenerator {
 
   protected generateMetadataManifest(config: GeneratorConfig): GeneratedFile {
     return {
-      path: 'sdkwork-sdk.json',
-      content: `${JSON.stringify({
-        name: config.name,
-        version: config.version,
-        language: config.language,
-        sdkType: config.sdkType,
-        packageName: config.packageName || null,
-        generator: '@sdkwork/sdk-generator',
-      }, null, 2)}\n`,
+      path: SDKWORK_METADATA_FILE,
+      content: `${JSON.stringify(buildSdkMetadataManifest(config), null, 2)}\n`,
       language: config.language,
       description: 'SDKWork generator metadata',
     };
@@ -1215,7 +1475,7 @@ export function createLanguageConfig(
     displayName: language.charAt(0).toUpperCase() + language.slice(1),
     description: `Generated ${language} SDK`,
     fileExtension: '.' + language,
-    supportsTests: true,
+    supportsTests: false,
     supportsStrictTypes: true,
     supportsAsyncAwait: true,
     defaultIndent: '  ',
@@ -1252,4 +1512,15 @@ function toKebabCase(str: string): string {
     .replace(/[\s_]+/g, '-')
     .replace(/[^a-zA-Z0-9-]/g, '')
     .toLowerCase();
+}
+
+function normalizeSchemaTypeValue(type: unknown): string | undefined {
+  if (typeof type === 'string') {
+    return type;
+  }
+  if (Array.isArray(type)) {
+    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
+    return typeof candidate === 'string' ? candidate : undefined;
+  }
+  return undefined;
 }

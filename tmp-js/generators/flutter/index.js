@@ -5,6 +5,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { ReadmeGenerator } from './readme-generator.js';
+import { TestGenerator } from './test-generator.js';
 import { generatePublishBinScripts } from '../../framework/publish.js';
 export class FlutterGenerator extends BaseGenerator {
     constructor() {
@@ -14,6 +15,7 @@ export class FlutterGenerator extends BaseGenerator {
         this.httpClientGenerator = new HttpClientGenerator();
         this.buildConfigGenerator = new BuildConfigGenerator();
         this.readmeGenerator = new ReadmeGenerator();
+        this.testGenerator = new TestGenerator();
     }
     generateModels(ctx) {
         return this.modelGenerator.generate(ctx, this.config);
@@ -32,6 +34,9 @@ export class FlutterGenerator extends BaseGenerator {
     }
     generateReadme(ctx, config) {
         return this.readmeGenerator.generate(ctx, config);
+    }
+    generateTests(ctx, config) {
+        return this.testGenerator.generate(ctx, config);
     }
     supportsHeaderCookieParameters() {
         return true;
@@ -53,3 +58,4 @@ export { ApiGenerator } from './api-generator.js';
 export { HttpClientGenerator } from './http-generator.js';
 export { BuildConfigGenerator } from './build-config-generator.js';
 export { ReadmeGenerator } from './readme-generator.js';
+export { TestGenerator } from './test-generator.js';

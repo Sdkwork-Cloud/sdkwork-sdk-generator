@@ -2,6 +2,7 @@ import type { GeneratedFile } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { JAVA_CONFIG } from './config.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
@@ -11,8 +12,21 @@ export class BuildConfigGenerator {
   }
 
   private generatePomXml(config: GeneratorConfig): GeneratedFile {
-    const artifactId = `${config.sdkType}-sdk`;
+    const identity = resolveJvmSdkIdentity(config);
     const commonPkg = resolveJvmCommonPackage(config);
+    const testDependencies = config.generateTests === true ? `
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>` : '';
+    const surefirePlugin = config.generateTests === true ? `
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>` : '';
     
     return {
       path: 'pom.xml',
@@ -22,9 +36,9 @@ export class BuildConfigGenerator {
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.sdkwork</groupId>
-    <artifactId>${artifactId}</artifactId>
-    <version>${config.version}</version>
+    <groupId>${identity.groupId}</groupId>
+    <artifactId>${identity.artifactId}</artifactId>
+    <version>${identity.version}</version>
     <packaging>jar</packaging>
 
     <name>${config.name}</name>
@@ -52,6 +66,7 @@ export class BuildConfigGenerator {
             <artifactId>jackson-databind</artifactId>
             <version>2.16.0</version>
         </dependency>
+${testDependencies}
     </dependencies>
 
     <build>
@@ -65,6 +80,7 @@ export class BuildConfigGenerator {
                     <target>11</target>
                 </configuration>
             </plugin>
+${surefirePlugin}
         </plugins>
     </build>
 </project>

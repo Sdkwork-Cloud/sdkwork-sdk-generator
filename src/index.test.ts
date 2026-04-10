@@ -16,6 +16,8 @@ import {
   buildExecutionDecisionFromContext,
   buildExecutionHandoff,
   getGenerator,
+  getLanguageCapabilities,
+  getLanguageCapability,
   getSupportedLanguages,
   getSupportedSdkTypes,
   generateSdk,
@@ -75,6 +77,12 @@ const baseConfig: GeneratorConfig = {
   baseUrl: 'https://api.example.com',
   apiPrefix: '/api/v1',
 };
+
+function getGeneratedFile(files: Array<{ path: string; content: string }>, path: string): { path: string; content: string } {
+  const file = files.find((candidate) => candidate.path === path);
+  expect(file).toBeDefined();
+  return file!;
+}
 
 describe('Generator registry', () => {
   it('should export change impact analysis for external automation', () => {
@@ -177,6 +185,124 @@ describe('Generator registry', () => {
     expect(getSupportedSdkTypes()).toEqual(['app', 'backend', 'ai', 'custom']);
   });
 
+  it('should expose a truthful cross-language capability matrix for automation callers', () => {
+    expect(getLanguageCapabilities()).toEqual([
+      {
+        language: 'typescript',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: true,
+      },
+      {
+        language: 'dart',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'python',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'go',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'java',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'swift',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'kotlin',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'flutter',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'csharp',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'rust',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: true,
+      },
+      {
+        language: 'php',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+      {
+        language: 'ruby',
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: false,
+      },
+    ]);
+
+    expect(getLanguageCapability('typescript')).toEqual(getLanguageCapabilities()[0]);
+    expect(getLanguageCapability('rust')).toMatchObject({
+      language: 'rust',
+      hasDistinctBuildStep: true,
+      supportsGeneratedTests: true,
+    });
+    expect(getLanguageCapability('php')).toMatchObject({
+      language: 'php',
+      hasDistinctBuildStep: false,
+      supportsGeneratedTests: true,
+    });
+    expect(getLanguageCapability('ruby')).toMatchObject({
+      language: 'ruby',
+      hasDistinctBuildStep: false,
+      supportsGeneratedTests: true,
+    });
+  });
+
   it('should register php and ruby as supported languages', () => {
     expect(getSupportedLanguages()).toContain('php');
     expect(getSupportedLanguages()).toContain('ruby');
@@ -197,6 +323,48 @@ describe('Generator registry', () => {
     expect(readme).toBeDefined();
     expect(readme!.content).toContain('## Regeneration Contract');
     expect(readme!.content).toContain('`custom/`');
+  });
+
+  it('should emit sdk metadata with standardized capabilities and ownership boundaries', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate({ ...baseConfig, generateTests: true }, mockSpec);
+    const metadataFile = result.files.find((file) => file.path === 'sdkwork-sdk.json');
+
+    expect(metadataFile).toBeDefined();
+
+    const metadata = JSON.parse(metadataFile!.content) as {
+      schemaVersion?: number;
+      capabilities?: Record<string, unknown>;
+      generation?: Record<string, unknown>;
+      ownership?: Record<string, unknown>;
+    };
+
+    expect(metadata).toMatchObject({
+      schemaVersion: 1,
+      name: 'TestSDK',
+      version: '1.0.0',
+      language: 'typescript',
+      sdkType: 'backend',
+      packageName: null,
+      generator: '@sdkwork/sdk-generator',
+      capabilities: {
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: true,
+      },
+      generation: {
+        readme: true,
+        tests: true,
+      },
+      ownership: {
+        generatedOwnership: 'generated',
+        scaffoldOwnership: 'scaffold',
+        scaffoldRoots: ['custom/'],
+        stateRoots: ['.sdkwork/'],
+      },
+    });
   });
 
   it('should reject unsupported sdk types for programmatic generation callers', async () => {
@@ -657,6 +825,324 @@ const postBodyAndQuerySpec: ApiSpec = {
         properties: {
           code: { type: 'string' },
         },
+      },
+    },
+  },
+};
+
+const arrayBodySpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Array Body API', version: '1.0.0' },
+  paths: {
+    '/tenant/batch': {
+      post: {
+        summary: 'Batch create tenants',
+        operationId: 'batchCreate',
+        tags: ['Tenant'],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    code: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const namedNonObjectComponentSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Named Non Object Component API', version: '1.0.0' },
+  paths: {
+    '/alias/scalar': {
+      post: {
+        summary: 'Send scalar alias',
+        operationId: 'sendScalar',
+        tags: ['Alias'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/StringAlias' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Scalar alias response',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/StringAlias' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/alias/array': {
+      post: {
+        summary: 'Send array alias',
+        operationId: 'sendArray',
+        tags: ['Alias'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/StringList' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Array alias response',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/StringList' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/alias/map': {
+      post: {
+        summary: 'Send map alias',
+        operationId: 'sendMap',
+        tags: ['Alias'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/StringMap' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Map alias response',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/StringMap' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/alias/user': {
+      post: {
+        summary: 'Send user object',
+        operationId: 'sendUser',
+        tags: ['Alias'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/User' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'User response',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/User' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      User: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          nickname: { $ref: '#/components/schemas/StringAlias' },
+          tags: { $ref: '#/components/schemas/StringList' },
+          metadata: { $ref: '#/components/schemas/StringMap' },
+        },
+      },
+      StringAlias: {
+        type: 'string',
+      },
+      StringList: {
+        type: 'array',
+        items: { type: 'string' },
+      },
+      StringMap: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+      },
+    },
+  },
+};
+
+const composedQueryParameterSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Composed Query Parameter API', version: '1.0.0' },
+  paths: {
+    '/tenant/list': {
+      get: {
+        summary: 'List tenants',
+        operationId: 'listByPage',
+        tags: ['Tenant'],
+        parameters: [
+          {
+            name: 'page',
+            in: 'query',
+            required: false,
+            schema: {
+              allOf: [
+                { type: 'integer' },
+              ],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Success',
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const composedHeaderParameterSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Composed Header Parameter API', version: '1.0.0' },
+  paths: {
+    '/tenant/list': {
+      get: {
+        summary: 'List tenants',
+        operationId: 'listByPage',
+        tags: ['Tenant'],
+        parameters: [
+          {
+            name: 'X-Trace-Id',
+            in: 'header',
+            required: false,
+            schema: {
+              allOf: [
+                { type: 'string', enum: ['trace-token'] },
+              ],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Success',
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const composedReferencedQueryParameterSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Composed Referenced Query Parameter API', version: '1.0.0' },
+  paths: {
+    '/tenant/list': {
+      get: {
+        summary: 'List tenants',
+        operationId: 'listByPage',
+        tags: ['Tenant'],
+        parameters: [
+          {
+            name: 'page',
+            in: 'query',
+            required: false,
+            schema: {
+              allOf: [
+                { $ref: '#/components/schemas/PageParam' },
+              ],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Success',
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      PageParam: {
+        type: 'integer',
+      },
+    },
+  },
+};
+
+const composedReferencedHeaderParameterSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Composed Referenced Header Parameter API', version: '1.0.0' },
+  paths: {
+    '/tenant/list': {
+      get: {
+        summary: 'List tenants',
+        operationId: 'listByPage',
+        tags: ['Tenant'],
+        parameters: [
+          {
+            name: 'X-Trace-Id',
+            in: 'header',
+            required: false,
+            schema: {
+              allOf: [
+                { $ref: '#/components/schemas/TraceHeader' },
+              ],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Success',
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      TraceHeader: {
+        type: 'string',
+        enum: ['trace-token'],
       },
     },
   },
@@ -1610,8 +2096,9 @@ describe('OpenAPI Security And Compliance', () => {
       'async listByPage(body?: PlusTenantQueryListForm, params?: QueryParams): Promise<PlusApiResultPagePlusTenantVO>'
     );
     expect(tenantApi!.content).toContain(
-      'return this.client.post<PlusApiResultPagePlusTenantVO>(backendApiPath(`/tenant/list`), body, params);'
+      'return this.client.post<PlusApiResultPagePlusTenantVO>(backendApiPath(`/tenant/list`), body, params'
     );
+    expect(tenantApi!.content).toContain(`'application/json'`);
   });
 
   it('should expose flattened and simplified typescript client api properties', async () => {
@@ -1986,5 +2473,1201 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.files.length).toBe(0);
     expect(result.stats.models).toBe(0);
     expect(result.stats.apis).toBe(0);
+  });
+
+  it('should fail generation when the spec uses external refs that cannot be resolved locally', async () => {
+    const generator = new TypeScriptGenerator();
+    const externalRefSpec: ApiSpec = {
+      openapi: '3.0.3',
+      info: { title: 'External Ref API', version: '1.0.0' },
+      paths: {
+        '/users': {
+          get: {
+            operationId: 'listUsers',
+            tags: ['User'],
+            responses: {
+              '200': {
+                $ref: 'https://example.com/openapi.yaml#/components/responses/UserList',
+              } as any,
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const result = await generator.generate(baseConfig, externalRefSpec);
+
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain('external');
+    expect(result.files.length).toBe(0);
+  });
+
+  it('should generate standardized TypeScript smoke tests when generateTests is enabled', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate({ ...baseConfig, generateTests: true }, mockSpec);
+    const packageJsonFile = result.files.find((file) => file.path === 'package.json');
+    const smokeTestFile = result.files.find((file) => file.path === 'test/sdk.smoke.test.mjs');
+
+    expect(result.errors).toEqual([]);
+    expect(packageJsonFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+
+    const packageJson = JSON.parse(packageJsonFile!.content) as {
+      scripts?: Record<string, string>;
+    };
+    expect(packageJson.scripts?.test).toBe('npm run build && node --test ./test/**/*.test.mjs');
+    expect(smokeTestFile!.content).toContain("import test from 'node:test';");
+    expect(smokeTestFile!.content).toContain("import assert from 'node:assert/strict';");
+    expect(smokeTestFile!.content).toContain('const client = new SdkworkBackendClient({');
+    expect(smokeTestFile!.content).toContain('client.http.get = async (path, params, headers) => {');
+    expect(smokeTestFile!.content).toContain('await client.user.listUsers()');
+    expect(smokeTestFile!.content).toContain("assert.equal(captured.path, '/api/v1/users');");
+  });
+
+  it('should generate TypeScript smoke tests that assert body query and content type forwarding', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate({ ...baseConfig, generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/sdk.smoke.test.mjs');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('client.http.post = async (path, body, params, headers, contentType) => {');
+    expect(smokeTestFile!.content).toContain('const body = {');
+    expect(smokeTestFile!.content).toContain("  keyword: 'keyword',");
+    expect(smokeTestFile!.content).toContain('const params = {');
+    expect(smokeTestFile!.content).toContain('await client.tenant.listByPage(body, params)');
+    expect(smokeTestFile!.content).toContain("assert.equal(captured.path, '/api/v1/tenant/list');");
+    expect(smokeTestFile!.content).toContain("assert.deepEqual(captured.body, body);");
+    expect(smokeTestFile!.content).toContain("assert.deepEqual(captured.params, params);");
+    expect(smokeTestFile!.content).toContain("assert.equal(captured.contentType, 'application/json');");
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('const body = {');
+    expect(readmeFile!.content).toContain("  keyword: 'keyword',");
+    expect(readmeFile!.content).toContain('const params = {');
+    expect(readmeFile!.content).toContain('  page: 1,');
+  });
+
+  it('should sample composed query parameters correctly in TypeScript smoke tests', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate({ ...baseConfig, generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/sdk.smoke.test.mjs');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('const params = {');
+    expect(smokeTestFile!.content).toContain('  page: 1,');
+    expect(smokeTestFile!.content).toContain('await client.tenant.listByPage(params)');
+  });
+
+  it('should generate concrete header samples in TypeScript README examples', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, composedHeaderParameterSpec);
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('const headers = {');
+    expect(readmeFile!.content).toContain("  'X-Trace-Id': 'trace-token',");
+    expect(readmeFile!.content).toContain('const result = await client.tenant.listByPage(headers);');
+  });
+
+  it('should generate standardized Dart smoke tests when generateTests is enabled', async () => {
+    const generator = new DartGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'dart', generateTests: true }, mockSpec);
+    const pubspecFile = result.files.find((file) => file.path === 'pubspec.yaml');
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(pubspecFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(pubspecFile!.content).toContain('test: ^1.24.0');
+    expect(smokeTestFile!.content).toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).toContain("import 'dart:io';");
+    expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:sdkwork_backend_sdk_dart/sdkwork_backend_sdk_dart.dart';");
+    expect(smokeTestFile!.content).toContain('final client = SdkworkBackendClient(');
+    expect(smokeTestFile!.content).toContain('await client.user.listUsers();');
+    expect(smokeTestFile!.content).toContain("expect(capturedPath, '/api/v1/users');");
+  });
+
+  it('should generate Dart smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new DartGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'dart', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('final body = PlusTenantQueryListForm(');
+    expect(smokeTestFile!.content).toContain("keyword: 'keyword'");
+    expect(smokeTestFile!.content).toContain('final params = <String, dynamic>{');
+    expect(smokeTestFile!.content).toContain("'page': 1");
+    expect(smokeTestFile!.content).toContain('final result = await client.tenant.listByPage(body, params);');
+    expect(smokeTestFile!.content).toContain("expect(capturedPath, '/api/v1/tenant/list');");
+    expect(smokeTestFile!.content).toContain("expect(capturedQuery['page'], '1');");
+    expect(smokeTestFile!.content).toContain("expect(capturedContentType.startsWith('application/json'), isTrue);");
+    expect(smokeTestFile!.content).toContain('expect(jsonDecode(utf8.decode(capturedBody)), body.toJson());');
+    expect(smokeTestFile!.content).toContain("expect(result?.code, 'ok');");
+  });
+
+  it('should sample composed query parameters correctly in Dart smoke tests', async () => {
+    const generator = new DartGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'dart', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('final params = <String, dynamic>{');
+    expect(smokeTestFile!.content).toContain("'page': 1");
+    expect(smokeTestFile!.content).toContain("expect(capturedQuery['page'], '1');");
+  });
+
+  it('should generate standardized Rust smoke tests when generateTests is enabled', async () => {
+    const generator = new RustGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'rust', generateTests: true }, mockSpec);
+    const cargoFile = result.files.find((file) => file.path === 'Cargo.toml');
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/generated_sdk_smoke.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(cargoFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(cargoFile!.content).toContain('tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }');
+    expect(smokeTestFile!.content).toContain('use sdkwork_backend_sdk::{SdkworkBackendClient, SdkworkConfig};');
+    expect(smokeTestFile!.content).toContain('#[tokio::test]');
+    expect(smokeTestFile!.content).toContain('client.user().list_users().await?;');
+    expect(smokeTestFile!.content).toContain('assert_eq!(captured.path, "/api/v1/users");');
+  });
+
+  it('should generate Rust smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new RustGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'rust', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/generated_sdk_smoke.rs');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+    const errorHandlingSection = (readmeFile?.content.split('## Error Handling')[1] || '').split('## License')[0] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(readmeFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('let body = PlusTenantQueryListForm {');
+    expect(smokeTestFile!.content).toContain('keyword: Some("keyword".to_string())');
+    expect(smokeTestFile!.content).toContain('let mut query = HashMap::new();');
+    expect(smokeTestFile!.content).toContain('query.insert("page".to_string(), serde_json::json!(1));');
+    expect(smokeTestFile!.content).toContain('let result = client.tenant().list_by_page(&body, Some(&query)).await?;');
+    expect(smokeTestFile!.content).toContain('assert_eq!(captured.path, "/api/v1/tenant/list");');
+    expect(smokeTestFile!.content).toContain('assert_eq!(captured.query.get("page").map(String::as_str), Some("1"));');
+    expect(smokeTestFile!.content).toContain('assert!(captured.content_type.starts_with("application/json"));');
+    expect(smokeTestFile!.content).toContain('assert_json_eq(&captured.body, &serde_json::to_vec(&body)?);');
+    expect(smokeTestFile!.content).toContain('assert_eq!(result.code.as_deref(), Some("ok"));');
+    expect(readmeFile!.content).toContain('## Usage Examples');
+    expect(usageExamplesSection).toContain('use std::collections::HashMap;');
+    expect(usageExamplesSection).toContain('let body = PlusTenantQueryListForm {');
+    expect(usageExamplesSection).toContain('query.insert("page".to_string(), serde_json::json!(1));');
+    expect(usageExamplesSection).toContain('let result = client.tenant().list_by_page(&body, Some(&query)).await?;');
+    expect(errorHandlingSection).toContain('let client = SdkworkBackendClient::new(SdkworkConfig::new("https://api.example.com"))?;');
+    expect(errorHandlingSection).toContain('let body = PlusTenantQueryListForm {');
+    expect(errorHandlingSection).toContain('query.insert("page".to_string(), serde_json::json!(1));');
+    expect(errorHandlingSection).toContain('client.tenant().list_by_page(&body, Some(&query)).await?;');
+  });
+
+  it('should sample composed query parameters correctly in Rust smoke tests', async () => {
+    const generator = new RustGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'rust', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/generated_sdk_smoke.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('let mut query = HashMap::new();');
+    expect(smokeTestFile!.content).toContain('query.insert("page".to_string(), serde_json::json!(1));');
+    expect(smokeTestFile!.content).toContain('assert_eq!(captured.query.get("page").map(String::as_str), Some("1"));');
+  });
+
+  it('should generate standardized PHP smoke tests when generateTests is enabled', async () => {
+    const generator = new PhpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'php', generateTests: true }, mockSpec);
+    const composerFile = result.files.find((file) => file.path === 'composer.json');
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/GeneratedSdkSmokeTest.php');
+
+    expect(result.errors).toEqual([]);
+    expect(composerFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(composerFile!.content).toContain('"phpunit/phpunit": "^11.0"');
+    expect(smokeTestFile!.content).toContain('use PHPUnit\\Framework\\TestCase;');
+    expect(smokeTestFile!.content).toContain('new MockHandler([');
+    expect(smokeTestFile!.content).toContain('$client = new SdkworkBackendClient($config);');
+    expect(smokeTestFile!.content).toContain('$client->user->listUsers();');
+    expect(smokeTestFile!.content).toContain("self::assertSame('/api/v1/users', \$request->getUri()->getPath());");
+  });
+
+  it('should generate PHP smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new PhpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'php', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/GeneratedSdkSmokeTest.php');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain("\$body = new PlusTenantQueryListForm(['keyword' => 'keyword']);");
+    expect(smokeTestFile!.content).toContain("\$params = ['page' => 1, 'size' => 2];");
+    expect(smokeTestFile!.content).toContain('$result = $client->tenant->listByPage($body, $params);');
+    expect(smokeTestFile!.content).toContain("self::assertSame('/api/v1/tenant/list', \$request->getUri()->getPath());");
+    expect(smokeTestFile!.content).toContain("self::assertSame('1', \$query['page'] ?? null);");
+    expect(smokeTestFile!.content).toContain("self::assertStringStartsWith('application/json', \$request->getHeaderLine('Content-Type'));");
+    expect(smokeTestFile!.content).toContain("self::assertJsonStringEqualsJsonString(json_encode(\$body->toArray(), JSON_THROW_ON_ERROR), (string) \$request->getBody());");
+    expect(smokeTestFile!.content).toContain("self::assertSame('ok', \$result?->code);");
+  });
+
+  it('should generate PHP README sections with planner-backed body query examples', async () => {
+    const generator = new PhpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'php' }, postBodyAndQuerySpec);
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+    const errorHandlingSection = (readmeFile?.content.split('## Error Handling')[1] || '').split('## License')[0] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('## Configuration (Non-Auth)');
+    expect(readmeFile!.content).toContain('$client->setHeader(\'X-Custom-Header\', \'value\');');
+    expect(readmeFile!.content).toContain('## Usage Examples');
+    expect(readmeFile!.content).toContain('## Error Handling');
+    expect(usageExamplesSection).toContain("$body = new PlusTenantQueryListForm(['keyword' => 'keyword']);");
+    expect(usageExamplesSection).toContain("\$params = ['page' => 1, 'size' => 2];");
+    expect(usageExamplesSection).toContain('$result = $client->tenant->listByPage($body, $params);');
+    expect(errorHandlingSection).toContain("$body = new PlusTenantQueryListForm(['keyword' => 'keyword']);");
+    expect(errorHandlingSection).toContain("\$params = ['page' => 1, 'size' => 2];");
+    expect(errorHandlingSection).toContain('$client->tenant->listByPage($body, $params);');
+    expect(errorHandlingSection).toContain('try {');
+    expect(errorHandlingSection).toContain('catch (\\Throwable $e)');
+  });
+
+  it('should generate concrete PHP array request body samples in smoke tests and README examples', async () => {
+    const generator = new PhpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'php', generateTests: true }, arrayBodySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/GeneratedSdkSmokeTest.php');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(readmeFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain("\$body = ['item'];");
+    expect(smokeTestFile!.content).toContain('$result = $client->tenant->batchCreate($body);');
+    expect(smokeTestFile!.content).toContain("self::assertJsonStringEqualsJsonString(json_encode(\$body, JSON_THROW_ON_ERROR), (string) \$request->getBody());");
+    expect(usageExamplesSection).toContain("\$body = ['item'];");
+    expect(usageExamplesSection).toContain('$result = $client->tenant->batchCreate($body);');
+  });
+
+  it('should sample composed query parameters correctly in PHP smoke tests', async () => {
+    const generator = new PhpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'php', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/GeneratedSdkSmokeTest.php');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain("\$params = ['page' => 1];");
+    expect(smokeTestFile!.content).toContain("self::assertSame('1', \$query['page'] ?? null);");
+  });
+
+  it('should generate standardized Ruby smoke tests when generateTests is enabled', async () => {
+    const generator = new RubyGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'ruby', generateTests: true }, mockSpec);
+    const gemspecFile = result.files.find((file) => file.path === 'sdkwork-backend-sdk.gemspec');
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.rb');
+
+    expect(result.errors).toEqual([]);
+    expect(gemspecFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(gemspecFile!.content).toContain("spec.add_development_dependency 'minitest'");
+    expect(smokeTestFile!.content).toContain("require 'minitest/autorun'");
+    expect(smokeTestFile!.content).toContain("require 'faraday/adapter/test'");
+    expect(smokeTestFile!.content).toContain('client = Sdkwork::BackendSdk::SdkworkBackendClient.new(config)');
+    expect(smokeTestFile!.content).toContain('client.user.list_users');
+    expect(smokeTestFile!.content).toContain("assert_equal '/api/v1/users', captured[:path]");
+  });
+
+  it('should generate Ruby smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new RubyGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'ruby', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.rb');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain("body = Sdkwork::BackendSdk::Models::PlusTenantQueryListForm.new('keyword' => 'keyword')");
+    expect(smokeTestFile!.content).toContain("params = { 'page' => 1, 'size' => 2 }");
+    expect(smokeTestFile!.content).toContain('result = client.tenant.list_by_page(body: body, params: params)');
+    expect(smokeTestFile!.content).toContain("assert_equal '/api/v1/tenant/list', captured[:path]");
+    expect(smokeTestFile!.content).toContain("assert_equal '1', captured[:query]['page']");
+    expect(smokeTestFile!.content).toContain("assert captured[:content_type].start_with?('application/json')");
+    expect(smokeTestFile!.content).toContain('assert_json_equal(JSON.generate(body.to_hash), captured[:body])');
+    expect(smokeTestFile!.content).toContain("assert_equal 'ok', result&.code");
+  });
+
+  it('should generate Ruby README sections with planner-backed body query examples', async () => {
+    const generator = new RubyGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'ruby' }, postBodyAndQuerySpec);
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+    const errorHandlingSection = (readmeFile?.content.split('## Error Handling')[1] || '').split('## License')[0] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('## Configuration (Non-Auth)');
+    expect(readmeFile!.content).toContain("client.set_header('X-Custom-Header', 'value')");
+    expect(readmeFile!.content).toContain('## Usage Examples');
+    expect(readmeFile!.content).toContain('## Error Handling');
+    expect(usageExamplesSection).toContain("body = Sdkwork::BackendSdk::Models::PlusTenantQueryListForm.new('keyword' => 'keyword')");
+    expect(usageExamplesSection).toContain("params = { 'page' => 1, 'size' => 2 }");
+    expect(usageExamplesSection).toContain('result = client.tenant.list_by_page(body: body, params: params)');
+    expect(errorHandlingSection).toContain("body = Sdkwork::BackendSdk::Models::PlusTenantQueryListForm.new('keyword' => 'keyword')");
+    expect(errorHandlingSection).toContain("params = { 'page' => 1, 'size' => 2 }");
+    expect(errorHandlingSection).toContain('client.tenant.list_by_page(body: body, params: params)');
+    expect(errorHandlingSection).toContain('begin');
+    expect(errorHandlingSection).toContain('rescue StandardError => e');
+  });
+
+  it('should generate standardized Python smoke tests when generateTests is enabled', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'python', generateTests: true }, mockSpec);
+    const pyprojectFile = result.files.find((file) => file.path === 'pyproject.toml');
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/test_sdk_smoke.py');
+
+    expect(result.errors).toEqual([]);
+    expect(pyprojectFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(pyprojectFile!.content).toContain('testpaths = ["tests"]');
+    expect(smokeTestFile!.content).toContain('def test_generated_sdk_forwards_request_metadata():');
+    expect(smokeTestFile!.content).toContain('client = SdkworkBackendClient(');
+    expect(smokeTestFile!.content).toContain('client.http.get = fake_get');
+    expect(smokeTestFile!.content).toContain('client.user.list_users()');
+    expect(smokeTestFile!.content).toContain("assert captured['path'] == '/api/v1/users'");
+  });
+
+  it('should generate Python smoke tests and README examples with concrete request body samples', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'python', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/test_sdk_smoke.py');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+    const errorHandlingSection = (readmeFile?.content.split('## Error Handling')[1] || '').split('## License')[0] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(readmeFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('body = {');
+    expect(smokeTestFile!.content).toContain("    'keyword': 'keyword',");
+    expect(smokeTestFile!.content).toContain('params = {');
+    expect(smokeTestFile!.content).toContain("    'page': 1,");
+    expect(smokeTestFile!.content).toContain('client.tenant.list_by_page(body, params)');
+    expect(smokeTestFile!.content).toContain("assert captured['json'] == body");
+    expect(readmeFile!.content).toContain('## Configuration (Non-Auth)');
+    expect(readmeFile!.content).toContain("client.set_header('X-Custom-Header', 'value')");
+    expect(readmeFile!.content).toContain('## Usage Examples');
+    expect(readmeFile!.content).toContain('## Error Handling');
+    expect(readmeFile!.content).toContain('body = {');
+    expect(readmeFile!.content).toContain("    'keyword': 'keyword',");
+    expect(readmeFile!.content).toContain('result = client.tenant.list_by_page(body, params)');
+    expect(usageExamplesSection).toContain('body = {');
+    expect(usageExamplesSection).toContain("    'keyword': 'keyword',");
+    expect(usageExamplesSection).toContain('result = client.tenant.list_by_page(body, params)');
+    expect(errorHandlingSection).toContain('body = {');
+    expect(errorHandlingSection).toContain("    'keyword': 'keyword',");
+    expect(errorHandlingSection).toContain('client.tenant.list_by_page(body, params)');
+    expect(errorHandlingSection).toContain('try:');
+    expect(errorHandlingSection).toContain('except Exception as error:');
+  });
+
+  it('should sample composed query parameters correctly in Python smoke tests', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'python', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'tests/test_sdk_smoke.py');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('params = {');
+    expect(smokeTestFile!.content).toContain("    'page': 1,");
+    expect(smokeTestFile!.content).toContain('client.tenant.list_by_page(params)');
+  });
+
+  it('should generate standardized Go smoke tests when generateTests is enabled', async () => {
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go', generateTests: true }, mockSpec);
+    const goModFile = result.files.find((file) => file.path === 'go.mod');
+    const smokeTestFile = result.files.find((file) => file.path === 'sdk_smoke_test.go');
+
+    expect(result.errors).toEqual([]);
+    expect(goModFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('package backend_test');
+    expect(smokeTestFile!.content).toContain('"net/http/httptest"');
+    expect(smokeTestFile!.content).toContain('client := backend.NewSdkworkBackendClientWithConfig(cfg)');
+    expect(smokeTestFile!.content).toContain('_, err := client.User.ListUsers()');
+    expect(smokeTestFile!.content).toContain('if capturedPath != "/api/v1/users" {');
+  });
+
+  it('should generate Go smoke tests that assert body query and content type forwarding', async () => {
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'sdk_smoke_test.go');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+    const errorHandlingSection = (readmeFile?.content.split('## Error Handling')[1] || '').split('## License')[0] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('sdktypes "github.com/sdkwork/backend-sdk/types"');
+    expect(smokeTestFile!.content).toContain('body := &sdktypes.PlusTenantQueryListForm{');
+    expect(smokeTestFile!.content).toContain('Keyword: "keyword",');
+    expect(smokeTestFile!.content).toContain('params := map[string]interface{}{');
+    expect(smokeTestFile!.content).toContain('_, err := client.Tenant.ListByPage(body, params)');
+    expect(smokeTestFile!.content).toContain('if capturedQuery.Get("page") != "1" {');
+    expect(smokeTestFile!.content).toContain('if capturedContentType != "application/json" {');
+    expect(smokeTestFile!.content).toContain('assertJSONEqual(t, marshalJSON(t, body), capturedBody)');
+    expect(readmeFile).toBeDefined();
+    expect(usageExamplesSection).toContain('body := &sdktypes.PlusTenantQueryListForm{');
+    expect(usageExamplesSection).toContain('Keyword: "keyword",');
+    expect(usageExamplesSection).toContain('params := map[string]interface{}{');
+    expect(usageExamplesSection).toContain('result, err := client.Tenant.ListByPage(body, params)');
+    expect(errorHandlingSection).toContain('body := &sdktypes.PlusTenantQueryListForm{');
+    expect(errorHandlingSection).toContain('params := map[string]interface{}{');
+    expect(errorHandlingSection).toContain('_, err := client.Tenant.ListByPage(body, params)');
+  });
+
+  it('should generate concrete Go array request body samples in smoke tests and README examples', async () => {
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go', generateTests: true }, arrayBodySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'sdk_smoke_test.go');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const usageExamplesSection = readmeFile?.content.split('## Usage Examples')[1] || '';
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(readmeFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('body := &sdktypes.BatchCreateRequest{');
+    expect(smokeTestFile!.content).toContain('"item",');
+    expect(smokeTestFile!.content).toContain('_, err := client.Tenant.BatchCreate(body)');
+    expect(smokeTestFile!.content).toContain('assertJSONEqual(t, marshalJSON(t, body), capturedBody)');
+    expect(usageExamplesSection).toContain('body := &sdktypes.BatchCreateRequest{');
+    expect(usageExamplesSection).toContain('"item",');
+    expect(usageExamplesSection).toContain('result, err := client.Tenant.BatchCreate(body)');
+  });
+
+  it('should sample composed header parameters correctly in Go smoke tests', async () => {
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go', generateTests: true }, composedHeaderParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'sdk_smoke_test.go');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('headers := map[string]string{');
+    expect(smokeTestFile!.content).toContain('"X-Trace-Id": "trace-token"');
+    expect(smokeTestFile!.content).toContain('if capturedHeaders.Get("X-Trace-Id") != "trace-token" {');
+  });
+
+  it('should sample composed referenced query parameters correctly in Go smoke tests', async () => {
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go', generateTests: true }, composedReferencedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'sdk_smoke_test.go');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('params := map[string]interface{}{');
+    expect(smokeTestFile!.content).toContain('"page": 1');
+    expect(smokeTestFile!.content).toContain('if capturedQuery.Get("page") != "1" {');
+  });
+
+  it('should sample composed referenced header parameters correctly in Go smoke tests', async () => {
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go', generateTests: true }, composedReferencedHeaderParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'sdk_smoke_test.go');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('headers := map[string]string{');
+    expect(smokeTestFile!.content).toContain('"X-Trace-Id": "trace-token"');
+    expect(smokeTestFile!.content).toContain('if capturedHeaders.Get("X-Trace-Id") != "trace-token" {');
+  });
+
+  it('should preserve named non-object component schemas in TypeScript and Go', async () => {
+    const typeScriptGenerator = new TypeScriptGenerator();
+    const typeScriptResult = await typeScriptGenerator.generate(
+      { ...baseConfig, language: 'typescript' },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(typeScriptResult.errors).toEqual([]);
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/string-alias.ts').content).toContain(
+      'export type StringAlias = string;',
+    );
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/string-list.ts').content).toContain(
+      'export type StringList = string[];',
+    );
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/string-map.ts').content).toContain(
+      'export type StringMap = Record<string, string>;',
+    );
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/user.ts').content).toContain('nickname?: StringAlias;');
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/user.ts').content).toContain('tags?: StringList;');
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/user.ts').content).toContain('metadata?: StringMap;');
+
+    const goGenerator = new GoGenerator();
+    const goResult = await goGenerator.generate(
+      { ...baseConfig, language: 'go', generateTests: true },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(goResult.errors).toEqual([]);
+    expect(getGeneratedFile(goResult.files, 'types/string_alias.go').content).toContain('type StringAlias string');
+    expect(getGeneratedFile(goResult.files, 'types/string_list.go').content).toContain('type StringList []string');
+    expect(getGeneratedFile(goResult.files, 'types/string_map.go').content).toContain(
+      'type StringMap map[string]string',
+    );
+    expect(getGeneratedFile(goResult.files, 'types/user.go').content).toContain('Nickname StringAlias');
+    expect(getGeneratedFile(goResult.files, 'types/user.go').content).toContain('Tags StringList');
+    expect(getGeneratedFile(goResult.files, 'types/user.go').content).toContain('Metadata StringMap');
+    expect(getGeneratedFile(goResult.files, 'sdk_smoke_test.go').content).toContain(
+      'body := sdktypes.StringAlias("value")',
+    );
+  });
+
+  it('should inline named non-object component schemas for fallback generators', async () => {
+    const pythonGenerator = new PythonGenerator();
+    const pythonResult = await pythonGenerator.generate(
+      { ...baseConfig, language: 'python' },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(pythonResult.errors).toEqual([]);
+    expect(pythonResult.files.some((file) => file.path === 'sdkwork_backend_sdk/models/string_alias.py')).toBe(false);
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
+      'nickname: str = None',
+    );
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
+      'tags: List[str] = None',
+    );
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
+      'metadata: Dict[str, str] = None',
+    );
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/api/alias.py').content).toContain(
+      'def send_scalar(self, body: str) -> str:',
+    );
+
+    const javaGenerator = new JavaGenerator();
+    const javaResult = await javaGenerator.generate({ ...baseConfig, language: 'java' }, namedNonObjectComponentSpec);
+
+    expect(javaResult.errors).toEqual([]);
+    expect(
+      javaResult.files.some((file) => file.path === 'src/main/java/com/sdkwork/backend/model/StringAlias.java'),
+    ).toBe(false);
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/model/User.java').content).toContain(
+      'private String nickname;',
+    );
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/model/User.java').content).toContain(
+      'private List<String> tags;',
+    );
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/model/User.java').content).toContain(
+      'private Map<String, String> metadata;',
+    );
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/api/AliasApi.java').content).toContain(
+      'public String sendScalar(String body) throws Exception {',
+    );
+
+    const dartGenerator = new DartGenerator();
+    const dartResult = await dartGenerator.generate({ ...baseConfig, language: 'dart' }, namedNonObjectComponentSpec);
+
+    expect(dartResult.errors).toEqual([]);
+    expect(getGeneratedFile(dartResult.files, 'lib/src/models.dart').content).not.toContain('class StringAlias');
+    expect(getGeneratedFile(dartResult.files, 'lib/src/api/alias.dart').content).toContain(
+      'Future<String?> sendScalar(String body) async {',
+    );
+    expect(getGeneratedFile(dartResult.files, 'lib/src/api/alias.dart').content).toContain('final payload = body;');
+
+    const flutterGenerator = new FlutterGenerator();
+    const flutterResult = await flutterGenerator.generate(
+      { ...baseConfig, language: 'flutter' },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(flutterResult.errors).toEqual([]);
+    expect(getGeneratedFile(flutterResult.files, 'lib/src/models.dart').content).not.toContain('class StringAlias');
+    expect(getGeneratedFile(flutterResult.files, 'lib/src/api/alias.dart').content).toContain(
+      'Future<String?> sendScalar(String body) async {',
+    );
+    expect(getGeneratedFile(flutterResult.files, 'lib/src/api/alias.dart').content).toContain(
+      'final payload = body;',
+    );
+
+    const swiftGenerator = new SwiftGenerator();
+    const swiftResult = await swiftGenerator.generate(
+      { ...baseConfig, language: 'swift' },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(swiftResult.errors).toEqual([]);
+    expect(getGeneratedFile(swiftResult.files, 'Sources/Models.swift').content).not.toContain(
+      'public struct StringAlias: Codable',
+    );
+    expect(getGeneratedFile(swiftResult.files, 'Sources/API/AliasApi.swift').content).toContain(
+      'public func sendScalar(body: String) async throws -> String? {',
+    );
+
+    const kotlinGenerator = new KotlinGenerator();
+    const kotlinResult = await kotlinGenerator.generate(
+      { ...baseConfig, language: 'kotlin' },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(kotlinResult.errors).toEqual([]);
+    expect(
+      kotlinResult.files.some((file) => file.path === 'src/main/kotlin/com/sdkwork/backend/model/StringAlias.kt'),
+    ).toBe(false);
+    expect(getGeneratedFile(kotlinResult.files, 'src/main/kotlin/com/sdkwork/backend/api/AliasApi.kt').content).toContain(
+      'suspend fun sendScalar(body: String): String?',
+    );
+
+    const csharpGenerator = new CSharpGenerator();
+    const csharpResult = await csharpGenerator.generate(
+      { ...baseConfig, language: 'csharp' },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(csharpResult.errors).toEqual([]);
+    expect(csharpResult.files.some((file) => file.path === 'Models/StringAlias.cs')).toBe(false);
+    expect(getGeneratedFile(csharpResult.files, 'Api/AliasApi.cs').content).toContain(
+      'public async Task<string?> SendScalarAsync(string body)',
+    );
+
+    const rustGenerator = new RustGenerator();
+    const rustResult = await rustGenerator.generate({ ...baseConfig, language: 'rust' }, namedNonObjectComponentSpec);
+
+    expect(rustResult.errors).toEqual([]);
+    expect(rustResult.files.some((file) => file.path === 'src/models/string_alias.rs')).toBe(false);
+    expect(getGeneratedFile(rustResult.files, 'src/api/alias.rs').content).toContain(
+      'pub async fn send_scalar(&self, body: &String) -> Result<String, SdkworkError>',
+    );
+
+    const phpGenerator = new PhpGenerator();
+    const phpResult = await phpGenerator.generate(
+      { ...baseConfig, language: 'php', generateTests: true },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(phpResult.errors).toEqual([]);
+    expect(phpResult.files.some((file) => file.path === 'src/Models/StringAlias.php')).toBe(false);
+    expect(getGeneratedFile(phpResult.files, 'src/Api/Alias.php').content).toContain(
+      'public function sendScalar(string $body): string',
+    );
+    expect(getGeneratedFile(phpResult.files, 'README.md').content).toContain("$body = 'value';");
+
+    const rubyGenerator = new RubyGenerator();
+    const rubyResult = await rubyGenerator.generate(
+      { ...baseConfig, language: 'ruby', generateTests: true },
+      namedNonObjectComponentSpec,
+    );
+
+    expect(rubyResult.errors).toEqual([]);
+    expect(rubyResult.files.some((file) => file.path === 'lib/sdkwork/backend_sdk/models/string_alias.rb')).toBe(false);
+    expect(getGeneratedFile(rubyResult.files, 'README.md').content).toContain("body = 'body'");
+  });
+
+  it('should wrap Ruby object models in classes', async () => {
+    const generator = new RubyGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'ruby' }, namedNonObjectComponentSpec);
+    const userModelFile = getGeneratedFile(result.files, 'lib/sdkwork/backend_sdk/models/user.rb');
+
+    expect(result.errors).toEqual([]);
+    expect(userModelFile.content).toContain('module Sdkwork');
+    expect(userModelFile.content).toContain('module BackendSdk');
+    expect(userModelFile.content).toContain('module Models');
+    expect(userModelFile.content).toContain('class User');
+    expect(userModelFile.content).toContain('attr_accessor :name, :nickname, :tags, :metadata');
+  });
+
+  it('should generate standardized Java smoke tests when generateTests is enabled', async () => {
+    const generator = new JavaGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'java', generateTests: true }, mockSpec);
+    const pomFile = result.files.find((file) => file.path === 'pom.xml');
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(pomFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(pomFile!.content).toContain('<artifactId>junit-jupiter</artifactId>');
+    expect(pomFile!.content).toContain('<artifactId>maven-surefire-plugin</artifactId>');
+    expect(smokeTestFile!.content).toContain('package com.sdkwork.backend;');
+    expect(smokeTestFile!.content).toContain('import org.junit.jupiter.api.Test;');
+    expect(smokeTestFile!.content).toContain('import com.sun.net.httpserver.HttpServer;');
+    expect(smokeTestFile!.content).toContain('SdkworkBackendClient client = new SdkworkBackendClient(config);');
+    expect(smokeTestFile!.content).toContain('client.getUser().listUsers();');
+    expect(smokeTestFile!.content).toContain('assertEquals("/api/v1/users", capturedPath.get());');
+  });
+
+  it('should generate Java smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new JavaGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'java', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('PlusTenantQueryListForm body = new PlusTenantQueryListForm();');
+    expect(smokeTestFile!.content).toContain('body.setKeyword("keyword");');
+    expect(smokeTestFile!.content).toContain('Map<String, Object> params = new LinkedHashMap<>();');
+    expect(smokeTestFile!.content).toContain('params.put("page", 1);');
+    expect(smokeTestFile!.content).toContain('PlusApiResultPagePlusTenantVO result = client.getTenant().listByPage(body, params);');
+    expect(smokeTestFile!.content).toContain('assertEquals("/api/v1/tenant/list", capturedPath.get());');
+    expect(smokeTestFile!.content).toContain('assertEquals("1", capturedQuery.get("page"));');
+    expect(smokeTestFile!.content).toContain('assertTrue(capturedContentType.get().startsWith("application/json"));');
+    expect(smokeTestFile!.content).toContain('assertEquals("ok", result.getCode());');
+  });
+
+  it('should sample composed query parameters correctly in Java smoke tests', async () => {
+    const generator = new JavaGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'java', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('Map<String, Object> params = new LinkedHashMap<>();');
+    expect(smokeTestFile!.content).toContain('params.put("page", 1);');
+    expect(smokeTestFile!.content).toContain('assertEquals("1", capturedQuery.get("page"));');
+  });
+
+  it('should generate standardized Kotlin smoke tests when generateTests is enabled', async () => {
+    const generator = new KotlinGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'kotlin', generateTests: true }, mockSpec);
+    const buildFile = result.files.find((file) => file.path === 'build.gradle.kts');
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(buildFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(buildFile!.content).toContain('testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")');
+    expect(buildFile!.content).toContain('testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")');
+    expect(smokeTestFile!.content).toContain('package com.sdkwork.backend');
+    expect(smokeTestFile!.content).toContain('import com.sun.net.httpserver.HttpServer');
+    expect(smokeTestFile!.content).toContain('runBlocking');
+    expect(smokeTestFile!.content).toContain('val client = SdkworkBackendClient(config)');
+    expect(smokeTestFile!.content).toContain('client.user.listUsers()');
+    expect(smokeTestFile!.content).toContain('assertEquals("/api/v1/users", capturedPath)');
+  });
+
+  it('should generate Kotlin smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new KotlinGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'kotlin', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('val body = PlusTenantQueryListForm(');
+    expect(smokeTestFile!.content).toContain('keyword = "keyword"');
+    expect(smokeTestFile!.content).toContain('val params = linkedMapOf<String, Any>(');
+    expect(smokeTestFile!.content).toContain('"page" to 1');
+    expect(smokeTestFile!.content).toContain('val result = client.tenant.listByPage(body, params)');
+    expect(smokeTestFile!.content).toContain('assertEquals("/api/v1/tenant/list", capturedPath)');
+    expect(smokeTestFile!.content).toContain('assertEquals("1", capturedQuery["page"])');
+    expect(smokeTestFile!.content).toContain('assertTrue(capturedContentType.startsWith("application/json"))');
+    expect(smokeTestFile!.content).toContain('assertEquals("ok", result?.code)');
+  });
+
+  it('should sample composed query parameters correctly in Kotlin smoke tests', async () => {
+    const generator = new KotlinGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'kotlin', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('val params = linkedMapOf<String, Any>(');
+    expect(smokeTestFile!.content).toContain('"page" to 1');
+    expect(smokeTestFile!.content).toContain('assertEquals("1", capturedQuery["page"])');
+  });
+
+  it('should generate standardized Flutter smoke tests when generateTests is enabled', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'flutter', generateTests: true }, mockSpec);
+    const pubspecFile = result.files.find((file) => file.path === 'pubspec.yaml');
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(pubspecFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(pubspecFile!.content).toContain('test: ^1.24.0');
+    expect(smokeTestFile!.content).toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).toContain("import 'dart:io';");
+    expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:backend_sdk/backend_sdk.dart';");
+    expect(smokeTestFile!.content).toContain("final client = SdkworkBackendClient.withBaseUrl(baseUrl: 'http://127.0.0.1:${server.port}');");
+    expect(smokeTestFile!.content).toContain('await client.user.listUsers();');
+    expect(smokeTestFile!.content).toContain("expect(capturedPath, '/api/v1/users');");
+  });
+
+  it('should generate Flutter smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'flutter', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('final body = PlusTenantQueryListForm(');
+    expect(smokeTestFile!.content).toContain("keyword: 'keyword'");
+    expect(smokeTestFile!.content).toContain('final params = <String, dynamic>{');
+    expect(smokeTestFile!.content).toContain("'page': 1");
+    expect(smokeTestFile!.content).toContain('final result = await client.tenant.listByPage(body, params);');
+    expect(smokeTestFile!.content).toContain("expect(capturedPath, '/api/v1/tenant/list');");
+    expect(smokeTestFile!.content).toContain("expect(capturedQuery['page'], '1');");
+    expect(smokeTestFile!.content).toContain("expect(capturedContentType.startsWith('application/json'), isTrue);");
+    expect(smokeTestFile!.content).toContain('expect(jsonDecode(utf8.decode(capturedBody)), body.toJson());');
+    expect(smokeTestFile!.content).toContain("expect(result?.code, 'ok');");
+  });
+
+  it('should generate standardized C# smoke tests when generateTests is enabled', async () => {
+    const generator = new CSharpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'csharp', generateTests: true }, mockSpec);
+    const testProjectFile = result.files.find((file) => file.path === 'Tests/Backend.Tests.csproj');
+    const smokeTestFile = result.files.find((file) => file.path === 'Tests/GeneratedSdkSmokeTests.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(testProjectFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(testProjectFile!.content).toContain('<ProjectReference Include="../Backend.csproj" />');
+    expect(testProjectFile!.content).toContain('<PackageReference Include="xunit" Version="2.9.0" />');
+    expect(smokeTestFile!.content).toContain('using Xunit;');
+    expect(smokeTestFile!.content).toContain('var client = new SdkworkBackendClient(config);');
+    expect(smokeTestFile!.content).toContain('await client.User.ListUsersAsync()');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("/api/v1/users", capturedPath);');
+  });
+
+  it('should generate standardized Swift smoke tests when generateTests is enabled', async () => {
+    const generator = new SwiftGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'swift', generateTests: true }, mockSpec);
+    const packageFile = result.files.find((file) => file.path === 'Package.swift');
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'Tests/BackendSDKTests/GeneratedSdkSmokeTests.swift'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(packageFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(packageFile!.content).toContain('.testTarget(');
+    expect(packageFile!.content).toContain('name: "BackendSDKTests"');
+    expect(smokeTestFile!.content).toContain('import XCTest');
+    expect(smokeTestFile!.content).toContain('@testable import BackendSDK');
+    expect(smokeTestFile!.content).toContain('let client = SdkworkBackendClient(config: config)');
+    expect(smokeTestFile!.content).toContain('try await client.user.listUsers()');
+    expect(smokeTestFile!.content).toContain('XCTAssertEqual("/api/v1/users", capturedPath)');
+  });
+
+  it('should generate Swift smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new SwiftGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'swift', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'Tests/BackendSDKTests/GeneratedSdkSmokeTests.swift'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('let body = PlusTenantQueryListForm(keyword: "keyword")');
+    expect(smokeTestFile!.content).toContain('let params: [String: Any] = [');
+    expect(smokeTestFile!.content).toContain('"page": 1');
+    expect(smokeTestFile!.content).toContain('let result = try await client.tenant.listByPage(body: body, params: params)');
+    expect(smokeTestFile!.content).toContain('XCTAssertEqual("/api/v1/tenant/list", capturedPath)');
+    expect(smokeTestFile!.content).toContain('XCTAssertEqual("1", capturedQuery["page"])');
+    expect(smokeTestFile!.content).toContain('XCTAssertTrue(capturedContentType.hasPrefix("application/json"))');
+    expect(smokeTestFile!.content).toContain('assertJSONEqual(try encoder.encode(body), capturedBody)');
+    expect(smokeTestFile!.content).toContain('XCTAssertEqual("ok", result?.code)');
+  });
+
+  it('should sample composed query parameters correctly in Swift smoke tests', async () => {
+    const generator = new SwiftGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'swift', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find(
+      (file) => file.path === 'Tests/BackendSDKTests/GeneratedSdkSmokeTests.swift'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('let params: [String: Any] = [');
+    expect(smokeTestFile!.content).toContain('"page": 1');
+    expect(smokeTestFile!.content).toContain('XCTAssertEqual("1", capturedQuery["page"])');
+  });
+
+  it('should generate C# smoke tests that assert body query and typed response forwarding', async () => {
+    const generator = new CSharpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'csharp', generateTests: true }, postBodyAndQuerySpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'Tests/GeneratedSdkSmokeTests.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('var body = new PlusTenantQueryListForm');
+    expect(smokeTestFile!.content).toContain('Keyword = "keyword"');
+    expect(smokeTestFile!.content).toContain('var query = new Dictionary<string, object>');
+    expect(smokeTestFile!.content).toContain('["page"] = 1');
+    expect(smokeTestFile!.content).toContain('var result = await client.Tenant.ListByPageAsync(body, query);');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("/api/v1/tenant/list", capturedPath);');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("1", capturedQuery["page"]);');
+    expect(smokeTestFile!.content).toContain('Assert.StartsWith("application/json", capturedContentType);');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("ok", result!.Code);');
+  });
+
+  it('should sample composed query parameters correctly in C# smoke tests', async () => {
+    const generator = new CSharpGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'csharp', generateTests: true }, composedQueryParameterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'Tests/GeneratedSdkSmokeTests.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain('var query = new Dictionary<string, object>');
+    expect(smokeTestFile!.content).toContain('["page"] = 1');
+    expect(smokeTestFile!.content).toContain('Assert.Equal("1", capturedQuery["page"]);');
+  });
+
+  it('should truthfully report that TypeScript, Dart, Rust, Python, Go, Java, Swift, Kotlin, Flutter, C#, PHP, and Ruby currently support generated tests', () => {
+    expect(getGenerator('typescript')?.supportsTests).toBe(true);
+    expect(getGenerator('dart')?.supportsTests).toBe(true);
+    expect(getGenerator('rust')?.supportsTests).toBe(true);
+    expect(getGenerator('python')?.supportsTests).toBe(true);
+    expect(getGenerator('go')?.supportsTests).toBe(true);
+    expect(getGenerator('java')?.supportsTests).toBe(true);
+    expect(getGenerator('swift')?.supportsTests).toBe(true);
+    expect(getGenerator('kotlin')?.supportsTests).toBe(true);
+    expect(getGenerator('flutter')?.supportsTests).toBe(true);
+    expect(getGenerator('csharp')?.supportsTests).toBe(true);
+    expect(getGenerator('php')?.supportsTests).toBe(true);
+    expect(getGenerator('ruby')?.supportsTests).toBe(true);
+
+    for (const language of getSupportedLanguages().filter((language) => !['typescript', 'dart', 'rust', 'python', 'go', 'java', 'swift', 'kotlin', 'flutter', 'csharp', 'php', 'ruby'].includes(language))) {
+      expect(getGenerator(language)?.supportsTests).toBe(false);
+    }
+  });
+
+  it('should treat form-urlencoded request bodies as supported for Java generation', async () => {
+    const generator = new JavaGenerator();
+    const formSpec: ApiSpec = {
+      openapi: '3.0.3',
+      info: { title: 'Form API', version: '1.0.0' },
+      paths: {
+        '/auth/token': {
+          post: {
+            operationId: 'createToken',
+            tags: ['Auth'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'string',
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const result = await generator.generate({ ...baseConfig, language: 'java' }, formSpec);
+    const apiFile = result.files.find(
+      (file) => file.path === 'src/main/java/com/sdkwork/backend/api/AuthApi.java'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some((warning) => warning.includes('non-JSON media types'))).toBe(false);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('application/x-www-form-urlencoded');
+  });
+
+  it('should propagate form-urlencoded content types through generated API layers for go, kotlin, swift, and csharp', async () => {
+    const formSpec: ApiSpec = {
+      openapi: '3.0.3',
+      info: { title: 'Form API', version: '1.0.0' },
+      paths: {
+        '/auth/token': {
+          post: {
+            operationId: 'createToken',
+            tags: ['Auth'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'string',
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const cases = [
+      {
+        configLanguage: 'go' as const,
+        generator: new GoGenerator(),
+        expectedPath: 'api/auth.go',
+      },
+      {
+        configLanguage: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        expectedPath: 'src/main/kotlin/com/sdkwork/backend/api/AuthApi.kt',
+      },
+      {
+        configLanguage: 'swift' as const,
+        generator: new SwiftGenerator(),
+        expectedPath: 'Sources/API/AuthApi.swift',
+      },
+      {
+        configLanguage: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        expectedPath: 'Api/AuthApi.cs',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.configLanguage },
+        formSpec
+      );
+      const apiFile = result.files.find((file) => file.path === testCase.expectedPath);
+
+      expect(result.errors).toEqual([]);
+      expect(apiFile).toBeDefined();
+      expect(apiFile!.content).toContain('application/x-www-form-urlencoded');
+    }
+  });
+
+  it('should send form-urlencoded request bodies via data in generated Python APIs', async () => {
+    const generator = new PythonGenerator();
+    const formSpec: ApiSpec = {
+      openapi: '3.0.3',
+      info: { title: 'Python Form API', version: '1.0.0' },
+      paths: {
+        '/auth/token': {
+          post: {
+            operationId: 'createToken',
+            tags: ['Auth'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'string',
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const result = await generator.generate({ ...baseConfig, language: 'python' }, formSpec);
+    const apiFile = result.files.find((file) => file.path.endsWith('/api/auth.py'));
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('data=body');
+  });
+
+  it('should propagate explicit content types in generated TypeScript clients for form-encoded bodies', async () => {
+    const generator = new TypeScriptGenerator();
+    const formSpec: ApiSpec = {
+      openapi: '3.0.3',
+      info: { title: 'TypeScript Form API', version: '1.0.0' },
+      paths: {
+        '/auth/token': {
+          post: {
+            operationId: 'createToken',
+            tags: ['Auth'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/x-www-form-urlencoded': {
+                  schema: {
+                    type: 'object',
+                    additionalProperties: {
+                      type: 'string',
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const result = await generator.generate(baseConfig, formSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/auth.ts');
+    const httpFile = result.files.find((file) => file.path === 'src/http/client.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(httpFile).toBeDefined();
+    expect(apiFile!.content).toContain('application/x-www-form-urlencoded');
+    expect(httpFile!.content).toContain("contentType?: string");
+    expect(httpFile!.content).toContain("contentType,");
   });
 });

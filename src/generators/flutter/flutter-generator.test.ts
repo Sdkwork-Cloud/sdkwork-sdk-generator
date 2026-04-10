@@ -231,4 +231,25 @@ describe('Flutter generator regressions', () => {
     expect(apiFile!.content).toContain('final payload = body.toJson();');
     expect(apiFile!.content).not.toContain('final payload = body?.toJson();');
   });
+
+  it('generates standardized flutter smoke tests and planner-backed readme examples', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate({ ...flutterConfig, generateTests: true }, flutterSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(readmeFile).toBeDefined();
+    expect(smokeTestFile!.content).toContain("import 'package:app_sdk/app_sdk.dart';");
+    expect(smokeTestFile!.content).toContain("final client = SdkworkAppClient.withBaseUrl(baseUrl: 'http://127.0.0.1:${server.port}');");
+    expect(smokeTestFile!.content).toContain('final result = await client.user.getUserProfile();');
+    expect(smokeTestFile!.content).toContain('expect(result?.data, isNotNull);');
+    expect(readmeFile!.content).toContain("final client = SdkworkAppClient.withBaseUrl(baseUrl: 'https://api.example.com');");
+    expect(readmeFile!.content).toContain('final result = await client.user.getUserProfile();');
+    expect(readmeFile!.content).toContain(`try {
+  final result = await client.user.getUserProfile();
+  print(result);`);
+    expect(readmeFile!.content).not.toContain("import 'package:sdkwork_common_flutter/sdkwork_common_flutter.dart';");
+  });
 });

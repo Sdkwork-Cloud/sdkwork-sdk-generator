@@ -3,6 +3,14 @@ import type { GeneratorConfig } from '../../framework/types.js';
 import { SWIFT_CONFIG } from './config.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
 
+export function resolveSwiftPackageTargetName(config: Pick<GeneratorConfig, 'sdkType'>): string {
+  return `${SWIFT_CONFIG.namingConventions.modelName(config.sdkType)}SDK`;
+}
+
+export function resolveSwiftTestTargetName(config: Pick<GeneratorConfig, 'sdkType'>): string {
+  return `${resolveSwiftPackageTargetName(config)}Tests`;
+}
+
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
     return [
@@ -11,8 +19,17 @@ export class BuildConfigGenerator {
   }
 
   private generatePackageSwift(config: GeneratorConfig): GeneratedFile {
-    const sdkName = `${SWIFT_CONFIG.namingConventions.modelName(config.sdkType)}SDK`;
+    const sdkName = resolveSwiftPackageTargetName(config);
+    const testTargetName = resolveSwiftTestTargetName(config);
     const commonPkg = resolveSwiftCommonPackage(config);
+    const testTarget = config.generateTests === true
+      ? `,
+        .testTarget(
+            name: "${testTargetName}",
+            dependencies: ["${sdkName}", "${commonPkg.productName}"],
+            path: "Tests/${testTargetName}"
+        )`
+      : '';
     
     return {
       path: 'Package.swift',
@@ -39,7 +56,7 @@ let package = Package(
             name: "${sdkName}",
             dependencies: ["${commonPkg.productName}"],
             path: "Sources"
-        ),
+        )${testTarget}
     ]
 )
 `),

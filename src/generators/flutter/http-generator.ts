@@ -3,7 +3,7 @@ import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { FLUTTER_CONFIG } from './config.js';
+import { FLUTTER_CONFIG, getFlutterPackageName } from './config.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -130,7 +130,7 @@ ${inits}
   }
 
   private generatePackageEntry(config: GeneratorConfig): GeneratedFile {
-    const packageName = `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
+    const packageName = getFlutterPackageName(config);
     const clientFile = `${FLUTTER_CONFIG.namingConventions.fileName(config.sdkType)}_client.dart`;
 
     return {

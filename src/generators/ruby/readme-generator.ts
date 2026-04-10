@@ -6,38 +6,26 @@ import {
   buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { getRubyGemName, getRubyModuleSegments, getRubyRootRequirePath, RUBY_CONFIG } from './config.js';
+import { getRubyGemName, getRubyModuleSegments, getRubyRootRequirePath } from './config.js';
+import { RubyUsagePlanner, renderRubyUsageSnippet } from './usage-planner.js';
 
 export class ReadmeGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
     const clientName = resolveSdkClientName(config);
     const gemName = getRubyGemName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
-    const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-    const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-      || tags[0];
-    const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-    const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-    const quickStartModule = quickStartTag
-      ? RUBY_CONFIG.namingConventions.propertyName(resolvedTagNames.get(quickStartTag) || quickStartTag)
-      : 'example';
-    const quickStartMethod = quickStartOperation
-      ? this.generateReadmeOperationId(
-        quickStartOperation.method,
-        quickStartOperation.path,
-        quickStartOperation,
-        quickStartTag || '',
-      )
-      : 'list';
     const modulePrefix = getRubyModuleSegments(config).join('::');
-    const modules = tags.map((tag) => {
-      const resolvedTagName = resolvedTagNames.get(tag) || tag;
-      const propName = RUBY_CONFIG.namingConventions.propertyName(resolvedTagName);
-      return `- \`client.${propName}\` - ${tag} API`;
-    }).join('\n');
+    const planner = new RubyUsagePlanner(ctx, modulePrefix);
+    const quickStartPlan = planner.selectQuickStartPlan();
+    const quickStartSnippet = quickStartPlan
+      ? renderRubyUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+      : 'result = client.example.list';
+    const quickStartOutput = quickStartPlan?.hasReturnValue ? "\nputs result.inspect" : '';
+    const errorHandlingSnippet = quickStartPlan
+      ? renderRubyUsageSnippet(quickStartPlan, 'readme', { assignResult: false })
+      : 'client.example.list';
+    const modules = tags.map((tag) => `- \`client.${planner.getModuleProperty(tag)}\` - ${tag} API`).join('\n');
     const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
     const authSection = buildMutuallyExclusiveAuthSection({
       codeFence: 'ruby',
@@ -58,6 +46,7 @@ client.set_access_token("your-access-token")
     });
     const publishSection = buildPublishSection('ruby');
     const readmeTitle = buildLanguageReadmeTitle(config.name, 'Ruby');
+    const examples = this.generateExamples(ctx, planner);
 
     return {
       path: 'README.md',
@@ -80,14 +69,39 @@ config = ${modulePrefix}::SdkConfig.new(base_url: '${config.baseUrl}')
 client = ${modulePrefix}::${clientName}.new(config)
 client.set_api_key('your-api-key')
 
-result = client.${quickStartModule}.${quickStartMethod}
+${quickStartSnippet}
+\n${quickStartOutput}
 \`\`\`
 
 ${authSection}
 
+## Configuration (Non-Auth)
+
+\`\`\`ruby
+config = ${modulePrefix}::SdkConfig.new(base_url: '${config.baseUrl}')
+client = ${modulePrefix}::${clientName}.new(config)
+
+# Set custom headers
+client.set_header('X-Custom-Header', 'value')
+\`\`\`
+
 ## API Modules
 
 ${modules}
+
+## Usage Examples
+
+${examples}
+
+## Error Handling
+
+\`\`\`ruby
+begin
+${this.indent(errorHandlingSnippet, 2)}
+rescue StandardError => e
+  warn("Error: #{e.message}")
+end
+\`\`\`
 
 ${publishSection}
 
@@ -100,39 +114,33 @@ ${config.license || 'MIT'}
     };
   }
 
-  private selectQuickStartOperation(operations: any[]): any | undefined {
-    if (!Array.isArray(operations) || operations.length === 0) {
-      return undefined;
-    }
-    const getWithoutPathParam = operations.find(
-      (op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'),
-    );
-    if (getWithoutPathParam) {
-      return getWithoutPathParam;
-    }
-    return operations[0];
-  }
-
-  private generateReadmeOperationId(method: string, path: string, op: any, tag: string): string {
-    if (op.operationId) {
-      const normalized = normalizeOperationId(op.operationId);
-      return RUBY_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-    }
-
-    const pathParts = path.split('/').filter(Boolean);
-    const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-    const actionMap: Record<string, string> = {
-      get: path.includes('{') ? 'get' : 'list',
-      post: 'create',
-      put: 'update',
-      patch: 'patch',
-      delete: 'delete',
-    };
-
-    return RUBY_CONFIG.namingConventions.methodName(`${actionMap[method] || method}_${resource}`);
-  }
-
   private format(content: string): string {
     return `${content.trim()}\n`;
+  }
+
+  private generateExamples(ctx: SchemaContext, planner: RubyUsagePlanner): string {
+    const examples: string[] = [];
+
+    for (const tag of Object.keys(ctx.apiGroups)) {
+      const plan = planner.selectPlanForTag(tag);
+      if (!plan) {
+        continue;
+      }
+
+      const outputLine = plan.hasReturnValue ? '\nputs result.inspect' : '';
+      examples.push(`### ${tag}
+
+\`\`\`ruby
+# ${plan.operation.summary || `${String(plan.operation.method || '').toUpperCase()} ${plan.operation.path}`}
+${renderRubyUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue })}${outputLine}
+\`\`\``);
+    }
+
+    return examples.join('\n\n') || 'No examples available.';
+  }
+
+  private indent(content: string, spaces: number): string {
+    const prefix = ' '.repeat(Math.max(0, spaces));
+    return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
   }
 }

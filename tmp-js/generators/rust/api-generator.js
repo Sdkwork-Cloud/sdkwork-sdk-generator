@@ -112,7 +112,6 @@ ${this.indent(methods, 4)}
         const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
         const requestBodySchema = requestBodyInfo?.schema;
         const hasBody = Boolean(requestBodySchema);
-        const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const responseSchema = this.extractResponseSchema(op);
         const responseType = responseSchema
             ? getRustType(responseSchema, RUST_CONFIG)
@@ -141,7 +140,7 @@ ${this.indent(methods, 4)}
         }
         if (hasBody) {
             const requestType = getRustType(requestBodySchema, RUST_CONFIG);
-            signatureParams.push(requestBodyRequired ? `body: &${requestType}` : `body: Option<&${requestType}>`);
+            signatureParams.push(`body: &${requestType}`);
         }
         if (hasQuery) {
             signatureParams.push('query: Option<&QueryParams>');
@@ -165,13 +164,13 @@ ${this.indent(methods, 4)}
                 clientCall = `self.client.get(&path, ${queryArg}, ${headersArg}).await`;
                 break;
             case 'post':
-                clientCall = `self.client.post(&path, ${hasBody ? (requestBodyRequired ? 'Some(body)' : 'body') : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = `self.client.post(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
                 break;
             case 'put':
-                clientCall = `self.client.put(&path, ${hasBody ? (requestBodyRequired ? 'Some(body)' : 'body') : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = `self.client.put(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
                 break;
             case 'patch':
-                clientCall = `self.client.patch(&path, ${hasBody ? (requestBodyRequired ? 'Some(body)' : 'body') : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = `self.client.patch(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
                 break;
             case 'delete':
                 clientCall = `self.client.delete(&path, ${queryArg}, ${headersArg}).await`;

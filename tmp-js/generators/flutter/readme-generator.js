@@ -1,33 +1,27 @@
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
-import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { FLUTTER_CONFIG } from './config.js';
+import { getFlutterPackageName } from './config.js';
+import { FlutterUsagePlanner, renderFlutterUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
-        const pkgName = `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
-        const commonPkg = resolveFlutterCommonPackage(config);
+        const pkgName = getFlutterPackageName(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const allGroups = Object.entries(ctx.apiGroups);
-        const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-        const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-            || allGroups[0]?.[0];
-        const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-        const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-        const quickStartResolvedTagName = quickStartTag
-            ? (resolvedTagNames.get(quickStartTag) || quickStartTag)
-            : 'example';
-        const quickStartModule = FLUTTER_CONFIG.namingConventions.propertyName(quickStartResolvedTagName);
-        const quickStartMethod = quickStartOperation
-            ? this.generateOperationId(quickStartOperation.method, quickStartOperation.path, quickStartOperation, quickStartTag || '')
-            : 'list';
-        const modules = tags.map(tag => {
-            const resolvedTagName = resolvedTagNames.get(tag) || tag;
-            const propName = FLUTTER_CONFIG.namingConventions.propertyName(resolvedTagName);
-            return `- \`client.${propName}\` - ${tag} API`;
-        }).join('\n');
+        const planner = new FlutterUsagePlanner(ctx);
+        const quickStartPlan = planner.selectQuickStartPlan();
+        const quickStartSnippet = quickStartPlan
+            ? renderFlutterUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : 'await client.example.list();';
+        const quickStartOutput = quickStartPlan?.hasReturnValue
+            ? '\nprint(result);'
+            : "\nprint('Request completed');";
+        const errorHandlingSnippet = quickStartPlan
+            ? renderFlutterUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : 'await client.example.list();';
+        const errorHandlingOutput = quickStartPlan?.hasReturnValue
+            ? '\n  print(result);'
+            : "\n  print('Request completed');";
+        const modules = tags.map((tag) => `- \`client.${planner.getModuleName(tag)}\` - ${tag} API`).join('\n');
         const readmeTitle = buildLanguageReadmeTitle(config.name, 'Flutter');
         const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
         const authSection = buildMutuallyExclusiveAuthSection({
@@ -46,7 +40,7 @@ client.setAccessToken('your-access-token');
             accessTokenCall: 'setAccessToken(...)',
         });
         const publishSection = buildPublishSection('flutter');
-        const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
+        const examples = this.generateExamples(ctx, planner);
         return {
             path: 'README.md',
             content: this.format(`# ${readmeTitle}
@@ -66,18 +60,12 @@ dependencies:
 
 \`\`\`dart
 import 'package:${pkgName}/${pkgName}.dart';
-import '${commonPkg.importPath}';
 
-final client = ${clientName}(
-  config: SdkConfig(
-    baseUrl: '${config.baseUrl}',
-  ),
-);
+final client = ${clientName}.withBaseUrl(baseUrl: '${config.baseUrl}');
 client.setApiKey('your-api-key');
 
 // Use the SDK
-final result = await client.${quickStartModule}.${quickStartMethod}();
-print(result);
+${quickStartSnippet}${quickStartOutput}
 \`\`\`
 
 ${authSection}
@@ -103,7 +91,7 @@ ${examples}
 
 \`\`\`dart
 try {
-  final result = await client.${quickStartModule}.${quickStartMethod}();
+${this.indent(errorHandlingSnippet, 2)}${errorHandlingOutput}
 } catch (e) {
   print('Error: $e');
 }
@@ -119,52 +107,30 @@ ${config.license || 'MIT'}
             description: 'SDK documentation',
         };
     }
-    generateExamples(ctx, config, clientName, resolvedTagNames) {
+    generateExamples(ctx, planner) {
         const examples = [];
-        for (const [tag, group] of Object.entries(ctx.apiGroups)) {
-            const operations = group.operations || [];
-            if (operations.length > 0) {
-                const op = operations[0];
-                const methodName = this.generateOperationId(op.method, op.path, op, tag);
-                const resolvedTagName = resolvedTagNames.get(tag) || tag;
-                examples.push(`### ${tag}
-
-\`\`\`dart
-// ${op.summary || `${op.method.toUpperCase()} ${op.path}`}
-final result = await client.${FLUTTER_CONFIG.namingConventions.propertyName(resolvedTagName)}.${methodName}();
-print(result);
-\`\`\``);
+        for (const [tag] of Object.entries(ctx.apiGroups)) {
+            const plan = planner.selectPlanForTag(tag);
+            if (!plan) {
+                continue;
             }
+            const usage = renderFlutterUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue });
+            const output = plan.hasReturnValue
+                ? '\nprint(result);'
+                : "\nprint('Request completed');";
+            examples.push(`### ${tag}
+\`\`\`dart
+// ${plan.operation.summary || `${String(plan.operation.method || '').toUpperCase()} ${plan.operation.path}`}
+${usage}${output}
+\`\`\``);
         }
         return examples.join('\n\n') || 'No examples available.';
     }
-    selectQuickStartOperation(operations) {
-        if (!Array.isArray(operations) || operations.length === 0) {
-            return undefined;
-        }
-        const getWithoutPathParam = operations.find((op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'));
-        if (getWithoutPathParam) {
-            return getWithoutPathParam;
-        }
-        return operations[0];
-    }
-    generateOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return FLUTTER_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-        };
-        return `${actionMap[method] || method}${FLUTTER_CONFIG.namingConventions.modelName(resource)}`;
-    }
     format(content) {
         return content.trim() + '\n';
+    }
+    indent(content, spaces) {
+        const prefix = ' '.repeat(Math.max(0, spaces));
+        return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
     }
 }

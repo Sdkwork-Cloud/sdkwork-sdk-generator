@@ -96,8 +96,9 @@ ${methods}
         const hasBody = Boolean(requestBodyInfo);
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestBodySchema = requestBodyInfo?.schema;
-        const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-        const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+        const contentTypeArg = requestBodyInfo?.mediaType
+            ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+            : '""';
         const rawRequestType = requestBodySchema
             ? getGoType(requestBodySchema, GO_CONFIG)
             : 'interface{}';
@@ -162,24 +163,16 @@ ${methods}
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, query, headers, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, query, headers, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, query, headers, ${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, query, nil, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, query, nil, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, query, nil, ${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, nil, headers, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, nil, headers, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, nil, headers, ${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, nil, nil, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, nil, nil, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, nil, nil, ${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -198,24 +191,16 @@ ${methods}
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, query, headers, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, query, headers, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, query, headers, ${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, query, nil, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, query, nil, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, query, nil, ${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, nil, headers, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, nil, headers, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, nil, headers, ${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, nil, nil, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, nil, nil, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, nil, nil, ${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -248,24 +233,16 @@ ${methods}
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, query, headers, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, query, headers, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, query, headers, ${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, query, nil, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, query, nil, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, query, nil, ${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, nil, headers, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, nil, headers, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, nil, headers, ${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, nil, nil, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, nil, nil, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, nil, nil, ${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {

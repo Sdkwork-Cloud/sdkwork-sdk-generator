@@ -211,4 +211,27 @@ describe('Dart generator', () => {
     expect(readme!.content).toContain('Dart');
     expect(readme!.content).toContain('dart pub add sdkwork_app_sdk_dart');
   });
+
+  it('emits dart smoke tests and aligns README quick start when generateTests is enabled', async () => {
+    const generator = getGenerator('dart' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate({ ...dartConfig, generateTests: true }, dartSpec);
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+    const readme = result.files.find((file) => file.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(smokeTestFile).toBeDefined();
+    expect(readme).toBeDefined();
+
+    expect(smokeTestFile!.content).toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).toContain("import 'dart:io';");
+    expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:sdkwork_app_sdk_dart/sdkwork_app_sdk_dart.dart';");
+    expect(smokeTestFile!.content).toContain('final client = SdkworkAppClient(');
+    expect(smokeTestFile!.content).toContain('final result = await client.user.getUserProfile();');
+    expect(smokeTestFile!.content).toContain("expect(result?.code, 'ok');");
+
+    expect(readme!.content).toContain('final result = await client.user.getUserProfile();');
+  });
 });

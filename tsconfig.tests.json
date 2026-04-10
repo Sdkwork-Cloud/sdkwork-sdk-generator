@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": false,
+    "declaration": false,
+    "declarationMap": false,
+    "allowImportingTsExtensions": false,
+    "outDir": "./.tmp-tests",
+    "rootDir": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "vitest": ["./test-support/vitest-shim.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "test-support/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tmp-js",
+    ".tmp-tests"
+  ]
+}

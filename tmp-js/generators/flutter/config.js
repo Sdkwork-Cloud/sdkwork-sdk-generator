@@ -149,6 +149,13 @@ export function getFlutterType(schema, config) {
     }
     return 'dynamic';
 }
+export function getFlutterPackageName(config) {
+    const raw = String(config.packageName || '').trim();
+    if (raw) {
+        return toSnakeCase(raw);
+    }
+    return `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
+}
 function normalizeSchemaType(type) {
     if (typeof type === 'string') {
         return type;

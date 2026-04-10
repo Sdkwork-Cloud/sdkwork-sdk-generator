@@ -1,16 +1,7 @@
 import { defineConfig } from 'vite';
-import { builtinModules } from 'node:module';
 import { resolve } from 'path';
 import dts from 'vite-plugin-dts';
-
-const NODE_BUILTIN_EXTERNALS = Array.from(new Set([
-  'fs',
-  'path',
-  'url',
-  'crypto',
-  ...builtinModules,
-  ...builtinModules.map((name) => `node:${name}`),
-]));
+import { SDK_GENERATOR_VITE_EXTERNALS } from './src/vite-config-shared.js';
 
 export default defineConfig({
   build: {
@@ -25,10 +16,7 @@ export default defineConfig({
     minify: 'esbuild',
     rollupOptions: {
       external: [
-        '@sdkwork/sdk-common',
-        /^@sdkwork\/sdk-common\/.*/,
-        ...NODE_BUILTIN_EXTERNALS,
-        /^node:/,
+        ...SDK_GENERATOR_VITE_EXTERNALS,
       ],
       output: {
         exports: 'named',

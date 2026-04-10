@@ -7,6 +7,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { ReadmeGenerator } from './readme-generator.js';
+import { TestGenerator } from './test-generator.js';
 
 export class PhpGenerator extends BaseGenerator {
   private modelGenerator: ModelGenerator;
@@ -14,6 +15,7 @@ export class PhpGenerator extends BaseGenerator {
   private httpClientGenerator: HttpClientGenerator;
   private buildConfigGenerator: BuildConfigGenerator;
   private readmeGenerator: ReadmeGenerator;
+  private testGenerator: TestGenerator;
 
   constructor() {
     super(PHP_CONFIG);
@@ -22,6 +24,7 @@ export class PhpGenerator extends BaseGenerator {
     this.httpClientGenerator = new HttpClientGenerator();
     this.buildConfigGenerator = new BuildConfigGenerator();
     this.readmeGenerator = new ReadmeGenerator();
+    this.testGenerator = new TestGenerator();
   }
 
   generateModels(ctx: SchemaContext): GeneratedFile[] {
@@ -48,6 +51,10 @@ export class PhpGenerator extends BaseGenerator {
     return this.readmeGenerator.generate(ctx, config);
   }
 
+  protected generateTests(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
+    return this.testGenerator.generate(ctx, config);
+  }
+
   protected supportsHeaderCookieParameters(): boolean {
     return true;
   }
@@ -68,3 +75,4 @@ export { ApiGenerator } from './api-generator.js';
 export { HttpClientGenerator } from './http-generator.js';
 export { BuildConfigGenerator } from './build-config-generator.js';
 export { ReadmeGenerator } from './readme-generator.js';
+export { TestGenerator } from './test-generator.js';

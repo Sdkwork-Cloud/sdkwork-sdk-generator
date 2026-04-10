@@ -1,31 +1,27 @@
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { DART_CONFIG, getDartPackageName } from './config.js';
+import { getDartPackageName } from './config.js';
+import { DartUsagePlanner, renderDartUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
         const packageName = getDartPackageName(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const allGroups = Object.entries(ctx.apiGroups);
-        const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-        const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-            || allGroups[0]?.[0];
-        const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-        const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-        const quickStartResolvedTagName = quickStartTag
-            ? (resolvedTagNames.get(quickStartTag) || quickStartTag)
-            : 'example';
-        const quickStartModule = DART_CONFIG.namingConventions.propertyName(quickStartResolvedTagName);
-        const quickStartMethod = quickStartOperation
-            ? this.generateOperationId(quickStartOperation.method, quickStartOperation.path, quickStartOperation, quickStartTag || '')
-            : 'list';
-        const modules = tags.map((tag) => {
-            const resolvedTagName = resolvedTagNames.get(tag) || tag;
-            const propName = DART_CONFIG.namingConventions.propertyName(resolvedTagName);
-            return `- \`client.${propName}\` - ${tag} API`;
-        }).join('\n');
+        const planner = new DartUsagePlanner(ctx);
+        const quickStartPlan = planner.selectQuickStartPlan();
+        const quickStartSnippet = quickStartPlan
+            ? renderDartUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : 'await client.example.list();';
+        const quickStartOutput = quickStartPlan?.hasReturnValue
+            ? '\nprint(result);'
+            : "\nprint('Request completed');";
+        const errorHandlingSnippet = quickStartPlan
+            ? renderDartUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : 'await client.example.list();';
+        const errorHandlingOutput = quickStartPlan?.hasReturnValue
+            ? '\n  print(result);'
+            : "\n  print('Request completed');";
+        const modules = tags.map((tag) => `- \`client.${planner.getModuleName(tag)}\` - ${tag} API`).join('\n');
         const readmeTitle = buildLanguageReadmeTitle(config.name, 'Dart');
         const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
         const authSection = buildMutuallyExclusiveAuthSection({
@@ -44,7 +40,7 @@ client.setAccessToken('your-access-token');
             accessTokenCall: 'setAccessToken(...)',
         });
         const publishSection = buildPublishSection('dart');
-        const examples = this.generateExamples(ctx, resolvedTagNames);
+        const examples = this.generateExamples(ctx, planner);
         return {
             path: 'README.md',
             content: this.format(`# ${readmeTitle}
@@ -69,8 +65,8 @@ final client = ${clientName}(
 );
 client.setApiKey('your-api-key');
 
-final result = await client.${quickStartModule}.${quickStartMethod}();
-print(result);
+// Use the SDK
+${quickStartSnippet}${quickStartOutput}
 \`\`\`
 
 ${authSection}
@@ -94,8 +90,7 @@ ${examples}
 
 \`\`\`dart
 try {
-  final result = await client.${quickStartModule}.${quickStartMethod}();
-  print(result);
+${this.indent(errorHandlingSnippet, 2)}${errorHandlingOutput}
 } catch (error) {
   print('Error: $error');
 }
@@ -111,52 +106,31 @@ ${config.license || 'MIT'}
             description: 'SDK documentation',
         };
     }
-    generateExamples(ctx, resolvedTagNames) {
+    generateExamples(ctx, planner) {
         const examples = [];
-        for (const [tag, group] of Object.entries(ctx.apiGroups)) {
-            const operations = group.operations || [];
-            if (operations.length === 0) {
+        for (const [tag] of Object.entries(ctx.apiGroups)) {
+            const plan = planner.selectPlanForTag(tag);
+            if (!plan) {
                 continue;
             }
-            const op = operations[0];
-            const methodName = this.generateOperationId(op.method, op.path, op, tag);
-            const resolvedTagName = resolvedTagNames.get(tag) || tag;
+            const usage = renderDartUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue });
+            const output = plan.hasReturnValue
+                ? '\nprint(result);'
+                : "\nprint('Request completed');";
             examples.push(`### ${tag}
 
 \`\`\`dart
-final result = await client.${DART_CONFIG.namingConventions.propertyName(resolvedTagName)}.${methodName}();
-print(result);
+// ${plan.operation.summary || `${String(plan.operation.method || '').toUpperCase()} ${plan.operation.path}`}
+${usage}${output}
 \`\`\``);
         }
         return examples.join('\n\n') || 'No examples available.';
     }
-    selectQuickStartOperation(operations) {
-        if (!Array.isArray(operations) || operations.length === 0) {
-            return undefined;
-        }
-        const getWithoutPathParam = operations.find((op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'));
-        if (getWithoutPathParam) {
-            return getWithoutPathParam;
-        }
-        return operations[0];
-    }
-    generateOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return DART_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-        };
-        return `${actionMap[method] || method}${DART_CONFIG.namingConventions.modelName(resource)}`;
-    }
     format(content) {
         return content.trim() + '\n';
+    }
+    indent(content, spaces) {
+        const prefix = ' '.repeat(Math.max(0, spaces));
+        return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
     }
 }

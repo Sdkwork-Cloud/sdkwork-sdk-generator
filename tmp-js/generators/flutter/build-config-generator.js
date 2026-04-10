@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { FLUTTER_CONFIG } from './config.js';
+import { getFlutterPackageName } from './config.js';
 import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
 export class BuildConfigGenerator {
     generate(config) {
@@ -17,7 +17,7 @@ export class BuildConfigGenerator {
         ];
     }
     generatePubspec(config) {
-        const pkgName = `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
+        const pkgName = getFlutterPackageName(config);
         const commonPkg = resolveFlutterCommonPackage(config);
         return {
             path: 'pubspec.yaml',

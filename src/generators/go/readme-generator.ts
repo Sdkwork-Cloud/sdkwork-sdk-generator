@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
+import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
@@ -9,6 +9,7 @@ import {
 } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GO_CONFIG } from './config.js';
+import { GoUsagePlanner, renderGoUsageSnippet } from './usage-planner.js';
 
 export class ReadmeGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
@@ -16,26 +17,17 @@ export class ReadmeGenerator {
     const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSimplifiedTagNames(tags);
-    const allGroups = Object.entries(ctx.apiGroups);
-    const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-    const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-      || allGroups[0]?.[0];
-    const quickStartGroup = quickStartTag ? (ctx.apiGroups as any)[quickStartTag] : undefined;
-    const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-    const quickStartResolvedTagName = quickStartTag
-      ? (resolvedTagNames.get(quickStartTag) || quickStartTag)
-      : 'Example';
-    const quickStartModule = GO_CONFIG.namingConventions.modelName(
-      GO_CONFIG.namingConventions.propertyName(quickStartResolvedTagName),
-    );
-    const quickStartMethod = quickStartOperation
-      ? this.generateOperationId(
-        quickStartOperation.method,
-        quickStartOperation.path,
-        quickStartOperation,
-        quickStartTag || '',
-      )
-      : 'List';
+    const planner = new GoUsagePlanner(ctx);
+    const quickStartPlan = planner.selectQuickStartPlan();
+    const quickStartSnippet = quickStartPlan
+      ? renderGoUsageSnippet(quickStartPlan, 'readme')
+      : 'result, err := client.Example.List()';
+    const errorHandlingSnippet = quickStartPlan
+      ? renderGoUsageSnippet(quickStartPlan, 'readme', { resultBinding: '_' })
+      : '_, err := client.Example.List()';
+    const quickStartTypesImport = quickStartPlan?.requiresTypesImport
+      ? `    sdktypes "${moduleName}/types"`
+      : '';
     
     const modules = tags.map(tag => {
       const resolvedTagName = resolvedTagNames.get(tag) || tag;
@@ -64,7 +56,7 @@ client.SetAccessToken("your-access-token")
     });
     const publishSection = buildPublishSection('go');
 
-    const examples = this.generateExamples(ctx, config, clientName, moduleName, resolvedTagNames);
+    const examples = this.generateExamples(ctx, planner);
 
     return {
       path: 'README.md',
@@ -87,6 +79,7 @@ import (
     "fmt"
     "${moduleName}"
     sdkhttp "${moduleName}/http"
+${quickStartTypesImport ? `\n${quickStartTypesImport}` : ''}
 )
 
 func main() {
@@ -95,7 +88,7 @@ func main() {
     client.SetApiKey("your-api-key")
     
     // Use the SDK
-    result, err := client.${quickStartModule}.${quickStartMethod}()
+${this.indent(quickStartSnippet, 4)}
     if err != nil {
         panic(err)
     }
@@ -126,7 +119,7 @@ ${examples}
 ## Error Handling
 
 \`\`\`go
-result, err := client.${quickStartModule}.${quickStartMethod}()
+${errorHandlingSnippet}
 if err != nil {
     // Handle error
     fmt.Println("Error:", err)
@@ -147,72 +140,40 @@ ${config.license || 'MIT'}
 
   private generateExamples(
     ctx: SchemaContext,
-    config: GeneratorConfig,
-    clientName: string,
-    moduleName: string,
-    resolvedTagNames: Map<string, string>
+    planner: GoUsagePlanner,
   ): string {
     const examples: string[] = [];
-    
-    for (const [tag, group] of Object.entries(ctx.apiGroups)) {
-      const resolvedTagName = resolvedTagNames.get(tag) || tag;
-      const propName = GO_CONFIG.namingConventions.propertyName(resolvedTagName);
-      const operations = (group as any).operations || [];
-      
-      if (operations.length > 0) {
-        const op = operations[0];
-        const methodName = this.generateOperationId(op.method, op.path, op, tag);
-        
-        examples.push(`### ${tag}
+
+    for (const tag of Object.keys(ctx.apiGroups)) {
+      const plan = planner.selectPlanForTag(tag);
+      if (!plan) {
+        continue;
+      }
+
+      examples.push(`### ${tag}
 
 \`\`\`go
-// ${op.summary || `${op.method.toUpperCase()} ${op.path}`}
-result, err := client.${GO_CONFIG.namingConventions.modelName(propName)}.${methodName}()
+// ${plan.operation.summary || `${plan.transportMethod.toUpperCase()} ${plan.operation.path}`}
+${renderGoUsageSnippet(plan, 'readme')}
 if err != nil {
     panic(err)
 }
 fmt.Println(result)
 \`\`\``);
-      }
     }
 
     return examples.join('\n\n') || 'No examples available.';
   }
 
-  private selectQuickStartOperation(operations: any[]): any | undefined {
-    if (!Array.isArray(operations) || operations.length === 0) {
-      return undefined;
-    }
-    const getWithoutPathParam = operations.find(
-      (op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'),
-    );
-    if (getWithoutPathParam) {
-      return getWithoutPathParam;
-    }
-    return operations[0];
-  }
-
-  private generateOperationId(method: string, path: string, op: any, tag: string): string {
-    if (op.operationId) {
-      const normalized = normalizeOperationId(op.operationId);
-      return GO_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-    }
-    
-    const pathParts = path.split('/').filter(Boolean);
-    const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-    
-    const actionMap: Record<string, string> = {
-      get: path.includes('{') ? 'Get' : 'List',
-      post: 'Create',
-      put: 'Update',
-      patch: 'Patch',
-      delete: 'Delete',
-    };
-    
-    return `${actionMap[method] || GO_CONFIG.namingConventions.modelName(method)}${GO_CONFIG.namingConventions.modelName(resource)}`;
-  }
-
   private format(content: string): string {
     return content.trim() + '\n';
+  }
+
+  private indent(content: string, spaces: number): string {
+    const prefix = ' '.repeat(Math.max(0, spaces));
+    return content
+      .split('\n')
+      .map((line) => (line ? `${prefix}${line}` : line))
+      .join('\n');
   }
 }

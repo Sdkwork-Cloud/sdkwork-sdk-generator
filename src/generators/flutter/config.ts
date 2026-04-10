@@ -1,4 +1,5 @@
 import type { LanguageConfig } from '../../framework/base.js';
+import type { GeneratorConfig } from '../../framework/types.js';
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
 
 export const FLUTTER_RESERVED_WORDS = new Set([
@@ -157,6 +158,14 @@ export function getFlutterType(schema: any, config: LanguageConfig): string {
   }
   
   return 'dynamic';
+}
+
+export function getFlutterPackageName(config: GeneratorConfig): string {
+  const raw = String(config.packageName || '').trim();
+  if (raw) {
+    return toSnakeCase(raw);
+  }
+  return `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
 }
 
 function normalizeSchemaType(type: unknown): string | undefined {

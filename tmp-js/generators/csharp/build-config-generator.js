@@ -4,9 +4,11 @@ import { getCSharpNamespace, getCSharpPackageId } from './config.js';
 import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
 export class BuildConfigGenerator {
     generate(config) {
-        return [
-            this.generateCsProj(config),
-        ];
+        const files = [this.generateCsProj(config)];
+        if (config.generateTests === true) {
+            files.push(this.generateTestCsProj(config));
+        }
+        return files;
     }
     generateCsProj(config) {
         const namespace = getCSharpNamespace(config);
@@ -52,6 +54,38 @@ ${commonReferenceGroup}
 `),
             language: 'csharp',
             description: 'Project configuration',
+        };
+    }
+    generateTestCsProj(config) {
+        const packageId = getCSharpPackageId(config);
+        return {
+            path: `Tests/${packageId}.Tests.csproj`,
+            content: this.format(`<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../${packageId}.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
+`),
+            language: 'csharp',
+            description: 'xUnit smoke-test project',
         };
     }
     format(content) {

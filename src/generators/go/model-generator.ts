@@ -55,8 +55,51 @@ type Page[T any] struct {
   private generateModel(name: string, schema: any, config: GeneratorConfig): GeneratedFile {
     const modelName = GO_CONFIG.namingConventions.modelName(name);
     const fileName = GO_CONFIG.namingConventions.fileName(name);
-    const props = schema.properties || {};
-    
+    const resolvedSchema = pickComposedSchema(schema) || schema;
+    const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+
+    if (normalizedType && normalizedType !== 'array' && normalizedType !== 'object') {
+      return {
+        path: `types/${fileName}.go`,
+        content: this.format(`package types
+
+${schema.description ? `// ${schema.description}` : ''}
+type ${modelName} ${getGoType(resolvedSchema, GO_CONFIG)}
+`),
+        language: 'go',
+        description: `${modelName} model definition`,
+      };
+    }
+
+    if (normalizedType === 'array') {
+      const itemType = resolvedSchema?.items ? getGoType(resolvedSchema.items, GO_CONFIG) : 'interface{}';
+      return {
+        path: `types/${fileName}.go`,
+        content: this.format(`package types
+
+${schema.description ? `// ${schema.description}` : ''}
+type ${modelName} []${itemType}
+`),
+        language: 'go',
+        description: `${modelName} model definition`,
+      };
+    }
+
+    if (resolvedSchema?.additionalProperties && typeof resolvedSchema.additionalProperties === 'object' && !resolvedSchema?.properties) {
+      const valueType = getGoType(resolvedSchema.additionalProperties, GO_CONFIG);
+      return {
+        path: `types/${fileName}.go`,
+        content: this.format(`package types
+
+${schema.description ? `// ${schema.description}` : ''}
+type ${modelName} map[string]${valueType}
+`),
+        language: 'go',
+        description: `${modelName} model definition`,
+      };
+    }
+
+    const props = resolvedSchema.properties || {};
     const fields = Object.entries(props).map(([propName, propSchema]: [string, any]) => {
       const fieldName = GO_CONFIG.namingConventions.propertyName(propName);
       const fieldType = getGoType(propSchema, GO_CONFIG);
@@ -93,4 +136,41 @@ ${fields}
   private format(content: string): string {
     return content.trim() + '\n';
   }
+}
+
+function normalizeSchemaType(type: unknown): string | undefined {
+  if (typeof type === 'string') {
+    return type;
+  }
+  if (Array.isArray(type)) {
+    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
+    return typeof candidate === 'string' ? candidate : undefined;
+  }
+  return undefined;
+}
+
+function inferImplicitObjectType(schema: any): string | undefined {
+  if (!schema || typeof schema !== 'object') {
+    return undefined;
+  }
+  if (schema.properties && typeof schema.properties === 'object') {
+    return 'object';
+  }
+  if (schema.additionalProperties) {
+    return 'object';
+  }
+  return undefined;
+}
+
+function pickComposedSchema(schema: any): any | undefined {
+  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
+  for (const key of orderedKeys) {
+    const values = schema?.[key];
+    if (!Array.isArray(values) || values.length === 0) {
+      continue;
+    }
+    const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
+    return candidate || values[0];
+  }
+  return undefined;
 }

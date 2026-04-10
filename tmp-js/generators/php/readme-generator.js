@@ -1,30 +1,25 @@
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { PHP_CONFIG, getPhpNamespace, getPhpPackageName } from './config.js';
+import { getPhpNamespace, getPhpPackageName } from './config.js';
+import { PhpUsagePlanner, renderPhpUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
         const packageName = getPhpPackageName(config);
         const namespace = getPhpNamespace(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-        const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-            || tags[0];
-        const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-        const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-        const quickStartModule = quickStartTag
-            ? PHP_CONFIG.namingConventions.propertyName(resolvedTagNames.get(quickStartTag) || quickStartTag)
-            : 'example';
-        const quickStartMethod = quickStartOperation
-            ? this.generateReadmeOperationId(quickStartOperation.method, quickStartOperation.path, quickStartOperation, quickStartTag || '')
-            : 'list';
-        const modules = tags.map((tag) => {
-            const resolvedTagName = resolvedTagNames.get(tag) || tag;
-            const propName = PHP_CONFIG.namingConventions.propertyName(resolvedTagName);
-            return `- \`$client->${propName}\` - ${tag} API`;
-        }).join('\n');
+        const planner = new PhpUsagePlanner(ctx);
+        const quickStartPlan = planner.selectQuickStartPlan();
+        const quickStartImports = this.buildModelImports(namespace, quickStartPlan);
+        const quickStartSnippet = quickStartPlan
+            ? renderPhpUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : '$result = $client->example->list();';
+        const quickStartOutput = quickStartPlan?.hasReturnValue ? "\nvar_dump(\$result);" : '';
+        const errorHandlingSnippet = quickStartPlan
+            ? renderPhpUsageSnippet(quickStartPlan, 'readme', { assignResult: false })
+            : '$client->example->list();';
+        const errorHandlingImports = this.buildModelImports(namespace, quickStartPlan);
+        const modules = tags.map((tag) => `- \`$client->${planner.getModuleProperty(tag)}\` - ${tag} API`).join('\n');
         const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
         const authSection = buildMutuallyExclusiveAuthSection({
             codeFence: 'php',
@@ -45,6 +40,7 @@ $client->setAccessToken('your-access-token');
         });
         const publishSection = buildPublishSection('php');
         const readmeTitle = buildLanguageReadmeTitle(config.name, 'PHP');
+        const examples = this.generateExamples(ctx, namespace, planner);
         return {
             path: 'README.md',
             content: this.format(`# ${readmeTitle}
@@ -64,19 +60,59 @@ composer require ${packageName}
 
 use ${namespace}\\${clientName};
 use ${namespace}\\SdkConfig;
+${quickStartImports}
 
 $config = new SdkConfig(baseUrl: '${config.baseUrl}');
 $client = new ${clientName}($config);
 $client->setApiKey('your-api-key');
 
-$result = $client->${quickStartModule}->${quickStartMethod}();
+${quickStartSnippet}
+\n${quickStartOutput}
 \`\`\`
 
 ${authSection}
 
+## Configuration (Non-Auth)
+
+\`\`\`php
+<?php
+
+use ${namespace}\\${clientName};
+use ${namespace}\\SdkConfig;
+
+$config = new SdkConfig(baseUrl: '${config.baseUrl}');
+$client = new ${clientName}($config);
+
+// Set custom headers
+$client->setHeader('X-Custom-Header', 'value');
+\`\`\`
+
 ## API Modules
 
 ${modules}
+
+## Usage Examples
+
+${examples}
+
+## Error Handling
+
+\`\`\`php
+<?php
+
+use ${namespace}\\${clientName};
+use ${namespace}\\SdkConfig;
+${errorHandlingImports}
+
+$config = new SdkConfig(baseUrl: '${config.baseUrl}');
+$client = new ${clientName}($config);
+
+try {
+${this.indent(errorHandlingSnippet, 4)}
+} catch (\\Throwable $e) {
+    echo "Error: {$e->getMessage()}\\n";
+}
+\`\`\`
 
 ${publishSection}
 
@@ -88,33 +124,40 @@ ${config.license || 'MIT'}
             description: 'SDK documentation',
         };
     }
-    selectQuickStartOperation(operations) {
-        if (!Array.isArray(operations) || operations.length === 0) {
-            return undefined;
-        }
-        const getWithoutPathParam = operations.find((op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'));
-        if (getWithoutPathParam) {
-            return getWithoutPathParam;
-        }
-        return operations[0];
-    }
-    generateReadmeOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return PHP_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-        };
-        return PHP_CONFIG.namingConventions.methodName(`${actionMap[method] || method}_${resource}`);
-    }
     format(content) {
         return `${content.trim()}\n`;
+    }
+    buildModelImports(namespace, plan) {
+        if (!plan || plan.modelImports.length === 0) {
+            return '';
+        }
+        return `${plan.modelImports.map((modelName) => `use ${namespace}\\Models\\${modelName};`).join('\n')}\n`;
+    }
+    generateExamples(ctx, namespace, planner) {
+        const examples = [];
+        for (const tag of Object.keys(ctx.apiGroups)) {
+            const plan = planner.selectPlanForTag(tag);
+            if (!plan) {
+                continue;
+            }
+            const imports = this.buildModelImports(namespace, plan);
+            const outputLine = plan.hasReturnValue ? '\nvar_dump($result);' : '';
+            examples.push(`### ${tag}
+
+\`\`\`php
+<?php
+
+${imports}// ${plan.operation.summary || `${String(plan.operation.method || '').toUpperCase()} ${plan.operation.path}`}
+${renderPhpUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue })}${outputLine}
+\`\`\``);
+        }
+        return examples.join('\n\n') || 'No examples available.';
+    }
+    indent(content, spaces) {
+        const prefix = ' '.repeat(Math.max(0, spaces));
+        return content
+            .split('\n')
+            .map((line) => (line ? `${prefix}${line}` : line))
+            .join('\n');
     }
 }

@@ -1,32 +1,28 @@
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
+import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
-import { resolveSdkClientName, resolveSdkLibraryName } from '../../framework/sdk-identity.js';
-import { SWIFT_CONFIG } from './config.js';
+import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveSwiftPackageTargetName } from './build-config-generator.js';
+import { SwiftUsagePlanner, renderSwiftUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
-        const sdkName = resolveSdkLibraryName(config);
+        const sdkTargetName = resolveSwiftPackageTargetName(config);
         const commonPkg = resolveSwiftCommonPackage(config);
+        const planner = new SwiftUsagePlanner(ctx);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const allGroups = Object.entries(ctx.apiGroups);
-        const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-        const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-            || allGroups[0]?.[0];
-        const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-        const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-        const quickStartResolvedTagName = quickStartTag
-            ? (resolvedTagNames.get(quickStartTag) || quickStartTag)
-            : 'example';
-        const quickStartModule = SWIFT_CONFIG.namingConventions.propertyName(quickStartResolvedTagName);
-        const quickStartMethod = quickStartOperation
-            ? this.generateOperationId(quickStartOperation.method, quickStartOperation.path, quickStartOperation, quickStartTag || '')
-            : 'list';
-        const modules = tags.map(tag => {
+        const quickStartPlan = planner.selectQuickStartPlan();
+        const quickStartUsage = quickStartPlan
+            ? renderSwiftUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : '// No API operations available.';
+        const quickStartPrint = quickStartPlan?.hasReturnValue ? '\nprint(result)' : '';
+        const errorCall = quickStartPlan
+            ? renderSwiftUsageSnippet(quickStartPlan, 'readme', { assignResult: false })
+            : '// No API operations available.';
+        const modules = tags.map((tag) => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
-            const propName = SWIFT_CONFIG.namingConventions.propertyName(resolvedTagName);
-            return `- \`client.${propName}\` - ${tag} API`;
+            return `- \`client.${planner.getModuleName(resolvedTagName)}\` - ${tag} API`;
         }).join('\n');
         const readmeTitle = buildLanguageReadmeTitle(config.name, 'Swift');
         const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
@@ -48,7 +44,7 @@ client.setAccessToken("your-access-token")
             accessTokenCall: 'setAccessToken(...)',
         });
         const publishSection = buildPublishSection('swift');
-        const examples = this.generateExamples(ctx, config, clientName, resolvedTagNames);
+        const examples = this.generateExamples(ctx, planner);
         return {
             path: 'README.md',
             content: this.format(`# ${readmeTitle}
@@ -68,7 +64,7 @@ dependencies: [
 ## Quick Start
 
 \`\`\`swift
-import ${sdkName}
+import ${sdkTargetName}
 import ${commonPkg.productName}
 
 let config = SdkConfig(baseUrl: "${config.baseUrl}")
@@ -76,8 +72,7 @@ let client = ${clientName}(config: config)
 client.setApiKey("your-api-key")
 
 // Use the SDK
-let result = try await client.${quickStartModule}.${quickStartMethod}()
-print(result)
+${quickStartUsage}${quickStartPrint}
 \`\`\`
 
 ${authSection}
@@ -104,7 +99,7 @@ ${examples}
 
 \`\`\`swift
 do {
-    let result = try await client.${quickStartModule}.${quickStartMethod}()
+${this.indent(errorCall, 4)}
 } catch {
     print("Error: \\(error)")
 }
@@ -120,52 +115,28 @@ ${config.license || 'MIT'}
             description: 'SDK documentation',
         };
     }
-    generateExamples(ctx, config, clientName, resolvedTagNames) {
+    generateExamples(ctx, planner) {
         const examples = [];
-        for (const [tag, group] of Object.entries(ctx.apiGroups)) {
-            const operations = group.operations || [];
-            if (operations.length > 0) {
-                const op = operations[0];
-                const methodName = this.generateOperationId(op.method, op.path, op, tag);
-                const resolvedTagName = resolvedTagNames.get(tag) || tag;
-                examples.push(`### ${tag}
+        for (const [tag] of Object.entries(ctx.apiGroups)) {
+            const plan = planner.selectPlanForTag(tag);
+            if (!plan) {
+                continue;
+            }
+            const usage = renderSwiftUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue });
+            examples.push(`### ${tag}
 
 \`\`\`swift
-// ${op.summary || `${op.method.toUpperCase()} ${op.path}`}
-let result = try await client.${SWIFT_CONFIG.namingConventions.propertyName(resolvedTagName)}.${methodName}()
-print(result)
+// ${plan.operation.summary || `${plan.operation.method.toUpperCase()} ${plan.operation.path}`}
+${usage}${plan.hasReturnValue ? '\nprint(result)' : ''}
 \`\`\``);
-            }
         }
         return examples.join('\n\n') || 'No examples available.';
     }
-    selectQuickStartOperation(operations) {
-        if (!Array.isArray(operations) || operations.length === 0) {
-            return undefined;
-        }
-        const getWithoutPathParam = operations.find((op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'));
-        if (getWithoutPathParam) {
-            return getWithoutPathParam;
-        }
-        return operations[0];
-    }
-    generateOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return SWIFT_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-        };
-        return `${actionMap[method] || method}${SWIFT_CONFIG.namingConventions.modelName(resource)}`;
-    }
     format(content) {
         return content.trim() + '\n';
+    }
+    indent(content, spaces) {
+        const prefix = ' '.repeat(Math.max(0, spaces));
+        return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
     }
 }

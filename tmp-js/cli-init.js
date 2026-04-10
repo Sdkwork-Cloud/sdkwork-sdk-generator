@@ -2,10 +2,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { buildGenerateExecutionArtifacts, buildGenerateExecutionReport, resolveGenerateExecutionArtifacts, } from './execution-report.js';
 import { parsePersistedGeneratorManifest, syncGeneratedOutput, } from './framework/output-sync.js';
+import { buildSdkMetadataManifest, SDKWORK_GENERATOR_PACKAGE, SDKWORK_METADATA_FILE, } from './framework/sdk-metadata.js';
 import { detectVersionFromProject, normalizeVersion, } from './framework/versioning.js';
 import { getSupportedLanguages, getSupportedSdkTypes } from './index.js';
 const DEFAULT_INIT_VERSION = '1.0.0';
-const INIT_GENERATED_PATHS = ['README.md', 'sdkwork-sdk.json'];
+const INIT_GENERATED_PATHS = ['README.md', SDKWORK_METADATA_FILE];
 const INIT_SCAFFOLD_PATHS = ['custom/README.md'];
 const INIT_SPEC = {
     openapi: '3.0.3',
@@ -132,7 +133,7 @@ export function formatInitFailure(error, options = {}) {
     if (options.json) {
         return `${JSON.stringify({
             schemaVersion: 1,
-            generator: '@sdkwork/sdk-generator',
+            generator: SDKWORK_GENERATOR_PACKAGE,
             status: 'error',
             command: 'init',
             message,
@@ -160,15 +161,8 @@ function buildInitFiles(config) {
             description: 'SDK workspace scaffold README',
         },
         {
-            path: 'sdkwork-sdk.json',
-            content: `${JSON.stringify({
-                name: config.name,
-                version: config.version,
-                language: config.language,
-                sdkType: config.sdkType,
-                packageName: config.packageName || null,
-                generator: '@sdkwork/sdk-generator',
-            }, null, 2)}\n`,
+            path: SDKWORK_METADATA_FILE,
+            content: `${JSON.stringify(buildSdkMetadataManifest(config), null, 2)}\n`,
             language: config.language,
             description: 'SDK workspace metadata',
         },
@@ -329,7 +323,7 @@ function buildInitImpact(changes) {
     if (paths.some((path) => path === 'README.md')) {
         areas.push('documentation');
     }
-    if (paths.some((path) => path === 'sdkwork-sdk.json')) {
+    if (paths.some((path) => path === SDKWORK_METADATA_FILE)) {
         areas.push('build-metadata');
     }
     if (paths.some((path) => path.startsWith('custom/'))) {
@@ -361,7 +355,7 @@ function classifyInitArea(path) {
     if (path === 'README.md') {
         areas.push('documentation');
     }
-    if (path === 'sdkwork-sdk.json') {
+    if (path === SDKWORK_METADATA_FILE) {
         areas.push('build-metadata');
     }
     if (path.startsWith('custom/')) {

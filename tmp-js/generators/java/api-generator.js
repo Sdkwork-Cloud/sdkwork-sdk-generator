@@ -1,34 +1,36 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
-        const packageName = config.sdkType.toLowerCase();
+        const identity = resolveJvmSdkIdentity(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => JAVA_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
             const group = ctx.apiGroups[tag];
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
-            files.push(this.generateApiClass(tag, resolvedTagName, group.operations, packageName, config, knownModels));
+            files.push(this.generateApiClass(tag, resolvedTagName, group.operations, identity, config, knownModels));
         }
-        files.push(this.generatePaths(packageName, config));
-        files.push(this.generateApiIndex(tags, resolvedTagNames, packageName, config));
+        files.push(this.generatePaths(identity, config));
+        files.push(this.generateApiIndex(tags, resolvedTagNames, identity, config));
         return files;
     }
-    generateApiClass(tag, resolvedTagName, operations, packageName, config, knownModels) {
+    generateApiClass(tag, resolvedTagName, operations, identity, config, knownModels) {
         const className = `${JAVA_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
         const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const methods = operations
             .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
             .join('\n\n');
         return {
-            path: `src/main/java/com/sdkwork/${packageName}/api/${className}.java`,
-            content: this.format(`package com.sdkwork.${packageName}.api;
+            path: `src/main/java/${identity.packagePath}/api/${className}.java`,
+            content: this.format(`package ${identity.packageRoot}.api;
 
-import com.sdkwork.${packageName}.http.HttpClient;
-import com.sdkwork.${packageName}.model.*;
+import com.fasterxml.jackson.core.type.TypeReference;
+import ${identity.packageRoot}.http.HttpClient;
+import ${identity.packageRoot}.model.*;
 import java.util.List;
 import java.util.Map;
 
@@ -56,8 +58,9 @@ ${methods}
         const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
         const hasBody = Boolean(requestBodyInfo);
         const requestBodySchema = requestBodyInfo?.schema;
-        const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-        const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+        const contentTypeArg = requestBodyInfo?.mediaType
+            ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+            : '';
         const requestType = requestBodySchema
             ? getJavaType(requestBodySchema, JAVA_CONFIG)
             : 'Object';
@@ -112,24 +115,16 @@ ${methods}
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `client.post(${pathCall}, body, params, headers, "multipart/form-data")`
-                            : `client.post(${pathCall}, body, params, headers)`;
+                        call = `client.post(${pathCall}, body, params, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `client.post(${pathCall}, body, params, null, "multipart/form-data")`
-                            : `client.post(${pathCall}, body, params)`;
+                        call = `client.post(${pathCall}, body, params, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `client.post(${pathCall}, body, null, headers, "multipart/form-data")`
-                            : `client.post(${pathCall}, body, null, headers)`;
+                        call = `client.post(${pathCall}, body, null, headers${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `client.post(${pathCall}, body, null, null, "multipart/form-data")`
-                            : `client.post(${pathCall}, body)`;
+                        call = `client.post(${pathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -148,24 +143,16 @@ ${methods}
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `client.put(${pathCall}, body, params, headers, "multipart/form-data")`
-                            : `client.put(${pathCall}, body, params, headers)`;
+                        call = `client.put(${pathCall}, body, params, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `client.put(${pathCall}, body, params, null, "multipart/form-data")`
-                            : `client.put(${pathCall}, body, params)`;
+                        call = `client.put(${pathCall}, body, params, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `client.put(${pathCall}, body, null, headers, "multipart/form-data")`
-                            : `client.put(${pathCall}, body, null, headers)`;
+                        call = `client.put(${pathCall}, body, null, headers${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `client.put(${pathCall}, body, null, null, "multipart/form-data")`
-                            : `client.put(${pathCall}, body)`;
+                        call = `client.put(${pathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -198,24 +185,16 @@ ${methods}
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `client.patch(${pathCall}, body, params, headers, "multipart/form-data")`
-                            : `client.patch(${pathCall}, body, params, headers)`;
+                        call = `client.patch(${pathCall}, body, params, headers${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `client.patch(${pathCall}, body, params, null, "multipart/form-data")`
-                            : `client.patch(${pathCall}, body, params)`;
+                        call = `client.patch(${pathCall}, body, params, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `client.patch(${pathCall}, body, null, headers, "multipart/form-data")`
-                            : `client.patch(${pathCall}, body, null, headers)`;
+                        call = `client.patch(${pathCall}, body, null, headers${contentTypeArg})`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `client.patch(${pathCall}, body, null, null, "multipart/form-data")`
-                            : `client.patch(${pathCall}, body)`;
+                        call = `client.patch(${pathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -243,7 +222,8 @@ ${methods}
         }
         const castType = this.ensureKnownType(responseType, knownModels);
         return `${docComment}    public ${responseType} ${methodName}(${params.join(', ')}) throws Exception {
-        return (${castType}) ${call};
+        Object raw = ${call};
+        return client.convertValue(raw, new TypeReference<${castType}>() {});
     }`;
     }
     generateOperationId(method, path, op, tag) {
@@ -373,8 +353,8 @@ ${methods}
     }
     generatePaths(packageName, config) {
         return {
-            path: `src/main/java/com/sdkwork/${packageName}/api/ApiPaths.java`,
-            content: this.format(`package com.sdkwork.${packageName}.api;
+            path: `src/main/java/${packageName.packagePath}/api/ApiPaths.java`,
+            content: this.format(`package ${packageName.packageRoot}.api;
 
 public class ApiPaths {
     public static final String API_PREFIX = "${config.apiPrefix}";
@@ -413,14 +393,14 @@ public class ApiPaths {
         const exports = tags.map((tag) => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
             const className = `${JAVA_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-            return `import com.sdkwork.${packageName}.api.${className};`;
+            return `import ${packageName.packageRoot}.api.${className};`;
         }).join('\n');
         return {
-            path: `src/main/java/com/sdkwork/${packageName}/api/package-info.java`,
+            path: `src/main/java/${packageName.packagePath}/api/package-info.java`,
             content: this.format(`/**
  * API modules for ${config.name}
  */
-package com.sdkwork.${packageName}.api;
+package ${packageName.packageRoot}.api;
 
 ${exports}
 `),

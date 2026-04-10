@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import type { GeneratedFile } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { FLUTTER_CONFIG } from './config.js';
+import { getFlutterPackageName } from './config.js';
 import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
 
 export class BuildConfigGenerator {
@@ -25,7 +25,7 @@ export class BuildConfigGenerator {
   }
 
   private generatePubspec(config: GeneratorConfig): GeneratedFile {
-    const pkgName = `${FLUTTER_CONFIG.namingConventions.packageName(config.sdkType)}_sdk`;
+    const pkgName = getFlutterPackageName(config);
     const commonPkg = resolveFlutterCommonPackage(config);
     
     return {

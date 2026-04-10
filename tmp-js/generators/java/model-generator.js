@@ -1,10 +1,11 @@
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
         const files = [];
-        const packageName = config.sdkType.toLowerCase();
+        const identity = resolveJvmSdkIdentity(config);
         for (const [name, schema] of Object.entries(ctx.schemas)) {
-            files.push(this.generateClass(name, schema, packageName));
+            files.push(this.generateClass(name, schema, identity));
         }
         return files;
     }
@@ -33,8 +34,8 @@ export class ModelGenerator {
     }`;
         }).join('\n');
         return {
-            path: `src/main/java/com/sdkwork/${packageName}/model/${className}.java`,
-            content: this.format(`package com.sdkwork.${packageName}.model;
+            path: `src/main/java/${packageName.packagePath}/model/${className}.java`,
+            content: this.format(`package ${packageName.packageRoot}.model;
 
 ${this.renderImports(imports)}
 public class ${className} {

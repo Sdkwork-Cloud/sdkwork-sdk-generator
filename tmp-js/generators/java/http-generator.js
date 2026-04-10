@@ -1,10 +1,11 @@
 import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
+import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JAVA_CONFIG } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
-        const packageName = config.sdkType.toLowerCase();
+        const identity = resolveJvmSdkIdentity(config);
         const clientName = resolveSdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSimplifiedTagNames(tags);
@@ -12,16 +13,17 @@ export class HttpClientGenerator {
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         const commonPkg = resolveJvmCommonPackage(config);
         return [
-            this.generateHttpClient(packageName, apiKeyHeader, apiKeyUseBearer, commonPkg.importRoot),
-            this.generateSdkClient(clientName, tags, resolvedTagNames, packageName, config, commonPkg.importRoot),
+            this.generateHttpClient(identity, apiKeyHeader, apiKeyUseBearer, commonPkg.importRoot),
+            this.generateSdkClient(clientName, tags, resolvedTagNames, identity, config, commonPkg.importRoot),
         ];
     }
-    generateHttpClient(packageName, apiKeyHeader, apiKeyUseBearer, commonImportRoot) {
+    generateHttpClient(identity, apiKeyHeader, apiKeyUseBearer, commonImportRoot) {
         return {
-            path: `src/main/java/com/sdkwork/${packageName}/http/HttpClient.java`,
-            content: this.format(`package com.sdkwork.${packageName}.http;
+            path: `src/main/java/${identity.packagePath}/http/HttpClient.java`,
+            content: this.format(`package ${identity.packageRoot}.http;
 
 import ${commonImportRoot}.Types;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
 
@@ -133,6 +135,13 @@ public class HttpClient {
         }
 
         return mapper.readValue(bodyText, Object.class);
+    }
+
+    public <T> T convertValue(Object value, TypeReference<T> typeReference) {
+        if (value == null) {
+            return null;
+        }
+        return mapper.convertValue(value, typeReference);
     }
 
     private RequestBody createJsonBody(Object body) throws Exception {
@@ -375,11 +384,11 @@ public class HttpClient {
             description: 'HTTP client implementation',
         };
     }
-    generateSdkClient(clientName, tags, resolvedTagNames, packageName, config, commonImportRoot) {
+    generateSdkClient(clientName, tags, resolvedTagNames, identity, config, commonImportRoot) {
         const imports = tags.map(tag => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
             const className = `${JAVA_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-            return `import com.sdkwork.${packageName}.api.${className};`;
+            return `import ${identity.packageRoot}.api.${className};`;
         }).join('\n');
         const fields = tags.map(tag => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
@@ -402,11 +411,11 @@ public class HttpClient {
     }`;
         }).join('\n\n');
         return {
-            path: `src/main/java/com/sdkwork/${packageName}/${clientName}.java`,
-            content: this.format(`package com.sdkwork.${packageName};
+            path: `src/main/java/${identity.packagePath}/${clientName}.java`,
+            content: this.format(`package ${identity.packageRoot};
 
 import ${commonImportRoot}.Types;
-import com.sdkwork.${packageName}.http.HttpClient;
+import ${identity.packageRoot}.http.HttpClient;
 ${imports}
 
 public class ${clientName} {

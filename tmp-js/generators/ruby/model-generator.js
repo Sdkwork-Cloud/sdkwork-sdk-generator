@@ -17,9 +17,8 @@ export class ModelGenerator {
             ? properties.map(([propName, propSchema]) => this.generateExport(propName, propSchema)).join('\n')
             : '            # No properties to serialize.';
         const description = schema?.description ? `        # ${sanitizeComment(schema.description)}\n` : '';
-        return {
-            path: `lib/${getRubyModuleSegments(config).map((segment) => toSnakeCase(segment)).join('/')}/models/${RUBY_CONFIG.namingConventions.fileName(name)}.rb`,
-            content: this.format(wrapRubyModules(moduleSegments, `${description}${attrAccessors ? `${attrAccessors}\n\n` : ''}        def initialize(attributes = {})
+        const body = `class ${modelName}
+${description}${attrAccessors ? `${attrAccessors}\n\n` : ''}        def initialize(attributes = {})
           attributes = (attributes || {}).transform_keys(&:to_s)
 ${assignments}
         end
@@ -34,7 +33,11 @@ ${assignments}
           {
 ${exports}
           }
-        end`)),
+        end
+      end`;
+        return {
+            path: `lib/${getRubyModuleSegments(config).map((segment) => toSnakeCase(segment)).join('/')}/models/${RUBY_CONFIG.namingConventions.fileName(name)}.rb`,
+            content: this.format(wrapRubyModules(moduleSegments, body)),
             language: 'ruby',
             description: `${modelName} model`,
         };

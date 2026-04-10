@@ -90,20 +90,42 @@ describe('runInitCommand', () => {
     expect(existsSync(join(outputDir, SDKWORK_GENERATOR_REPORT_PATH))).toBe(true);
 
     const metadata = JSON.parse(readFileSync(join(outputDir, 'sdkwork-sdk.json'), 'utf-8')) as {
+      schemaVersion?: number;
       name: string;
       version: string;
       language: string;
       sdkType: string;
       packageName: string | null;
       generator: string;
+      capabilities?: Record<string, unknown>;
+      generation?: Record<string, unknown>;
+      ownership?: Record<string, unknown>;
     };
     expect(metadata).toMatchObject({
+      schemaVersion: 1,
       name: 'TestSDK',
       version: '1.0.0',
       language: 'typescript',
       sdkType: 'backend',
       packageName: null,
       generator: '@sdkwork/sdk-generator',
+      capabilities: {
+        supportsGeneratedTests: true,
+        supportsReadme: true,
+        supportsCustomScaffold: true,
+        supportsPublishWorkflow: true,
+        hasDistinctBuildStep: true,
+      },
+      generation: {
+        readme: true,
+        tests: false,
+      },
+      ownership: {
+        generatedOwnership: 'generated',
+        scaffoldOwnership: 'scaffold',
+        scaffoldRoots: ['custom/'],
+        stateRoots: ['.sdkwork/'],
+      },
     });
 
     expect(execution.syncSummary.changes.createdGeneratedFiles).toEqual(['README.md', 'sdkwork-sdk.json']);

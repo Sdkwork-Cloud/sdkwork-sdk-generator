@@ -60,9 +60,19 @@ end`)),
     @api_key = nil
     @auth_token = nil
     @access_token = nil
-    @connection = Faraday.new(url: config.base_url) do |faraday|
+    connection_options = normalize_connection_options(config.connection_options)
+    test_stubs = connection_options.delete(:test_stubs)
+    adapter = connection_options.delete(:adapter)
+    adapter_options = connection_options.delete(:adapter_options)
+    @connection = Faraday.new({ url: config.base_url }.merge(connection_options)) do |faraday|
       faraday.options.timeout = config.timeout
-      faraday.adapter Faraday.default_adapter
+      if test_stubs
+        faraday.adapter :test, test_stubs
+      elsif adapter_options
+        faraday.adapter adapter || Faraday.default_adapter, adapter_options
+      else
+        faraday.adapter adapter || Faraday.default_adapter
+      end
     end
   end
 
@@ -144,6 +154,14 @@ end`)),
 
   def format_bearer(value)
     "Bearer #{value}"
+  end
+
+  def normalize_connection_options(options)
+    return {} unless options.is_a?(Hash)
+
+    options.each_with_object({}) do |(key, value), normalized|
+      normalized[key.respond_to?(:to_sym) ? key.to_sym : key] = value
+    end
   end
 end`, [
                 "require 'faraday'",

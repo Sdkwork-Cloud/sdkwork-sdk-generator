@@ -1,6 +1,6 @@
 {
   "name": "@sdkwork/sdk-generator",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "SDKWork SDK Generator - Professional SDK code generator for TypeScript, Dart, Python, Go, Java, Kotlin, Swift, C#, Flutter, Rust, PHP, and Ruby",
   "author": "SDKWork Team",
   "license": "MIT",
@@ -45,10 +45,12 @@
   ],
   "scripts": {
     "dev": "vite build --watch",
-    "build": "tsc --emitDeclarationOnly && vite build && tsc -p tsconfig.runtime.json",
-    "lint": "eslint src --ext .ts",
-    "test": "vitest",
-    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc --emitDeclarationOnly && npm run build:bundle && tsc -p tsconfig.runtime.json",
+    "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=es2020 --format=esm --outfile=dist/index.js --sourcemap --external:@sdkwork/sdk-common --external:@sdkwork/sdk-common/* && esbuild src/index.ts --bundle --platform=node --target=es2020 --format=cjs --outfile=dist/index.cjs --sourcemap --external:@sdkwork/sdk-common --external:@sdkwork/sdk-common/*",
+    "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.runtime.json",
+    "test": "node ./bin/test-runner.mjs",
+    "test:vitest": "vitest",
+    "clean": "node ./bin/clean.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

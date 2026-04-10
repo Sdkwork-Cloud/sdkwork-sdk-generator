@@ -1,8 +1,8 @@
-import { normalizeOperationId, resolveSimplifiedTagNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { CSHARP_CONFIG, getCSharpNamespace, getCSharpPackageId } from './config.js';
+import { getCSharpNamespace, getCSharpPackageId } from './config.js';
+import { CSharpUsagePlanner, renderCSharpUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
         const namespace = getCSharpNamespace(config);
@@ -10,23 +10,17 @@ export class ReadmeGenerator {
         const clientName = resolveSdkClientName(config);
         const commonPkg = resolveCSharpCommonPackage(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const allGroups = Object.entries(ctx.apiGroups);
-        const preferredModules = new Set(['tenant', 'user', 'app', 'auth', 'workspace']);
-        const quickStartTag = tags.find((tag) => preferredModules.has((resolvedTagNames.get(tag) || tag).toLowerCase()))
-            || allGroups[0]?.[0];
-        const quickStartGroup = quickStartTag ? ctx.apiGroups[quickStartTag] : undefined;
-        const quickStartOperation = this.selectQuickStartOperation(quickStartGroup?.operations || []);
-        const quickStartResolvedTagName = quickStartTag
-            ? (resolvedTagNames.get(quickStartTag) || quickStartTag)
-            : 'Example';
-        const quickStartModule = CSHARP_CONFIG.namingConventions.modelName(quickStartResolvedTagName);
-        const quickStartMethod = quickStartOperation
-            ? this.generateOperationId(quickStartOperation.method, quickStartOperation.path, quickStartOperation, quickStartTag || '')
-            : 'List';
+        const planner = new CSharpUsagePlanner(ctx);
+        const quickStartPlan = planner.selectQuickStartPlan();
+        const quickStartSnippet = quickStartPlan
+            ? renderCSharpUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })
+            : 'await client.Example.ListAsync();';
+        const quickStartResultLog = quickStartPlan?.hasReturnValue ? '\nConsole.WriteLine(result);' : '';
+        const quickStartNeedsCollections = /Dictionary<|List</.test(quickStartSnippet);
+        const quickStartCollectionUsing = quickStartNeedsCollections ? 'using System.Collections.Generic;\n' : '';
+        const quickStartModelUsing = quickStartPlan?.usesModelNamespace ? `using ${namespace}.Models;\n` : '';
         const modules = tags.map(tag => {
-            const resolvedTagName = resolvedTagNames.get(tag) || tag;
-            const propName = CSHARP_CONFIG.namingConventions.propertyName(resolvedTagName);
+            const propName = planner.getModuleName(tag);
             return `- \`client.${propName}\` - ${tag} API`;
         }).join('\n');
         const readmeTitle = buildLanguageReadmeTitle(config.name, 'C#');
@@ -49,7 +43,10 @@ client.SetAccessToken("your-access-token");
             accessTokenCall: 'SetAccessToken(...)',
         });
         const publishSection = buildPublishSection('csharp');
-        const examples = this.generateExamples(ctx, config, clientName, namespace, resolvedTagNames);
+        const examples = this.generateExamples(ctx, planner);
+        const errorHandlingSnippet = quickStartPlan
+            ? renderCSharpUsageSnippet(quickStartPlan, 'readme', { assignResult: false })
+            : 'await client.Example.ListAsync();';
         return {
             path: 'README.md',
             content: this.format(`# ${readmeTitle}
@@ -71,16 +68,14 @@ Or add to your \`.csproj\`:
 ## Quick Start
 
 \`\`\`csharp
-using ${namespace};
+${quickStartCollectionUsing}${quickStartModelUsing}using ${namespace};
 using ${commonPkg.namespace};
 
 var config = new SdkConfig("${config.baseUrl}");
 var client = new ${clientName}(config);
 client.SetApiKey("your-api-key");
 
-// Use the SDK
-var result = await client.${quickStartModule}.${quickStartMethod}Async();
-Console.WriteLine(result);
+${quickStartSnippet}${quickStartResultLog}
 \`\`\`
 
 ${authSection}
@@ -108,7 +103,7 @@ ${examples}
 \`\`\`csharp
 try
 {
-    var result = await client.${quickStartModule}.${quickStartMethod}Async();
+${this.indent(errorHandlingSnippet, 4)}
 }
 catch (HttpRequestException ex)
 {
@@ -126,52 +121,27 @@ ${config.license || 'MIT'}
             description: 'SDK documentation',
         };
     }
-    generateExamples(ctx, config, clientName, namespace, resolvedTagNames) {
+    generateExamples(ctx, planner) {
         const examples = [];
-        for (const [tag, group] of Object.entries(ctx.apiGroups)) {
-            const operations = group.operations || [];
-            if (operations.length > 0) {
-                const op = operations[0];
-                const methodName = this.generateOperationId(op.method, op.path, op, tag);
-                const resolvedTagName = resolvedTagNames.get(tag) || tag;
+        for (const [tag] of Object.entries(ctx.apiGroups)) {
+            const plan = planner.selectPlanForTag(tag);
+            if (plan) {
+                const usageSnippet = renderCSharpUsageSnippet(plan, 'readme', { assignResult: plan.hasReturnValue });
                 examples.push(`### ${tag}
 
 \`\`\`csharp
-// ${op.summary || `${op.method.toUpperCase()} ${op.path}`}
-var result = await client.${CSHARP_CONFIG.namingConventions.modelName(resolvedTagName)}.${methodName}Async();
-Console.WriteLine(result);
+// ${plan.operation.summary || `${plan.operation.method.toUpperCase()} ${plan.operation.path}`}
+${usageSnippet}${plan.hasReturnValue ? '\nConsole.WriteLine(result);' : ''}
 \`\`\``);
             }
         }
         return examples.join('\n\n') || 'No examples available.';
     }
-    selectQuickStartOperation(operations) {
-        if (!Array.isArray(operations) || operations.length === 0) {
-            return undefined;
-        }
-        const getWithoutPathParam = operations.find((op) => op?.method === 'get' && typeof op?.path === 'string' && !op.path.includes('{'));
-        if (getWithoutPathParam) {
-            return getWithoutPathParam;
-        }
-        return operations[0];
-    }
-    generateOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return CSHARP_CONFIG.namingConventions.modelName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'Get' : 'List',
-            post: 'Create',
-            put: 'Update',
-            patch: 'Patch',
-            delete: 'Delete',
-        };
-        return `${actionMap[method] || CSHARP_CONFIG.namingConventions.modelName(method)}${CSHARP_CONFIG.namingConventions.modelName(resource)}`;
-    }
     format(content) {
         return content.trim() + '\n';
+    }
+    indent(content, spaces) {
+        const prefix = ' '.repeat(Math.max(0, spaces));
+        return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
     }
 }

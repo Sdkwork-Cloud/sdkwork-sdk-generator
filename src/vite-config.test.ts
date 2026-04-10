@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import viteConfig from '../vite.config.ts';
+import { SDK_GENERATOR_VITE_EXTERNALS } from './vite-config-shared.js';
 
 describe('vite config', () => {
   it('externalizes node builtins used by the generator runtime', () => {
-    const external = viteConfig.build?.rollupOptions?.external;
+    const external = SDK_GENERATOR_VITE_EXTERNALS;
     expect(Array.isArray(external)).toBe(true);
 
     const entries = external as Array<string | RegExp>;
