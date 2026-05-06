@@ -149,6 +149,68 @@ const modelRefSpec: ApiSpec = {
   },
 };
 
+const languageCorrectnessSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: { title: 'Language Correctness API', version: '1.0.0' },
+  security: [{ ApiKeyAuth: [] }],
+  paths: {
+    '/forms': {
+      post: {
+        summary: 'Submit form',
+        operationId: 'submitForm',
+        tags: ['Form'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/x-www-form-urlencoded': {
+              schema: { $ref: '#/components/schemas/SubmitFormRequest' },
+            },
+          },
+        },
+        responses: { '204': { description: 'No Content' } },
+      },
+    },
+  },
+  components: {
+    securitySchemes: {
+      ApiKeyAuth: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+    },
+    schemas: {
+      User: {
+        type: 'object',
+        required: ['id', 'role', 'createdAt'],
+        properties: {
+          id: { type: 'string' },
+          displayName: { type: ['string', 'null'] as any },
+          role: { type: 'string' },
+          profile: { $ref: '#/components/schemas/UserProfile' },
+          tags: { type: 'array', items: { type: 'string' } },
+          settings: { type: 'object', additionalProperties: { type: 'string' } },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      UserProfile: {
+        type: 'object',
+        properties: {
+          address: { $ref: '#/components/schemas/DomesticAddress' },
+        },
+      },
+      DomesticAddress: {
+        type: 'object',
+        properties: {
+          state: { type: 'string' },
+        },
+      },
+      SubmitFormRequest: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 const duplicateOperationIdSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Duplicate Operation Id API', version: '1.0.0' },
@@ -728,6 +790,75 @@ describe('OpenAPI Security And Compliance', () => {
     expect(modelAFile).toBeDefined();
     expect(modelAFile!.content).toContain("import type { ModelB } from './model-b';");
     expect(modelAFile!.content).toContain('modelB?: ModelB;');
+  });
+
+  it('should generate compilable typescript auth constants and OpenAPI 3.1 nullable unions', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, languageCorrectnessSpec);
+    const httpClientFile = result.files.find((f) => f.path === 'src/http/client.ts');
+    const userFile = result.files.find((f) => f.path === 'src/types/user.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(httpClientFile).toBeDefined();
+    expect(httpClientFile!.content).toContain("private static readonly API_KEY_HEADER: string = 'X-API-Key';");
+    expect(userFile).toBeDefined();
+    expect(userFile!.content).toContain('displayName?: string | null;');
+  });
+
+  it('should generate python model imports and dataclass-safe field ordering', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate(
+      { ...baseConfig, language: 'python', packageName: 'sdkcheck-python' },
+      languageCorrectnessSpec
+    );
+    const userFile = result.files.find((f) => f.path === 'sdkcheck_python/models/user.py');
+    const profileFile = result.files.find((f) => f.path === 'sdkcheck_python/models/user_profile.py');
+
+    expect(userFile).toBeDefined();
+    expect(userFile!.content).toContain('from .user_profile import UserProfile');
+    expect(profileFile).toBeDefined();
+    expect(profileFile!.content).toContain('from .domestic_address import DomesticAddress');
+    expect(userFile!.content.indexOf('    created_at: str')).toBeLessThan(
+      userFile!.content.indexOf('    display_name: str = None')
+    );
+  });
+
+  it('should generate java model collection imports', async () => {
+    const generator = new JavaGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'java' }, languageCorrectnessSpec);
+    const userFile = result.files.find((f) => f.path === 'src/main/java/com/sdkwork/backend/model/User.java');
+
+    expect(userFile).toBeDefined();
+    expect(userFile!.content).toContain('import java.util.List;');
+    expect(userFile!.content).toContain('import java.util.Map;');
+    expect(userFile!.content).toContain('private List<String> tags;');
+    expect(userFile!.content).toContain('private Map<String, String> settings;');
+  });
+
+  it('should pass form-urlencoded media type from API methods to HTTP clients', async () => {
+    const configs = {
+      typescript: { generator: new TypeScriptGenerator(), path: 'src/api/form.ts', expected: "'application/x-www-form-urlencoded'" },
+      python: { generator: new PythonGenerator(), path: 'sdkcheck_python/api/form.py', expected: "headers=form_headers" },
+      go: { generator: new GoGenerator(), path: 'api/form.go', expected: '"application/x-www-form-urlencoded"' },
+      java: { generator: new JavaGenerator(), path: 'src/main/java/com/sdkwork/backend/api/FormApi.java', expected: '"application/x-www-form-urlencoded"' },
+      swift: { generator: new SwiftGenerator(), path: 'Sources/API/FormApi.swift', expected: 'contentType: "application/x-www-form-urlencoded"' },
+      kotlin: { generator: new KotlinGenerator(), path: 'src/main/kotlin/com/sdkwork/backend/api/FormApi.kt', expected: '"application/x-www-form-urlencoded"' },
+      csharp: { generator: new CSharpGenerator(), path: 'Api/FormApi.cs', expected: '"application/x-www-form-urlencoded"' },
+      flutter: { generator: new FlutterGenerator(), path: 'lib/src/api/form.dart', expected: "contentType: 'application/x-www-form-urlencoded'" },
+    };
+
+    for (const [language, { generator, path, expected }] of Object.entries(configs)) {
+      const packageName = language === 'python' ? 'sdkcheck-python' : undefined;
+      const result = await generator.generate(
+        { ...baseConfig, language: language as any, packageName },
+        languageCorrectnessSpec
+      );
+      const apiFile = result.files.find((f) => f.path === path);
+
+      expect(result.errors, `${language} generation errors`).toEqual([]);
+      expect(apiFile, `${language} API file ${path}`).toBeDefined();
+      expect(apiFile!.content).toContain(expected);
+    }
   });
 
   it('should handle advanced OpenAPI patterns without generation errors', async () => {

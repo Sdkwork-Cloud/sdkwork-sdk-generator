@@ -70,6 +70,7 @@ ${methods}
         const requestBodySchema = requestBodyInfo?.schema;
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
         const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+        const contentType = this.getExplicitContentType(requestBodyMediaType);
         const rawRequestType = requestBodySchema
             ? getGoType(requestBodySchema, GO_CONFIG)
             : 'interface{}';
@@ -125,24 +126,16 @@ ${methods}
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, query, headers, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, query, headers, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, query, headers, "${contentType || ''}")`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, query, nil, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, query, nil, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, query, nil, "${contentType || ''}")`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, nil, headers, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, nil, headers, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, nil, headers, "${contentType || ''}")`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `a.client.Post(${prefixedPath}, body, nil, nil, "multipart/form-data")`
-                            : `a.client.Post(${prefixedPath}, body, nil, nil, "")`;
+                        call = `a.client.Post(${prefixedPath}, body, nil, nil, "${contentType || ''}")`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -161,24 +154,16 @@ ${methods}
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, query, headers, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, query, headers, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, query, headers, "${contentType || ''}")`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, query, nil, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, query, nil, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, query, nil, "${contentType || ''}")`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, nil, headers, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, nil, headers, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, nil, headers, "${contentType || ''}")`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `a.client.Put(${prefixedPath}, body, nil, nil, "multipart/form-data")`
-                            : `a.client.Put(${prefixedPath}, body, nil, nil, "")`;
+                        call = `a.client.Put(${prefixedPath}, body, nil, nil, "${contentType || ''}")`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -211,24 +196,16 @@ ${methods}
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, query, headers, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, query, headers, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, query, headers, "${contentType || ''}")`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, query, nil, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, query, nil, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, query, nil, "${contentType || ''}")`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, nil, headers, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, nil, headers, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, nil, headers, "${contentType || ''}")`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `a.client.Patch(${prefixedPath}, body, nil, nil, "multipart/form-data")`
-                            : `a.client.Patch(${prefixedPath}, body, nil, nil, "")`;
+                        call = `a.client.Patch(${prefixedPath}, body, nil, nil, "${contentType || ''}")`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
@@ -275,6 +252,12 @@ ${methods}
             delete: 'Delete',
         };
         return `${actionMap[method] || GO_CONFIG.namingConventions.modelName(method)}${GO_CONFIG.namingConventions.modelName(resource)}`;
+    }
+    getExplicitContentType(mediaType) {
+        if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+            return mediaType;
+        }
+        return undefined;
     }
     extractPathParams(path) {
         const matches = path.match(/\{([^}]+)\}/g) || [];

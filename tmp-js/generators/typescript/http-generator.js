@@ -27,7 +27,7 @@ import type { AuthTokenManager } from '${commonImportPath}';
 import { BaseHttpClient, withRetry } from '${commonImportPath}';
 
 export class HttpClient extends BaseHttpClient {
-  private static readonly API_KEY_HEADER = '${apiKeyHeader}';
+  private static readonly API_KEY_HEADER: string = '${apiKeyHeader}';
   private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
 
   constructor(config: ${configType}) {
@@ -116,20 +116,20 @@ export class HttpClient extends BaseHttpClient {
     return this.request<T>(path, { method: 'GET', params, headers });
   }
 
-  async post<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>(path, { method: 'POST', body, params, headers });
+  async post<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>, contentType?: string): Promise<T> {
+    return this.request<T>(path, { method: 'POST', body, params, headers: contentType ? { ...(headers || {}), 'Content-Type': contentType } : headers });
   }
 
-  async put<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>(path, { method: 'PUT', body, params, headers });
+  async put<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>, contentType?: string): Promise<T> {
+    return this.request<T>(path, { method: 'PUT', body, params, headers: contentType ? { ...(headers || {}), 'Content-Type': contentType } : headers });
   }
 
   async delete<T>(path: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
     return this.request<T>(path, { method: 'DELETE', params, headers });
   }
 
-  async patch<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>): Promise<T> {
-    return this.request<T>(path, { method: 'PATCH', body, params, headers });
+  async patch<T>(path: string, body?: unknown, params?: QueryParams, headers?: Record<string, string>, contentType?: string): Promise<T> {
+    return this.request<T>(path, { method: 'PATCH', body, params, headers: contentType ? { ...(headers || {}), 'Content-Type': contentType } : headers });
   }
 }
 

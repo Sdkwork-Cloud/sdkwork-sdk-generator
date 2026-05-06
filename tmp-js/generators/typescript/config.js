@@ -86,7 +86,9 @@ export function getTypeScriptType(schema, config, knownModels) {
         const recordType = `Record<string, ${valueType}>`;
         return schema.nullable ? `${recordType} | null` : recordType;
     }
-    const type = schema.type;
+    const normalized = normalizeSchemaType(schema.type);
+    const type = normalized.type;
+    const nullable = schema.nullable || normalized.nullable;
     const format = schema.format;
     if (Array.isArray(schema.enum) && schema.enum.length > 0) {
         const enumType = schema.enum
@@ -100,7 +102,7 @@ export function getTypeScriptType(schema, config, knownModels) {
             return 'unknown';
         })
             .join(' | ');
-        return schema.nullable && !enumType.includes('null') ? `${enumType} | null` : enumType;
+        return nullable && !enumType.includes('null') ? `${enumType} | null` : enumType;
     }
     if (type === 'string') {
         if (format === 'date')
@@ -113,22 +115,35 @@ export function getTypeScriptType(schema, config, knownModels) {
             return 'string';
         if (format === 'uri')
             return 'string';
-        return 'string';
+        return nullable ? 'string | null' : 'string';
     }
     if (type === 'number' || type === 'integer') {
-        return 'number';
+        return nullable ? 'number | null' : 'number';
     }
     if (type === 'boolean') {
-        return 'boolean';
+        return nullable ? 'boolean | null' : 'boolean';
     }
     if (type === 'array') {
         const itemType = schema.items ? getTypeScriptType(schema.items, config, knownModels) : 'unknown';
         const arrayType = `${wrapComplexType(itemType)}[]`;
-        return schema.nullable ? `${arrayType} | null` : arrayType;
+        return nullable ? `${arrayType} | null` : arrayType;
     }
     if (type === 'object') {
         const objectType = 'Record<string, unknown>';
-        return schema.nullable ? `${objectType} | null` : objectType;
+        return nullable ? `${objectType} | null` : objectType;
     }
     return 'unknown';
+}
+function normalizeSchemaType(type) {
+    if (typeof type === 'string') {
+        return { type, nullable: false };
+    }
+    if (Array.isArray(type)) {
+        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
+        return {
+            type: typeof candidate === 'string' ? candidate : undefined,
+            nullable: type.includes('null'),
+        };
+    }
+    return { type: undefined, nullable: false };
 }

@@ -52,6 +52,7 @@ ${methods}
         const requestBodySchema = requestBodyInfo?.schema;
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
         const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+        const contentType = this.getExplicitContentType(requestBodyMediaType);
         const requestType = requestBodySchema
             ? this.ensureKnownType(getSwiftType(requestBodySchema, SWIFT_CONFIG), knownModels)
             : 'Any';
@@ -99,23 +100,23 @@ ${methods}
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `try await client.post(${pathCall}, body: body, params: params, headers: headers, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.post(${pathCall}, body: body, params: params, headers: headers, contentType: "${contentType}")`
                             : `try await client.post(${pathCall}, body: body, params: params, headers: headers)`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `try await client.post(${pathCall}, body: body, params: params, headers: nil, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.post(${pathCall}, body: body, params: params, headers: nil, contentType: "${contentType}")`
                             : `try await client.post(${pathCall}, body: body, params: params)`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `try await client.post(${pathCall}, body: body, params: nil, headers: headers, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.post(${pathCall}, body: body, params: nil, headers: headers, contentType: "${contentType}")`
                             : `try await client.post(${pathCall}, body: body, params: nil, headers: headers)`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `try await client.post(${pathCall}, body: body, params: nil, headers: nil, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.post(${pathCall}, body: body, params: nil, headers: nil, contentType: "${contentType}")`
                             : `try await client.post(${pathCall}, body: body)`;
                     }
                 }
@@ -135,23 +136,23 @@ ${methods}
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `try await client.put(${pathCall}, body: body, params: params, headers: headers, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.put(${pathCall}, body: body, params: params, headers: headers, contentType: "${contentType}")`
                             : `try await client.put(${pathCall}, body: body, params: params, headers: headers)`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `try await client.put(${pathCall}, body: body, params: params, headers: nil, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.put(${pathCall}, body: body, params: params, headers: nil, contentType: "${contentType}")`
                             : `try await client.put(${pathCall}, body: body, params: params)`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `try await client.put(${pathCall}, body: body, params: nil, headers: headers, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.put(${pathCall}, body: body, params: nil, headers: headers, contentType: "${contentType}")`
                             : `try await client.put(${pathCall}, body: body, params: nil, headers: headers)`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `try await client.put(${pathCall}, body: body, params: nil, headers: nil, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.put(${pathCall}, body: body, params: nil, headers: nil, contentType: "${contentType}")`
                             : `try await client.put(${pathCall}, body: body)`;
                     }
                 }
@@ -185,23 +186,23 @@ ${methods}
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = isMultipartBody
-                            ? `try await client.patch(${pathCall}, body: body, params: params, headers: headers, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.patch(${pathCall}, body: body, params: params, headers: headers, contentType: "${contentType}")`
                             : `try await client.patch(${pathCall}, body: body, params: params, headers: headers)`;
                     }
                     else if (hasQuery) {
-                        call = isMultipartBody
-                            ? `try await client.patch(${pathCall}, body: body, params: params, headers: nil, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.patch(${pathCall}, body: body, params: params, headers: nil, contentType: "${contentType}")`
                             : `try await client.patch(${pathCall}, body: body, params: params)`;
                     }
                     else if (hasHeaders) {
-                        call = isMultipartBody
-                            ? `try await client.patch(${pathCall}, body: body, params: nil, headers: headers, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.patch(${pathCall}, body: body, params: nil, headers: headers, contentType: "${contentType}")`
                             : `try await client.patch(${pathCall}, body: body, params: nil, headers: headers)`;
                     }
                     else {
-                        call = isMultipartBody
-                            ? `try await client.patch(${pathCall}, body: body, params: nil, headers: nil, contentType: "multipart/form-data")`
+                        call = contentType
+                            ? `try await client.patch(${pathCall}, body: body, params: nil, headers: nil, contentType: "${contentType}")`
                             : `try await client.patch(${pathCall}, body: body)`;
                     }
                 }
@@ -252,6 +253,12 @@ ${methods}
             delete: 'delete',
         };
         return `${actionMap[method] || method}${SWIFT_CONFIG.namingConventions.modelName(resource)}`;
+    }
+    getExplicitContentType(mediaType) {
+        if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+            return mediaType;
+        }
+        return undefined;
     }
     extractPathParams(path) {
         const matches = path.match(/\{([^}]+)\}/g) || [];

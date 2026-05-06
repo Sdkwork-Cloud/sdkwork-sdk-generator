@@ -56,7 +56,11 @@ export class SwiftGenerator extends BaseGenerator {
     if (!Array.isArray(mediaTypes) || mediaTypes.length === 0) {
       return false;
     }
-    return mediaTypes.every((mediaType) => mediaType.toLowerCase() === 'multipart/form-data');
+    return mediaTypes.every((mediaType) => this.supportedNonJsonMediaTypes().has(mediaType.toLowerCase()));
+  }
+
+  private supportedNonJsonMediaTypes(): Set<string> {
+    return new Set(['multipart/form-data', 'application/x-www-form-urlencoded']);
   }
 }
 

@@ -157,7 +157,11 @@ ${config.license || 'MIT'}
     if (!Array.isArray(mediaTypes) || mediaTypes.length === 0) {
       return false;
     }
-    return mediaTypes.every((mediaType) => mediaType.toLowerCase() === 'multipart/form-data');
+    return mediaTypes.every((mediaType) => this.supportedNonJsonMediaTypes().has(mediaType.toLowerCase()));
+  }
+
+  private supportedNonJsonMediaTypes(): Set<string> {
+    return new Set(['multipart/form-data', 'application/x-www-form-urlencoded']);
   }
 
   private selectQuickStartOperation(operations: any[]): any | undefined {

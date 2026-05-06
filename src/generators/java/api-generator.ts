@@ -82,6 +82,7 @@ ${methods}
     const requestBodySchema = requestBodyInfo?.schema;
     const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
     const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
+    const contentType = this.getExplicitContentType(requestBodyMediaType);
     const requestType = requestBodySchema
       ? getJavaType(requestBodySchema, JAVA_CONFIG)
       : 'Object';
@@ -124,20 +125,20 @@ ${methods}
       case 'post':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, params, headers, "multipart/form-data")`
+            call = contentType
+              ? `client.post(${pathCall}, body, params, headers, "${contentType}")`
               : `client.post(${pathCall}, body, params, headers)`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, params, null, "multipart/form-data")`
+            call = contentType
+              ? `client.post(${pathCall}, body, params, null, "${contentType}")`
               : `client.post(${pathCall}, body, params)`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, null, headers, "multipart/form-data")`
+            call = contentType
+              ? `client.post(${pathCall}, body, null, headers, "${contentType}")`
               : `client.post(${pathCall}, body, null, headers)`;
           } else {
-            call = isMultipartBody
-              ? `client.post(${pathCall}, body, null, null, "multipart/form-data")`
+            call = contentType
+              ? `client.post(${pathCall}, body, null, null, "${contentType}")`
               : `client.post(${pathCall}, body)`;
           }
         } else if (hasQuery && hasHeaders) {
@@ -153,20 +154,20 @@ ${methods}
       case 'put':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, params, headers, "multipart/form-data")`
+            call = contentType
+              ? `client.put(${pathCall}, body, params, headers, "${contentType}")`
               : `client.put(${pathCall}, body, params, headers)`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, params, null, "multipart/form-data")`
+            call = contentType
+              ? `client.put(${pathCall}, body, params, null, "${contentType}")`
               : `client.put(${pathCall}, body, params)`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, null, headers, "multipart/form-data")`
+            call = contentType
+              ? `client.put(${pathCall}, body, null, headers, "${contentType}")`
               : `client.put(${pathCall}, body, null, headers)`;
           } else {
-            call = isMultipartBody
-              ? `client.put(${pathCall}, body, null, null, "multipart/form-data")`
+            call = contentType
+              ? `client.put(${pathCall}, body, null, null, "${contentType}")`
               : `client.put(${pathCall}, body)`;
           }
         } else if (hasQuery && hasHeaders) {
@@ -193,20 +194,20 @@ ${methods}
       case 'patch':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, params, headers, "multipart/form-data")`
+            call = contentType
+              ? `client.patch(${pathCall}, body, params, headers, "${contentType}")`
               : `client.patch(${pathCall}, body, params, headers)`;
           } else if (hasQuery) {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, params, null, "multipart/form-data")`
+            call = contentType
+              ? `client.patch(${pathCall}, body, params, null, "${contentType}")`
               : `client.patch(${pathCall}, body, params)`;
           } else if (hasHeaders) {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, null, headers, "multipart/form-data")`
+            call = contentType
+              ? `client.patch(${pathCall}, body, null, headers, "${contentType}")`
               : `client.patch(${pathCall}, body, null, headers)`;
           } else {
-            call = isMultipartBody
-              ? `client.patch(${pathCall}, body, null, null, "multipart/form-data")`
+            call = contentType
+              ? `client.patch(${pathCall}, body, null, null, "${contentType}")`
               : `client.patch(${pathCall}, body)`;
           }
         } else if (hasQuery && hasHeaders) {
@@ -255,6 +256,13 @@ ${methods}
     };
     
     return `${actionMap[method] || method}${JAVA_CONFIG.namingConventions.modelName(resource)}`;
+  }
+
+  private getExplicitContentType(mediaType: string): string | undefined {
+    if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+      return mediaType;
+    }
+    return undefined;
   }
 
   private extractPathParams(path: string): string[] {

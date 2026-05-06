@@ -76,6 +76,10 @@ export function create${className}(client: HttpClient): ${className} {
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
         const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
         const hasBody = supportsRequestBody && requestBodyInfo !== undefined;
+        const explicitContentType = this.getExplicitContentType(requestBodyMediaType);
+        const contentTypeArg = hasBody && explicitContentType
+            ? `'${explicitContentType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+            : undefined;
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestType = isMultipartBody
             ? 'FormData'
@@ -126,16 +130,16 @@ export function create${className}(client: HttpClient): ${className} {
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body, params, headers)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg ? `, ${contentTypeArg}` : ''})`;
                     }
                     else if (hasQuery) {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body, params)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, params${contentTypeArg ? `, undefined, ${contentTypeArg}` : ''})`;
                     }
                     else if (hasHeaders) {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, headers)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg ? `, ${contentTypeArg}` : ''})`;
                     }
                     else {
-                        call = `this.client.post<${responseType}>(${pathExpression}, body)`;
+                        call = `this.client.post<${responseType}>(${pathExpression}, body${contentTypeArg ? `, undefined, undefined, ${contentTypeArg}` : ''})`;
                     }
                 }
                 else {
@@ -156,16 +160,16 @@ export function create${className}(client: HttpClient): ${className} {
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body, params, headers)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg ? `, ${contentTypeArg}` : ''})`;
                     }
                     else if (hasQuery) {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body, params)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, params${contentTypeArg ? `, undefined, ${contentTypeArg}` : ''})`;
                     }
                     else if (hasHeaders) {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, headers)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg ? `, ${contentTypeArg}` : ''})`;
                     }
                     else {
-                        call = `this.client.put<${responseType}>(${pathExpression}, body)`;
+                        call = `this.client.put<${responseType}>(${pathExpression}, body${contentTypeArg ? `, undefined, undefined, ${contentTypeArg}` : ''})`;
                     }
                 }
                 else {
@@ -200,16 +204,16 @@ export function create${className}(client: HttpClient): ${className} {
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params, headers)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg ? `, ${contentTypeArg}` : ''})`;
                     }
                     else if (hasQuery) {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, params${contentTypeArg ? `, undefined, ${contentTypeArg}` : ''})`;
                     }
                     else if (hasHeaders) {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, headers)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg ? `, ${contentTypeArg}` : ''})`;
                     }
                     else {
-                        call = `this.client.patch<${responseType}>(${pathExpression}, body)`;
+                        call = `this.client.patch<${responseType}>(${pathExpression}, body${contentTypeArg ? `, undefined, undefined, ${contentTypeArg}` : ''})`;
                     }
                 }
                 else {
@@ -364,6 +368,12 @@ export function create${className}(client: HttpClient): ${className} {
             delete: 'delete',
         };
         return `${actionMap[method] || method}${TYPESCRIPT_CONFIG.namingConventions.modelName(resource)}`;
+    }
+    getExplicitContentType(mediaType) {
+        if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+            return mediaType;
+        }
+        return undefined;
     }
     extractPathParams(path) {
         const matches = path.match(/\{([^}]+)\}/g) || [];
