@@ -33,7 +33,7 @@ type HttpRequestOptions = RequestOptions & {
 };
 
 export class HttpClient extends BaseHttpClient {
-  private static readonly API_KEY_HEADER = '${apiKeyHeader}';
+  private static readonly API_KEY_HEADER: string = '${apiKeyHeader}';
   private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
 
   constructor(config: ${configType}) {

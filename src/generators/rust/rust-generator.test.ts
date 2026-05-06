@@ -67,6 +67,70 @@ const rustSpec: ApiSpec = {
   },
 };
 
+const rustComposedReferenceSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Rust Composed Reference Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/profile': {
+      get: {
+        summary: 'Get profile',
+        operationId: 'getProfile',
+        tags: ['Profile'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/UserProfile',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      UserProfile: {
+        type: 'object',
+        properties: {
+          address: {
+            oneOf: [
+              {
+                $ref: '#/components/schemas/DomesticAddress',
+              },
+              {
+                $ref: '#/components/schemas/InternationalAddress',
+              },
+            ],
+          },
+        },
+      },
+      DomesticAddress: {
+        type: 'object',
+        properties: {
+          state: {
+            type: 'string',
+          },
+        },
+      },
+      InternationalAddress: {
+        type: 'object',
+        properties: {
+          country: {
+            type: 'string',
+          },
+        },
+      },
+    },
+  },
+};
+
 describe('Rust generator', () => {
   it('emits rust smoke tests and aligns README quick start when generateTests is enabled', async () => {
     const generator = getGenerator('rust' as any);
@@ -91,5 +155,19 @@ describe('Rust generator', () => {
     expect(smokeTestFile!.content).toContain('assert_eq!(result.code.as_deref(), Some("ok"));');
 
     expect(readme!.content).toContain('let result = client.user().get_user_profile().await?;');
+  });
+
+  it('imports only rust model references that are used in generated fields', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rustConfig, rustComposedReferenceSpec);
+    const profileFile = result.files.find((file) => file.path === 'src/models/user_profile.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(profileFile).toBeDefined();
+    expect(profileFile!.content).toContain('use crate::models::{DomesticAddress};');
+    expect(profileFile!.content).not.toContain('InternationalAddress');
+    expect(profileFile!.content).toContain('pub address: Option<DomesticAddress>,');
   });
 });

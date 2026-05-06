@@ -53,6 +53,7 @@ export class BaseGenerator {
             files.push(...this.generateClient(this.config));
             files.push(...this.generateBuildConfig(this.config));
             files.push(this.generateMetadataManifest(this.config));
+            files.push(...this.generateReleaseMetadata(this.config));
             files.push(...this.generateBinScripts(this.config));
             if (config.generateReadme === false) {
                 warnings.push('generateReadme=false was provided, but README generation is mandatory and remains enabled.');
@@ -1029,6 +1030,52 @@ export class BaseGenerator {
             language: config.language,
             description: 'SDKWork generator metadata',
         };
+    }
+    generateReleaseMetadata(config) {
+        const author = (config.author || 'SDKWork Team').trim() || 'SDKWork Team';
+        const license = (config.license || 'MIT').trim() || 'MIT';
+        return [
+            {
+                path: 'LICENSE',
+                content: this.formatFile([
+                    `${license} License`,
+                    '',
+                    `Copyright (c) ${author}`,
+                    '',
+                    'Permission is hereby granted, free of charge, to any person obtaining a copy',
+                    'of this software and associated documentation files (the "Software"), to deal',
+                    'in the Software without restriction, including without limitation the rights',
+                    'to use, copy, modify, merge, publish, distribute, sublicense, and/or sell',
+                    'copies of the Software, and to permit persons to whom the Software is',
+                    'furnished to do so, subject to the following conditions:',
+                    '',
+                    'The above copyright notice and this permission notice shall be included in all',
+                    'copies or substantial portions of the Software.',
+                    '',
+                    'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR',
+                    'IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,',
+                    'FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE',
+                    'AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER',
+                    'LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,',
+                    'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE',
+                    'SOFTWARE.',
+                ].join('\n')),
+                language: config.language,
+                description: 'License metadata',
+            },
+            {
+                path: 'CHANGELOG.md',
+                content: this.formatFile([
+                    '# Changelog',
+                    '',
+                    `## ${config.version}`,
+                    '',
+                    '- Initial generated SDK release.',
+                ].join('\n')),
+                language: config.language,
+                description: 'Release changelog',
+            },
+        ];
     }
     indent(content, spaces = 2) {
         const indent = ' '.repeat(spaces);

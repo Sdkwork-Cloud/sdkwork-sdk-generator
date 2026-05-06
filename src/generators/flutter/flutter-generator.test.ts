@@ -159,6 +159,50 @@ const flutterSpec: ApiSpec = {
   },
 };
 
+const flutterVoidOnlySpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Flutter Void API Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/forms': {
+      post: {
+        summary: 'Submit form',
+        operationId: 'submitForm',
+        tags: ['Forms'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/x-www-form-urlencoded': {
+              schema: {
+                $ref: '#/components/schemas/SubmitFormRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '204': {
+            description: 'No content',
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      SubmitFormRequest: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+          },
+        },
+      },
+    },
+  },
+};
+
 describe('Flutter generator regressions', () => {
   it('generates sdk client imports from lib/src/api', async () => {
     const generator = new FlutterGenerator();
@@ -167,6 +211,8 @@ describe('Flutter generator regressions', () => {
     const rootFile = result.files.find((file) => file.path === 'lib/app_sdk.dart');
     const apiFile = result.files.find((file) => file.path === 'lib/src/api/user.dart');
     const overridesFile = result.files.find((file) => file.path === 'pubspec_overrides.yaml');
+    const licenseFile = result.files.find((file) => file.path === 'LICENSE');
+    const changelogFile = result.files.find((file) => file.path === 'CHANGELOG.md');
 
     expect(result.errors).toEqual([]);
     expect(clientFile).toBeDefined();
@@ -178,6 +224,10 @@ describe('Flutter generator regressions', () => {
     expect(clientFile!.content).toContain("import 'src/api/user.dart';");
     expect(clientFile!.content).not.toContain("import '../api/user.dart';");
     expect(apiFile!.content).toContain("import 'paths.dart';");
+    expect(licenseFile).toBeDefined();
+    expect(licenseFile!.content).toContain('MIT License');
+    expect(changelogFile).toBeDefined();
+    expect(changelogFile!.content).toContain('## 1.0.0');
     expect(overridesFile!.content).toContain('dependency_overrides:');
     expect(overridesFile!.content).toContain('sdkwork_common_flutter:');
     expect(overridesFile!.content).toContain('path:');
@@ -237,10 +287,14 @@ describe('Flutter generator regressions', () => {
     const result = await generator.generate({ ...flutterConfig, generateTests: true }, flutterSpec);
     const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
     const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const pubspecFile = result.files.find((file) => file.path === 'pubspec.yaml');
 
     expect(result.errors).toEqual([]);
     expect(smokeTestFile).toBeDefined();
     expect(readmeFile).toBeDefined();
+    expect(pubspecFile).toBeDefined();
+    expect(pubspecFile!.content).toContain('homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
+    expect(pubspecFile!.content).toContain('repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
     expect(smokeTestFile!.content).toContain("import 'package:app_sdk/app_sdk.dart';");
     expect(smokeTestFile!.content).toContain("final client = SdkworkAppClient.withBaseUrl(baseUrl: 'http://127.0.0.1:${server.port}');");
     expect(smokeTestFile!.content).toContain('final result = await client.user.getUserProfile();');
@@ -251,5 +305,16 @@ describe('Flutter generator regressions', () => {
   final result = await client.user.getUserProfile();
   print(result);`);
     expect(readmeFile!.content).not.toContain("import 'package:sdkwork_common_flutter/sdkwork_common_flutter.dart';");
+  });
+
+  it('does not import response helpers for void-only flutter api files', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate(flutterConfig, flutterVoidOnlySpec);
+    const apiFile = result.files.find((file) => file.path === 'lib/src/api/form.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).not.toContain("import 'response_helpers.dart';");
+    expect(apiFile!.content).toContain("contentType: 'application/x-www-form-urlencoded'");
   });
 });

@@ -125,7 +125,7 @@ pub struct Page<T> {
             : [];
         const referencedModels = new Set();
         for (const [, propSchema] of properties) {
-            this.collectReferencedModels(propSchema, knownModels, referencedModels);
+            this.collectRenderedModelReferences(propSchema, knownModels, referencedModels);
         }
         referencedModels.delete(modelName);
         const modelImports = referencedModels.size > 0
@@ -204,6 +204,34 @@ ${fields}
         }
         if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
             this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
+        }
+    }
+    collectRenderedModelReferences(schema, knownModels, refs, visited = new Set()) {
+        if (!schema || typeof schema !== 'object') {
+            return;
+        }
+        if (visited.has(schema)) {
+            return;
+        }
+        visited.add(schema);
+        if (schema.$ref) {
+            const refName = schema.$ref.split('/').pop();
+            const modelName = RUST_CONFIG.namingConventions.modelName(refName ?? '');
+            if (knownModels.has(modelName)) {
+                refs.add(modelName);
+            }
+            return;
+        }
+        const composed = pickComposedSchema(schema);
+        if (composed) {
+            this.collectRenderedModelReferences(composed, knownModels, refs, visited);
+            return;
+        }
+        if (schema.items) {
+            this.collectRenderedModelReferences(schema.items, knownModels, refs, visited);
+        }
+        if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+            this.collectRenderedModelReferences(schema.additionalProperties, knownModels, refs, visited);
         }
     }
 }

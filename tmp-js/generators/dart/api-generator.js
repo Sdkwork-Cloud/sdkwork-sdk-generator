@@ -24,12 +24,15 @@ export class ApiGenerator {
         const methods = operations
             .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
             .join('\n\n');
+        const responseHelperImport = operations.some((op) => this.methodNeedsResponseHelpers(op))
+            ? "import 'response_helpers.dart';\n"
+            : '';
         return {
             path: `lib/src/api/${fileName}.dart`,
             content: this.format(`import '../http/client.dart';
 import '../models.dart';
 import 'paths.dart';
-import 'response_helpers.dart';
+${responseHelperImport}
 
 class ${className} {
   final HttpClient _client;
@@ -268,6 +271,28 @@ ${payloadLine}    final response = await ${call};
             return `sdkworkResponseAsMap(${itemExpr})`;
         }
         return itemExpr;
+    }
+    methodNeedsResponseHelpers(op) {
+        const responseSchema = this.extractResponseSchema(op);
+        if (!responseSchema || typeof responseSchema !== 'object') {
+            return false;
+        }
+        return this.schemaNeedsResponseHelpers(responseSchema);
+    }
+    schemaNeedsResponseHelpers(schema) {
+        if (!schema || typeof schema !== 'object') {
+            return false;
+        }
+        if (schema.$ref || schema.items || (schema.additionalProperties && typeof schema.additionalProperties === 'object')) {
+            return true;
+        }
+        for (const key of ['oneOf', 'anyOf', 'allOf']) {
+            const values = schema[key];
+            if (Array.isArray(values) && values.some((value) => this.schemaNeedsResponseHelpers(value))) {
+                return true;
+            }
+        }
+        return false;
     }
     extractRequestBodyInfo(op) {
         const content = op?.requestBody?.content;

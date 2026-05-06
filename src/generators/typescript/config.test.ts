@@ -43,4 +43,15 @@ describe('TypeScript config', () => {
 
         expect(type).toBe("('WEB' | 'APP')[]");
     });
+
+    it('maps OpenAPI 3.1 nullable type arrays to nullable TypeScript unions', () => {
+        const type = getTypeScriptType(
+            {
+                type: ['string', 'null'],
+            },
+            TYPESCRIPT_CONFIG,
+        );
+
+        expect(type).toBe('string | null');
+    });
 });

@@ -80,6 +80,32 @@ const CSHARP_RESERVED_WORDS = new Set([
     'volatile',
     'while',
 ]);
+const CSHARP_PRIMITIVE_TYPE_NAMES = new Set([
+    'bool',
+    'byte',
+    'char',
+    'decimal',
+    'double',
+    'float',
+    'int',
+    'long',
+    'object',
+    'sbyte',
+    'short',
+    'string',
+    'uint',
+    'ulong',
+    'ushort',
+    'void',
+]);
+const CSHARP_FRAMEWORK_GENERIC_TYPE_NAMES = new Set([
+    'Dictionary',
+    'IEnumerable',
+    'IReadOnlyCollection',
+    'IReadOnlyDictionary',
+    'IReadOnlyList',
+    'List',
+]);
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
@@ -100,7 +126,7 @@ export class ApiGenerator {
         const className = `${CSHARP_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
         const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const methods = operations
-            .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'Operation', knownModels))
+            .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'Operation', knownModels, namespace))
             .join('\n\n');
         return {
             path: `Api/${className}.cs`,
@@ -129,7 +155,7 @@ ${methods}
             description: `${tag} API module`,
         };
     }
-    generateMethod(op, config, methodName, knownModels) {
+    generateMethod(op, config, methodName, knownModels, namespace) {
         const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const hasQuery = allParameters.some((param) => param?.in === 'query');
@@ -144,11 +170,11 @@ ${methods}
             ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
             : '';
         const requestType = requestBodySchema
-            ? this.ensureKnownType(getCSharpType(requestBodySchema, CSHARP_CONFIG), knownModels)
+            ? this.qualifyKnownModelTypes(getCSharpType(requestBodySchema, CSHARP_CONFIG), knownModels, namespace)
             : 'object';
         const responseSchema = this.extractResponseSchema(op);
         const responseType = responseSchema
-            ? this.ensureKnownType(getCSharpType(responseSchema, CSHARP_CONFIG), knownModels)
+            ? this.qualifyKnownModelTypes(getCSharpType(responseSchema, CSHARP_CONFIG), knownModels, namespace)
             : this.inferFallbackResponseType(op);
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => toSafeCamelIdentifier(value, CSHARP_RESERVED_WORDS), [
             hasBody ? 'body' : '',
@@ -415,8 +441,25 @@ ${methods}
         }
         return 'object';
     }
-    ensureKnownType(typeName, _knownModels) {
-        return typeName;
+    qualifyKnownModelTypes(typeName, knownModels, namespace) {
+        if (!typeName || knownModels.size === 0) {
+            return typeName;
+        }
+        const modelNamespace = `${namespace}.Models.`;
+        return typeName.replace(/[A-Za-z_][A-Za-z0-9_]*/g, (identifier, offset, fullType) => {
+            const previous = offset > 0 ? fullType[offset - 1] : '';
+            const next = fullType[offset + identifier.length] || '';
+            const rest = fullType.slice(offset + identifier.length);
+            const nextNonWhitespace = rest.match(/^\s*(.)/)?.[1] || '';
+            if (previous === '.' ||
+                next === '.' ||
+                CSHARP_PRIMITIVE_TYPE_NAMES.has(identifier) ||
+                (CSHARP_FRAMEWORK_GENERIC_TYPE_NAMES.has(identifier) && nextNonWhitespace === '<') ||
+                !knownModels.has(identifier)) {
+                return identifier;
+            }
+            return `${modelNamespace}${identifier}`;
+        });
     }
     normalizeOperationPath(path, apiPrefix) {
         const normalizedPathRaw = String(path || '').trim();

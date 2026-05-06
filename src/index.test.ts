@@ -627,6 +627,34 @@ const pythonDataclassOrderingSpec: ApiSpec = {
   },
 };
 
+const pythonNullableSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: { title: 'Python Nullable API', version: '1.0.0' },
+  paths: {
+    '/nullable-model': {
+      get: {
+        summary: 'Get nullable model',
+        operationId: 'getNullableModel',
+        tags: ['Nullable Model'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      NullableModel: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+          displayName: { type: ['string', 'null'] },
+          optionalCount: { type: 'integer' },
+        },
+      },
+    },
+  },
+};
+
 const pythonKeywordPropertySpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Python Keyword Property API', version: '1.0.0' },
@@ -1610,6 +1638,16 @@ describe('OpenAPI Security And Compliance', () => {
     }
   });
 
+  it('should generate compilable TypeScript API key constants for custom auth headers', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, securitySpec);
+    const httpClientFile = result.files.find((f) => f.path === 'src/http/client.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(httpClientFile).toBeDefined();
+    expect(httpClientFile!.content).toContain("private static readonly API_KEY_HEADER: string = 'X-API-Key';");
+  });
+
   it('should preserve swift bearer interpolation syntax', async () => {
     const generator = new SwiftGenerator();
     const result = await generator.generate(baseConfig, securitySpec);
@@ -1643,7 +1681,10 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(modelAFile).toBeDefined();
     expect(modelAFile!.content).toContain('from __future__ import annotations');
-    expect(modelAFile!.content).toContain('model_b: ModelB = None');
+    expect(modelAFile!.content).toContain('from typing import TYPE_CHECKING');
+    expect(modelAFile!.content).toContain('if TYPE_CHECKING:');
+    expect(modelAFile!.content).toContain('from .model_b import ModelB');
+    expect(modelAFile!.content).toContain('model_b: Optional[ModelB] = None');
   });
 
   it('should place required python dataclass fields before optional defaults', async () => {
@@ -1656,10 +1697,25 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(orderedModelFile).toBeDefined();
     const requiredIndex = orderedModelFile!.content.indexOf('required_id: str');
-    const optionalIndex = orderedModelFile!.content.indexOf('optional_name: str = None');
+    const optionalIndex = orderedModelFile!.content.indexOf('optional_name: Optional[str] = None');
     expect(requiredIndex).toBeGreaterThanOrEqual(0);
     expect(optionalIndex).toBeGreaterThanOrEqual(0);
     expect(requiredIndex).toBeLessThan(optionalIndex);
+  });
+
+  it('should emit optional python annotations for nullable and optional fields', async () => {
+    const generator = new PythonGenerator();
+    const result = await generator.generate(
+      { ...baseConfig, language: 'python' },
+      pythonNullableSpec
+    );
+    const nullableModelFile = result.files.find((f) => f.path.endsWith('/models/nullable_model.py'));
+
+    expect(nullableModelFile).toBeDefined();
+    expect(nullableModelFile!.content).toContain('id: str');
+    expect(nullableModelFile!.content).toContain('display_name: Optional[str] = None');
+    expect(nullableModelFile!.content).toContain('optional_count: Optional[int] = None');
+    expect(nullableModelFile!.content).not.toContain('display_name: str = None');
   });
 
   it('should escape python keyword property names', async () => {
@@ -1671,8 +1727,8 @@ describe('OpenAPI Security And Compliance', () => {
     const keywordModelFile = result.files.find((f) => f.path.endsWith('/models/keyword_model.py'));
 
     expect(keywordModelFile).toBeDefined();
-    expect(keywordModelFile!.content).toContain('async_: bool = None');
-    expect(keywordModelFile!.content).toContain('await_: str = None');
+    expect(keywordModelFile!.content).toContain('async_: Optional[bool] = None');
+    expect(keywordModelFile!.content).toContain('await_: Optional[str] = None');
     expect(keywordModelFile!.content).not.toContain('\n    async: bool = None');
   });
 
@@ -2050,6 +2106,22 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(manifest).toBeDefined();
     expect(manifest!.content).not.toContain('include LICENSE');
+  });
+
+  it('should include standard release metadata files in generated SDK packages', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, mockSpec);
+    const licenseFile = result.files.find((f) => f.path === 'LICENSE');
+    const changelogFile = result.files.find((f) => f.path === 'CHANGELOG.md');
+
+    expect(result.errors).toEqual([]);
+    expect(licenseFile).toBeDefined();
+    expect(licenseFile!.content).toContain('MIT License');
+    expect(licenseFile!.content).toContain('SDKWork Team');
+    expect(changelogFile).toBeDefined();
+    expect(changelogFile!.content).toContain('# Changelog');
+    expect(changelogFile!.content).toContain(`## ${baseConfig.version}`);
+    expect(changelogFile!.content).toContain('Initial generated SDK release.');
   });
 
   it('should normalize trailing numeric suffixes per api class only', async () => {
@@ -3038,13 +3110,13 @@ describe('OpenAPI Security And Compliance', () => {
     expect(pythonResult.errors).toEqual([]);
     expect(pythonResult.files.some((file) => file.path === 'sdkwork_backend_sdk/models/string_alias.py')).toBe(false);
     expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
-      'nickname: str = None',
+      'nickname: Optional[str] = None',
     );
     expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
-      'tags: List[str] = None',
+      'tags: Optional[List[str]] = None',
     );
     expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
-      'metadata: Dict[str, str] = None',
+      'metadata: Optional[Dict[str, str]] = None',
     );
     expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/api/alias.py').content).toContain(
       'def send_scalar(self, body: str) -> str:',
@@ -3618,6 +3690,8 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
     expect(apiFile!.content).toContain('data=body');
+    expect(apiFile!.content).toContain("form_headers = {**({} or {}), 'Content-Type': 'application/x-www-form-urlencoded'}");
+    expect(apiFile!.content).toContain('headers=form_headers');
   });
 
   it('should propagate explicit content types in generated TypeScript clients for form-encoded bodies', async () => {

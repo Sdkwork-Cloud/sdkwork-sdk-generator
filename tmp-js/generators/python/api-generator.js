@@ -67,6 +67,7 @@ ${methods}
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
         const useDataArgument = requestBodyMediaType === 'multipart/form-data'
             || requestBodyMediaType === 'application/x-www-form-urlencoded';
+        const isFormUrlencodedBody = requestBodyMediaType === 'application/x-www-form-urlencoded';
         const requestType = requestBodySchema
             ? getPythonType(requestBodySchema, PYTHON_CONFIG)
             : 'Any';
@@ -117,22 +118,30 @@ ${methods}
             const safeName = pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);
             return `{${safeName}}`;
         });
+        const formHeaderLine = isFormUrlencodedBody
+            ? `        form_headers = {**(${hasHeaders ? 'headers' : '{}'} or {}), 'Content-Type': 'application/x-www-form-urlencoded'}\n`
+            : '';
+        const headersArg = isFormUrlencodedBody
+            ? ', headers=form_headers'
+            : hasHeaders
+                ? ', headers=headers'
+                : '';
         let call = '';
         switch (method) {
             case 'get':
                 call = `self._client.get(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             case 'post':
-                call = `self._client.post(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+                call = `self._client.post(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${headersArg})`;
                 break;
             case 'put':
-                call = `self._client.put(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+                call = `self._client.put(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${headersArg})`;
                 break;
             case 'delete':
                 call = `self._client.delete(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
                 break;
             case 'patch':
-                call = `self._client.patch(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+                call = `self._client.patch(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${headersArg})`;
                 break;
             default:
                 call = `self._client.get(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
@@ -142,7 +151,7 @@ ${methods}
             : '';
         return {
             content: `    def ${methodName}(${params.join(', ')}) -> ${responseType}:
-${docComment}        return ${call}`,
+${docComment}${formHeaderLine}        return ${call}`,
             referencedModels,
         };
     }

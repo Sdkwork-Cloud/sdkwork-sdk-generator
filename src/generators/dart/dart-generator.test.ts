@@ -156,6 +156,50 @@ const dartSpec: ApiSpec = {
   },
 };
 
+const dartVoidOnlySpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Dart Void API Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/forms': {
+      post: {
+        summary: 'Submit form',
+        operationId: 'submitForm',
+        tags: ['Forms'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/x-www-form-urlencoded': {
+              schema: {
+                $ref: '#/components/schemas/SubmitFormRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '204': {
+            description: 'No content',
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      SubmitFormRequest: {
+        type: 'object',
+        properties: {
+          name: {
+            type: 'string',
+          },
+        },
+      },
+    },
+  },
+};
+
 describe('Dart generator', () => {
   it('registers dart as a supported generator-backed language', async () => {
     const generator = getGenerator('dart' as any);
@@ -176,11 +220,19 @@ describe('Dart generator', () => {
     const responseHelperFile = result.files.find((file) => file.path === 'lib/src/api/response_helpers.dart');
     const modelsFile = result.files.find((file) => file.path === 'lib/src/models.dart');
     const readme = result.files.find((file) => file.path === 'README.md');
+    const licenseFile = result.files.find((file) => file.path === 'LICENSE');
+    const changelogFile = result.files.find((file) => file.path === 'CHANGELOG.md');
 
     expect(result.errors).toEqual([]);
     expect(pubspec).toBeDefined();
     expect(pubspec!.content).toContain('name: sdkwork_app_sdk_dart');
+    expect(pubspec!.content).toContain('homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
+    expect(pubspec!.content).toContain('repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
     expect(pubspec!.content).toContain('http:');
+    expect(licenseFile).toBeDefined();
+    expect(licenseFile!.content).toContain('MIT License');
+    expect(changelogFile).toBeDefined();
+    expect(changelogFile!.content).toContain('## 1.0.0');
     expect(rootLibrary).toBeDefined();
     expect(rootLibrary!.content).toContain("export 'src/models.dart';");
     expect(rootLibrary!.content).toContain("export 'src/http/sdk_config.dart';");
@@ -233,5 +285,18 @@ describe('Dart generator', () => {
     expect(smokeTestFile!.content).toContain("expect(result?.code, 'ok');");
 
     expect(readme!.content).toContain('final result = await client.user.getUserProfile();');
+  });
+
+  it('does not import response helpers for void-only dart api files', async () => {
+    const generator = getGenerator('dart' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(dartConfig, dartVoidOnlySpec);
+    const apiFile = result.files.find((file) => file.path === 'lib/src/api/form.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).not.toContain("import 'response_helpers.dart';");
+    expect(apiFile!.content).toContain("contentType: 'application/x-www-form-urlencoded'");
   });
 });

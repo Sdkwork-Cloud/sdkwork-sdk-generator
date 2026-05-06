@@ -154,6 +154,61 @@ const wrappedTypedResponseSpec: ApiSpec = {
   },
 };
 
+const conflictingModelNameSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'CSharp Model Name Conflict Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/files': {
+      post: {
+        summary: 'Upload file',
+        operationId: 'uploadFile',
+        tags: ['Files'],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                $ref: '#/components/schemas/UploadFileRequest',
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/FileInfo',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      FileInfo: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      UploadFileRequest: {
+        type: 'object',
+        properties: {
+          file: { type: 'string', format: 'binary' },
+        },
+      },
+    },
+  },
+};
+
 describe('CSharp generator regressions', () => {
   it('prefers a local common project when generated inside the repository', async () => {
     const generator = getGenerator('csharp' as any);
@@ -277,5 +332,19 @@ describe('CSharp generator regressions', () => {
     expect(smokeTestFile!.content).toContain('var result = await client.User.GetWrappedUserProfileAsync();');
     expect(smokeTestFile!.content).toContain('Assert.NotNull(result!.Data);');
     expect(smokeTestFile!.content).toContain('Assert.Equal("ok", result!.Code);');
+  });
+
+  it('qualifies model types in API methods to avoid framework type name conflicts', async () => {
+    const generator = getGenerator('csharp' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(csharpConfig, conflictingModelNameSpec);
+    const apiFile = result.files.find((file) => file.path === 'Api/FileApi.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('public async Task<App.Models.FileInfo?> UploadAsync(App.Models.UploadFileRequest body)');
+    expect(apiFile!.content).toContain('_client.PostAsync<App.Models.FileInfo>(');
+    expect(apiFile!.content).not.toContain('public async Task<FileInfo?> UploadAsync(UploadFileRequest body)');
   });
 });
