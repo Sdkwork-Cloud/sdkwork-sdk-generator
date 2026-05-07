@@ -265,6 +265,19 @@ describe('Kotlin generator regressions', () => {
     expect(smokeTestFile!.content).toContain('assertEquals("1", result?.id)');
   });
 
+  it('targets Java 21 for generated Kotlin JVM SDK packages', async () => {
+    const generator = getGenerator('kotlin' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(kotlinConfig, typedResponseSpec);
+    const buildFile = result.files.find((file) => file.path === 'build.gradle.kts');
+
+    expect(result.errors).toEqual([]);
+    expect(buildFile).toBeDefined();
+    expect(buildFile!.content).toContain('jvmToolchain(21)');
+    expect(buildFile!.content).not.toContain('jvmToolchain(11)');
+  });
+
   it('uses not-null smoke-test assertions for wrapped Kotlin ref properties', async () => {
     const generator = getGenerator('kotlin' as any);
     expect(generator).toBeDefined();

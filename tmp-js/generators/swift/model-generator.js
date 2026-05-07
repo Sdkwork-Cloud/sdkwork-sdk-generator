@@ -1,9 +1,10 @@
+import { resolveModelSchema } from '../../framework/schema.js';
 import { SWIFT_CONFIG, getSwiftType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
         const models = [];
         for (const [name, schema] of Object.entries(ctx.schemas)) {
-            models.push(this.generateStruct(name, schema));
+            models.push(this.generateStruct(name, schema, ctx.schemas));
         }
         return [{
                 path: 'Sources/Models.swift',
@@ -15,9 +16,10 @@ ${models.join('\n\n')}
                 description: 'Data models',
             }];
     }
-    generateStruct(name, schema) {
+    generateStruct(name, schema, schemas) {
+        const modelSchema = resolveModelSchema(schema, schemas);
         const structName = SWIFT_CONFIG.namingConventions.modelName(name);
-        const props = schema.properties || {};
+        const props = modelSchema.properties || {};
         const entries = Object.entries(props);
         const fields = entries.map(([propName, propSchema]) => {
             const fieldName = SWIFT_CONFIG.namingConventions.propertyName(propName);

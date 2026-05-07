@@ -1,5 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveModelSchema, resolveSchemaType } from '../../framework/schema.js';
 import { GO_CONFIG, getGoType } from './config.js';
 
 export class ModelGenerator {
@@ -9,7 +10,7 @@ export class ModelGenerator {
     files.push(this.generateCommonTypes(config));
     
     for (const [name, schema] of Object.entries(ctx.schemas)) {
-      files.push(this.generateModel(name, schema, config));
+      files.push(this.generateModel(name, schema, ctx.schemas, config));
     }
     
     files.push(this.generateModelsIndex(config));
@@ -52,11 +53,11 @@ type Page[T any] struct {
     };
   }
 
-  private generateModel(name: string, schema: any, config: GeneratorConfig): GeneratedFile {
+  private generateModel(name: string, schema: any, schemas: SchemaContext['schemas'], config: GeneratorConfig): GeneratedFile {
     const modelName = GO_CONFIG.namingConventions.modelName(name);
     const fileName = GO_CONFIG.namingConventions.fileName(name);
-    const resolvedSchema = pickComposedSchema(schema) || schema;
-    const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+    const resolvedSchema = resolveModelSchema(schema, schemas);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
 
     if (normalizedType && normalizedType !== 'array' && normalizedType !== 'object') {
       return {
@@ -72,13 +73,12 @@ type ${modelName} ${getGoType(resolvedSchema, GO_CONFIG)}
     }
 
     if (normalizedType === 'array') {
-      const itemType = resolvedSchema?.items ? getGoType(resolvedSchema.items, GO_CONFIG) : 'interface{}';
       return {
         path: `types/${fileName}.go`,
         content: this.format(`package types
 
 ${schema.description ? `// ${schema.description}` : ''}
-type ${modelName} []${itemType}
+type ${modelName} ${getGoType(resolvedSchema, GO_CONFIG)}
 `),
         language: 'go',
         description: `${modelName} model definition`,
@@ -136,41 +136,4 @@ ${fields}
   private format(content: string): string {
     return content.trim() + '\n';
   }
-}
-
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: any): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.properties && typeof schema.properties === 'object') {
-    return 'object';
-  }
-  if (schema.additionalProperties) {
-    return 'object';
-  }
-  return undefined;
-}
-
-function pickComposedSchema(schema: any): any | undefined {
-  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
-  for (const key of orderedKeys) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-    return candidate || values[0];
-  }
-  return undefined;
 }

@@ -1,17 +1,82 @@
 import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
 import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { TYPESCRIPT_CONFIG } from './config.js';
 import { buildTypeScriptTagMetadataMap } from './tag-metadata.js';
 
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
+const TYPESCRIPT_RESERVED_WORDS = new Set([
+  'break',
+  'case',
+  'catch',
+  'class',
+  'const',
+  'continue',
+  'debugger',
+  'default',
+  'delete',
+  'do',
+  'else',
+  'enum',
+  'export',
+  'extends',
+  'false',
+  'finally',
+  'for',
+  'function',
+  'if',
+  'import',
+  'in',
+  'instanceof',
+  'new',
+  'null',
+  'return',
+  'super',
+  'switch',
+  'this',
+  'throw',
+  'true',
+  'try',
+  'typeof',
+  'var',
+  'void',
+  'while',
+  'with',
+  'as',
+  'implements',
+  'interface',
+  'let',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'static',
+  'yield',
+  'any',
+  'boolean',
+  'constructor',
+  'number',
+  'string',
+  'symbol',
+  'type',
+  'unknown',
+]);
 
 export type TypeScriptUsageRenderMode = 'readme' | 'test';
 
 export interface TypeScriptUsageVariable {
   name: string;
-  kind: 'path' | 'body' | 'params' | 'headers';
+  kind: 'path' | 'body' | 'params' | 'headers' | 'parameter';
   initializerByMode: Record<TypeScriptUsageRenderMode, string>;
+}
+
+export interface TypeScriptUsageExpectation {
+  name: string;
+  expected: string;
+  source?: string;
+  cookie?: boolean;
 }
 
 export interface TypeScriptUsagePlan {
@@ -23,6 +88,7 @@ export interface TypeScriptUsagePlan {
   requestBodyMediaType?: string;
   variables: TypeScriptUsageVariable[];
   callExpression: string;
+  headerExpectations: TypeScriptUsageExpectation[];
 }
 
 export class TypeScriptUsagePlanner {
@@ -63,10 +129,16 @@ export class TypeScriptUsagePlanner {
     const transportMethod = String(operation.method || '').toLowerCase();
     const variables: TypeScriptUsageVariable[] = [];
     const callArguments: string[] = [];
+    const headerExpectations: TypeScriptUsageExpectation[] = [];
 
     const pathParams = extractPathParams(operation.path);
+    const pathParamNames = createUniqueIdentifierMap(
+      pathParams,
+      (value) => toSafeCamelIdentifier(value, TYPESCRIPT_RESERVED_WORDS),
+      ['body', 'params', 'headers'],
+    );
     for (let index = 0; index < pathParams.length; index += 1) {
-      const variableName = toUsageIdentifier(pathParams[index], 'pathParam', index + 1);
+      const variableName = pathParamNames.get(pathParams[index]) || toUsageIdentifier(pathParams[index], 'pathParam', index + 1);
       const sampleValue = /id$/i.test(variableName) ? "'1'" : `'${escapeSingleQuoted(variableName)}'`;
       variables.push({
         name: variableName,
@@ -107,16 +179,39 @@ export class TypeScriptUsagePlanner {
     }
 
     const headerParams = allParameters.filter((parameter) => parameter?.in === 'header' || parameter?.in === 'cookie');
-    if (headerParams.length > 0) {
+    const headerParameterKeys = headerParams.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawHeaderNameByKey = new Map(
+      headerParameterKeys.map((key, index) => [key, String(headerParams[index]?.name || `value${index + 1}`)]),
+    );
+    const headerParameterNames = createUniqueIdentifierMap(
+      headerParameterKeys,
+      (key) => toSafeCamelIdentifier(rawHeaderNameByKey.get(key) || 'value', TYPESCRIPT_RESERVED_WORDS),
+      [...variables.map((variable) => variable.name), 'body', 'params', 'headers'],
+    );
+    for (let index = 0; index < headerParams.length; index += 1) {
+      const parameter = headerParams[index];
+      const key = headerParameterKeys[index];
+      const variableName = headerParameterNames.get(key) || toUsageIdentifier(
+        parameter.name,
+        parameter.in === 'cookie' ? 'cookieParam' : 'headerParam',
+        variables.length + 1,
+      );
+      const sampleValue = sampleValueForParameter(this.ctx, parameter, variables.length);
       variables.push({
-        name: 'headers',
-        kind: 'headers',
+        name: variableName,
+        kind: 'parameter',
         initializerByMode: {
-          readme: renderObjectLiteral(this.ctx, headerParams),
-          test: renderObjectLiteral(this.ctx, headerParams),
+          readme: sampleValue,
+          test: sampleValue,
         },
       });
-      callArguments.push('headers');
+      callArguments.push(variableName);
+      headerExpectations.push({
+        name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+        expected: extractLiteralString(sampleValue) || parameter.name || `value${variables.length}`,
+        source: variableName,
+        cookie: parameter.in === 'cookie',
+      });
     }
 
     return {
@@ -128,6 +223,7 @@ export class TypeScriptUsagePlanner {
       requestBodyMediaType: requestBodyInfo?.mediaType,
       variables,
       callExpression: `client.${moduleName}.${methodName}(${callArguments.join(', ')})`,
+      headerExpectations,
     };
   }
 
@@ -279,6 +375,10 @@ function generateTypeScriptOperationName(
     put: 'update',
     patch: 'patch',
     delete: 'delete',
+    options: 'options',
+    head: 'head',
+    trace: 'trace',
+    query: 'query',
   };
 
   return `${actionMap[method] || method}${TYPESCRIPT_CONFIG.namingConventions.modelName(resource)}`;
@@ -302,7 +402,7 @@ function extractRequestBodyInfo(
     return undefined;
   }
 
-  const schema = content[mediaType]?.schema as ApiSchema | undefined;
+  const schema = resolveMediaTypeSchema(content[mediaType]);
   return { mediaType, schema };
 }
 
@@ -399,7 +499,7 @@ function renderSampleValue(
     case 'boolean':
       return 'true';
     case 'array': {
-      const itemValue = renderSampleValue(ctx, resolvedSchema?.items as ApiSchema | undefined, fallbackName, depth + 1);
+      const itemValue = renderSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1);
       const indent = '  '.repeat(depth);
       const childIndent = '  '.repeat(depth + 1);
       return `[\n${childIndent}${itemValue},\n${indent}]`;
@@ -447,6 +547,14 @@ function sampleValueForParameter(ctx: SchemaContext, parameter: ApiParameter, in
   }
 }
 
+function extractLiteralString(expression: string): string | undefined {
+  const match = String(expression || '').match(/^'((?:\\'|\\\\|[^'])*)'$/);
+  if (!match) {
+    return undefined;
+  }
+  return match[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+}
+
 function formatLiteral(value: unknown): string {
   if (typeof value === 'string') {
     return `'${escapeSingleQuoted(value)}'`;
@@ -474,27 +582,5 @@ function resolveSchema(ctx: SchemaContext, schema: ApiSchema | undefined): ApiSc
 }
 
 function normalizeSampleSchemaType(schema: ApiSchema | undefined): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.type === 'array') {
-    return 'array';
-  }
-  if (schema.type === 'object' || schema.properties || schema.additionalProperties) {
-    return 'object';
-  }
-  return schema.type;
-}
-
-function pickComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const values = schema[key];
-    if (Array.isArray(values) && values.length > 0) {
-      return values.find((entry) => typeof entry === 'object' && entry && entry.type !== 'null') || values[0];
-    }
-  }
-  return undefined;
+  return resolveSchemaType(schema).effectiveType;
 }

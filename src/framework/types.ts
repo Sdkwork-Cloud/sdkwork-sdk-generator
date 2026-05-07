@@ -75,6 +75,8 @@ export interface ApiPathItem {
   head?: ApiOperation;
   patch?: ApiOperation;
   trace?: ApiOperation;
+  query?: ApiOperation;
+  additionalOperations?: Record<string, ApiOperation>;
   [key: string]: unknown;
 }
 
@@ -103,10 +105,18 @@ export interface ApiOperation {
 
 export interface ApiParameter {
   name: string;
-  in: 'query' | 'header' | 'path' | 'cookie';
+  in: 'query' | 'querystring' | 'header' | 'path' | 'cookie';
   description?: string;
   required?: boolean;
+  deprecated?: boolean;
+  allowEmptyValue?: boolean;
+  style?: string;
+  explode?: boolean;
+  allowReserved?: boolean;
   schema: ApiSchema;
+  content?: Record<string, unknown>;
+  example?: unknown;
+  examples?: Record<string, unknown>;
 }
 
 export interface ApiReference {
@@ -118,15 +128,23 @@ export type ApiParameterOrRef = ApiParameter | ApiReference;
 export interface ApiRequestBody {
   description?: string;
   required?: boolean;
-  content: Record<string, { schema: ApiSchema }>;
+  content: Record<string, ApiMediaType>;
 }
 
 export type ApiRequestBodyOrRef = ApiRequestBody | ApiReference;
 
 export interface ApiResponse {
   description?: string;
-  content?: Record<string, { schema: ApiSchema }>;
+  content?: Record<string, ApiMediaType>;
   headers?: Record<string, unknown>;
+}
+
+export interface ApiMediaType {
+  schema?: ApiSchema;
+  itemSchema?: ApiSchema;
+  example?: unknown;
+  examples?: Record<string, unknown>;
+  encoding?: Record<string, unknown>;
 }
 
 export interface ApiResponseOrRef extends ApiResponse {
@@ -134,16 +152,22 @@ export interface ApiResponseOrRef extends ApiResponse {
 }
 
 export interface ApiSchema {
-  type?: string;
+  type?: string | string[];
   format?: string;
   description?: string;
-  enum?: (string | number)[];
+  enum?: (string | number | boolean | null)[];
+  const?: string | number | boolean | null;
   nullable?: boolean;
   properties?: Record<string, ApiSchema>;
-  items?: ApiSchema;
+  required?: string[];
+  items?: ApiSchema | boolean;
+  prefixItems?: ApiSchema[];
+  minItems?: number;
+  maxItems?: number;
   allOf?: ApiSchema[];
   oneOf?: ApiSchema[];
   anyOf?: ApiSchema[];
+  not?: ApiSchema;
   additionalProperties?: ApiSchema | boolean;
   default?: unknown;
   example?: unknown;
@@ -274,6 +298,7 @@ export interface ApiOperationGroup {
 export interface GeneratedApiOperation extends ApiOperation {
   path: string;
   method: string;
+  httpMethod?: string;
   allParameters?: ApiParameter[];
   requestBody?: ApiRequestBody;
   responses: Record<string, ApiResponse>;

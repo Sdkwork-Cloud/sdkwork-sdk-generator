@@ -1,4 +1,5 @@
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const DART_RESERVED_WORDS = new Set([
     'abstract',
     'as',
@@ -112,40 +113,6 @@ function toSnakeCase(str) {
         .replace(/[^a-zA-Z0-9_]/g, '')
         .toLowerCase();
 }
-function normalizeSchemaType(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
-}
-function inferImplicitObjectType(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return undefined;
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-        return 'object';
-    }
-    if (schema.additionalProperties) {
-        return 'object';
-    }
-    return undefined;
-}
-function pickComposedSchema(schema) {
-    const orderedKeys = ['allOf', 'oneOf', 'anyOf'];
-    for (const key of orderedKeys) {
-        const values = schema?.[key];
-        if (!Array.isArray(values) || values.length === 0) {
-            continue;
-        }
-        const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-        return candidate || values[0];
-    }
-    return undefined;
-}
 export function getDartType(schema, config) {
     if (!schema || typeof schema !== 'object') {
         return 'dynamic';
@@ -158,7 +125,11 @@ export function getDartType(schema, config) {
     if (composed) {
         return getDartType(composed, config);
     }
-    const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+    const constInfo = getConstSchemaInfo(schema);
+    if (constInfo) {
+        return getDartPrimitiveType(constInfo.type);
+    }
+    const type = resolveSchemaType(schema).effectiveType;
     if (type === 'string')
         return 'String';
     if (type === 'number')
@@ -168,7 +139,10 @@ export function getDartType(schema, config) {
     if (type === 'boolean')
         return 'bool';
     if (type === 'array') {
-        const itemType = schema.items ? getDartType(schema.items, config) : 'dynamic';
+        if (getTupleSchemaInfo(schema)) {
+            return 'List<dynamic>';
+        }
+        const itemType = schema.items && typeof schema.items === 'object' ? getDartType(schema.items, config) : 'dynamic';
         return `List<${itemType}>`;
     }
     if (type === 'object') {
@@ -181,6 +155,17 @@ export function getDartType(schema, config) {
         }
         return 'Map<String, dynamic>';
     }
+    return 'dynamic';
+}
+function getDartPrimitiveType(type) {
+    if (type === 'string')
+        return 'String';
+    if (type === 'number')
+        return 'double';
+    if (type === 'integer')
+        return 'int';
+    if (type === 'boolean')
+        return 'bool';
     return 'dynamic';
 }
 export function getDartPackageName(config) {

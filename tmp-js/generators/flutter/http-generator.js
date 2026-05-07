@@ -19,12 +19,216 @@ export class HttpClientGenerator {
     generateHttpClient(config, commonImportPath) {
         return {
             path: 'lib/src/http/client.dart',
-            content: this.format(`import '${commonImportPath}';
+            content: this.format(`import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:http/http.dart' as http;
+import '${commonImportPath}';
 
 class HttpClient extends BaseHttpClient {
+  final http.Client _rawClient = http.Client();
+
   HttpClient({
     required SdkConfig config,
   }) : super(config);
+
+  @override
+  Future<dynamic> request(
+    String method,
+    String path, {
+    Map<String, dynamic>? params,
+    dynamic body,
+    Map<String, String>? requestHeaders,
+    String? contentType,
+  }) async {
+    final uri = _buildUri(path, params);
+    final mergedHeaders = <String, String>{
+      ...headers,
+      ...?requestHeaders,
+    };
+
+    if (body != null && _normalizeContentType(contentType).toLowerCase().startsWith('multipart/form-data')) {
+      final response = await _sendMultipart(method, uri, body, mergedHeaders)
+          .timeout(Duration(milliseconds: timeout));
+      return _parseResponse(response);
+    } else {
+      final request = http.Request(method, uri)
+        ..headers.addAll(_buildHeaders(mergedHeaders, contentType, body));
+      final encodedBody = _encodeBody(body, contentType);
+      if (encodedBody != null) {
+        if (encodedBody is List<int>) {
+          request.bodyBytes = encodedBody;
+        } else {
+          request.body = encodedBody.toString();
+        }
+      }
+      final streamed = await _rawClient
+          .send(request)
+          .timeout(Duration(milliseconds: timeout));
+      final response = await http.Response.fromStream(streamed);
+      return _parseResponse(response);
+    }
+  }
+
+  Uri _buildUri(String path, [Map<String, dynamic>? params]) {
+    final normalizedPath = path.startsWith('/') ? path : '/$path';
+    var url = Uri.parse('$baseUrl$normalizedPath');
+    if (params != null && params.isNotEmpty) {
+      url = url.replace(
+        queryParameters: params.map((k, v) => MapEntry(k, v?.toString())),
+      );
+    }
+    return url;
+  }
+
+  dynamic _parseResponse(http.Response response) {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('HTTP \${response.statusCode}: \${response.body}');
+    }
+
+    if (response.body.isEmpty) {
+      return null;
+    }
+
+    final contentType = response.headers['content-type'] ?? '';
+    if (contentType.contains('application/json')) {
+      return jsonDecode(response.body);
+    }
+    return response.body;
+  }
+
+  String _normalizeContentType(String? contentType) {
+    if (contentType == null || contentType.trim().isEmpty) {
+      return 'application/json';
+    }
+    return contentType.trim();
+  }
+
+  Map<String, String> _buildHeaders(
+    Map<String, String> mergedHeaders,
+    String? contentType,
+    dynamic body,
+  ) {
+    if (body == null) {
+      return mergedHeaders;
+    }
+
+    final normalized = _normalizeContentType(contentType).toLowerCase();
+    if (normalized.startsWith('multipart/form-data')) {
+      final copied = Map<String, String>.from(mergedHeaders);
+      copied.remove('Content-Type');
+      return copied;
+    }
+
+    return {
+      ...mergedHeaders,
+      'Content-Type': _normalizeContentType(contentType),
+    };
+  }
+
+  dynamic _encodeBody(dynamic body, String? contentType) {
+    if (body == null) {
+      return null;
+    }
+
+    final normalized = _normalizeContentType(contentType).toLowerCase();
+    if (normalized.startsWith('application/x-www-form-urlencoded')) {
+      final entries = _toFormEntries(body);
+      return entries
+          .map(
+            (entry) =>
+                '\${Uri.encodeQueryComponent(entry.key)}=\${Uri.encodeQueryComponent(entry.value)}',
+          )
+          .join('&');
+    }
+
+    if (normalized.contains('json')) {
+      return jsonEncode(body);
+    }
+
+    if (body is String || body is List<int>) {
+      return body;
+    }
+    return body.toString();
+  }
+
+  List<MapEntry<String, String>> _toFormEntries(dynamic body) {
+    final result = <MapEntry<String, String>>[];
+    void addValue(String key, dynamic value) {
+      if (value == null) {
+        result.add(MapEntry(key, ''));
+        return;
+      }
+      if (value is Iterable && value is! String && value is! List<int>) {
+        for (final item in value) {
+          addValue(key, item);
+        }
+        return;
+      }
+      result.add(MapEntry(key, value.toString()));
+    }
+
+    if (body is Map) {
+      body.forEach((key, value) {
+        if (key == null) {
+          return;
+        }
+        addValue(key.toString(), value);
+      });
+    } else {
+      addValue('value', body);
+    }
+
+    return result;
+  }
+
+  Future<http.Response> _sendMultipart(
+    String method,
+    Uri uri,
+    dynamic body,
+    Map<String, String> mergedHeaders,
+  ) async {
+    final request = http.MultipartRequest(method, uri);
+    request.headers.addAll(_buildHeaders(mergedHeaders, 'multipart/form-data', body));
+
+    void addField(String key, dynamic value) {
+      if (value == null) {
+        request.fields[key] = '';
+        return;
+      }
+      if (value is Iterable && value is! String && value is! List<int>) {
+        for (final item in value) {
+          addField(key, item);
+        }
+        return;
+      }
+      if (value is http.MultipartFile) {
+        request.files.add(value);
+        return;
+      }
+      if (value is Uint8List || value is List<int>) {
+        request.files.add(http.MultipartFile.fromBytes(key, List<int>.from(value as List<int>), filename: key));
+        return;
+      }
+      request.fields[key] = value.toString();
+    }
+
+    if (body is Map) {
+      body.forEach((key, value) {
+        if (key == null) {
+          return;
+        }
+        addField(key.toString(), value);
+      });
+    } else if (body != null) {
+      addField('value', body);
+    }
+
+    final streamed = await _rawClient
+        .send(request)
+        .timeout(Duration(milliseconds: timeout));
+    return http.Response.fromStream(streamed);
+  }
 }
 `),
             language: 'flutter',

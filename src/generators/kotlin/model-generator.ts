@@ -1,5 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveModelSchema } from '../../framework/schema.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { KOTLIN_CONFIG, getKotlinType } from './config.js';
 
@@ -9,15 +10,21 @@ export class ModelGenerator {
     const packageName = resolveJvmSdkIdentity(config);
     
     for (const [name, schema] of Object.entries(ctx.schemas)) {
-      files.push(this.generateDataClass(name, schema, packageName));
+      files.push(this.generateDataClass(name, schema, ctx.schemas, packageName));
     }
 
     return files;
   }
 
-  private generateDataClass(name: string, schema: any, packageName: ReturnType<typeof resolveJvmSdkIdentity>): GeneratedFile {
+  private generateDataClass(
+    name: string,
+    schema: any,
+    schemas: SchemaContext['schemas'],
+    packageName: ReturnType<typeof resolveJvmSdkIdentity>
+  ): GeneratedFile {
+    const modelSchema = resolveModelSchema(schema, schemas);
     const className = KOTLIN_CONFIG.namingConventions.modelName(name);
-    const props = schema.properties || {};
+    const props = modelSchema.properties || {};
     
     const fields = Object.entries(props).map(([propName, propSchema]: [string, any]) => {
       const fieldName = KOTLIN_CONFIG.namingConventions.propertyName(propName);

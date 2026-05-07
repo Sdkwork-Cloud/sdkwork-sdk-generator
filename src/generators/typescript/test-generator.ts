@@ -75,8 +75,17 @@ ${assertions}
     if (plan.variables.some((variable) => variable.kind === 'params')) {
       assertions.push('assert.deepEqual(captured.params, params);');
     }
-    if (plan.variables.some((variable) => variable.kind === 'headers')) {
-      assertions.push('assert.deepEqual(captured.headers, headers);');
+    if (plan.headerExpectations.length > 0) {
+      assertions.push('assert.ok(captured.headers);');
+      for (const expectation of plan.headerExpectations) {
+        if (expectation.cookie) {
+          const source = expectation.source || `'${this.escape(expectation.expected)}'`;
+          assertions.push(`assert.equal(captured.headers.Cookie, \`${this.escape(expectation.expected)}=\${encodeURIComponent(${source})}\`);`);
+        } else {
+          const source = expectation.source || `'${this.escape(expectation.expected)}'`;
+          assertions.push(`assert.equal(captured.headers['${this.escape(expectation.name)}'], ${source});`);
+        }
+      }
     }
     if (plan.requestBodyMediaType) {
       assertions.push(`assert.equal(captured.contentType, '${this.escape(plan.requestBodyMediaType)}');`);

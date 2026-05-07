@@ -3,6 +3,24 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('package exports', () => {
+  it('includes only source-level native rust integration client files in published package files', () => {
+    const packageJson = JSON.parse(
+      readFileSync(resolve(process.cwd(), 'package.json'), 'utf-8')
+    ) as {
+      files?: string[];
+    };
+
+    expect(packageJson.files).toEqual(expect.arrayContaining([
+      'rust/Cargo.toml',
+      'rust/README.md',
+      'rust/src',
+      'rust/tests',
+    ]));
+    expect(packageJson.files).not.toContain('rust');
+    expect(packageJson.files).not.toContain('rust/target');
+    expect(packageJson.files).not.toContain('rust/Cargo.lock');
+  });
+
   it('exposes a stable node-only output sync entry for programmatic safe writes', () => {
     const packageJson = JSON.parse(
       readFileSync(resolve(process.cwd(), 'package.json'), 'utf-8')

@@ -2,6 +2,7 @@ import type { LanguageConfig } from '../../framework/base.js';
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const PHP_CONFIG: LanguageConfig = {
   language: 'php',
@@ -132,42 +133,6 @@ function toKebabCase(str: string): string {
     .toLowerCase();
 }
 
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: any): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.properties && typeof schema.properties === 'object') {
-    return 'object';
-  }
-  if (schema.additionalProperties) {
-    return 'object';
-  }
-  return undefined;
-}
-
-function pickComposedSchema(schema: any): any | undefined {
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-    return candidate || values[0];
-  }
-  return undefined;
-}
-
 export function getPhpType(schema: any, config: LanguageConfig): string {
   if (!schema || typeof schema !== 'object') {
     return 'mixed';
@@ -183,7 +148,12 @@ export function getPhpType(schema: any, config: LanguageConfig): string {
     return getPhpType(composed, config);
   }
 
-  const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+  const constInfo = getConstSchemaInfo(schema);
+  if (constInfo) {
+    return getPhpPrimitiveType(constInfo.type);
+  }
+
+  const type = resolveSchemaType(schema).effectiveType;
   if (type === 'string') {
     return 'string';
   }
@@ -197,11 +167,22 @@ export function getPhpType(schema: any, config: LanguageConfig): string {
     return 'bool';
   }
   if (type === 'array') {
+    if (getTupleSchemaInfo(schema)) {
+      return 'array';
+    }
     return 'array';
   }
   if (type === 'object') {
     return 'array';
   }
+  return 'mixed';
+}
+
+function getPhpPrimitiveType(type: string): string {
+  if (type === 'string') return 'string';
+  if (type === 'number') return 'float';
+  if (type === 'integer') return 'int';
+  if (type === 'boolean') return 'bool';
   return 'mixed';
 }
 

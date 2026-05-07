@@ -1,5 +1,6 @@
 import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -22,6 +23,8 @@ export interface PhpUsageVariable {
 export interface PhpUsageExpectation {
   name: string;
   expected: string;
+  source?: string;
+  cookie?: boolean;
 }
 
 export interface PhpBodyAssertionPlan {
@@ -158,10 +161,10 @@ export class PhpUsagePlanner {
       (parameter) => parameter?.in === 'header' || parameter?.in === 'cookie',
     );
     if (headerParams.length > 0) {
-      const headerVariable = this.buildHeaderVariable(headerParams);
-      variables.push(headerVariable.variable);
-      headerExpectations.push(...headerVariable.expectations);
-      callArguments.push('$headers');
+      const headerVariables = this.buildHeaderVariables(headerParams, variables.map((variable) => variable.name));
+      variables.push(...headerVariables.variables);
+      headerExpectations.push(...headerVariables.expectations);
+      callArguments.push(...headerVariables.arguments);
     }
 
     const responseSchema = extractResponseSchema(operation);
@@ -193,7 +196,7 @@ export class PhpUsagePlanner {
     const declaredType = getPhpType(schema, PHP_CONFIG);
     const resolvedSchema = resolveSchema(this.ctx, schema);
     const normalizedMediaType = String(mediaType || '').toLowerCase();
-    const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
 
     if (schema.$ref && this.isKnownModelType(declaredType) && normalizedType === 'object') {
       const modelVariable = this.renderModelVariable('body', declaredType, resolvedSchema);
@@ -212,8 +215,8 @@ export class PhpUsagePlanner {
     }
 
     if (normalizedType === 'array') {
-      const itemValue = renderInlinePhpValue(this.ctx, resolvedSchema?.items, 'item', 0, normalizedMediaType, 1)
-        || buildScalarPhpValue('item', resolvedSchema?.items, 0, normalizedMediaType);
+      const itemValue = renderInlinePhpValue(this.ctx, getArrayItemSchema(resolvedSchema), 'item', 0, normalizedMediaType, 1)
+        || buildScalarPhpValue('item', getArrayItemSchema(resolvedSchema), 0, normalizedMediaType);
       const lines = [`$body = [${itemValue.phpExpression}];`];
       return {
         variable: {
@@ -301,23 +304,47 @@ export class PhpUsagePlanner {
     };
   }
 
-  private buildHeaderVariable(parameters: ApiParameter[]): {
-    variable: PhpUsageVariable;
+  private buildHeaderVariables(parameters: ApiParameter[], reservedNames: string[]): {
+    variables: PhpUsageVariable[];
+    arguments: string[];
     expectations: PhpUsageExpectation[];
   } {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => PHP_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'),
+      [...reservedNames, 'body', 'params', 'headers'],
+    );
+    const variables: PhpUsageVariable[] = [];
+    const arguments_: string[] = [];
     const expectations: PhpUsageExpectation[] = [];
-    const entries: string[] = [];
 
     for (let index = 0; index < parameters.length; index += 1) {
       const parameter = parameters[index];
+      const key = keys[index];
+      const variableName = safeNameByKey.get(key) || `headerParam${index + 1}`;
       const sample = buildHeaderValue(this.ctx, parameter, index);
-      expectations.push({ name: parameter.name, expected: sample.stringValue });
-      entries.push(`${quotePhpString(parameter.name)} => ${sample.phpExpression}`);
+      variables.push({
+        name: variableName,
+        kind: 'headers',
+        setupByMode: {
+          readme: [`$${variableName} = ${sample.phpExpression};`],
+          test: [`$${variableName} = ${sample.phpExpression};`],
+        },
+      });
+      arguments_.push(parameter.in === 'cookie' ? `$${variableName}` : `$${variableName}`);
+      expectations.push({
+        name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+        expected: sample.stringValue,
+        source: `$${variableName}`,
+        cookie: parameter.in === 'cookie',
+      });
     }
 
-    const line = `$headers = [${entries.join(', ')}];`;
     return {
-      variable: { name: 'headers', kind: 'headers', setupByMode: { readme: [line], test: [line] } },
+      variables,
+      arguments: arguments_,
       expectations,
     };
   }
@@ -489,6 +516,10 @@ function generatePhpOperationName(
     put: 'update',
     patch: 'patch',
     delete: 'delete',
+    options: 'options',
+    head: 'head',
+    trace: 'trace',
+    query: 'query',
   };
 
   return PHP_CONFIG.namingConventions.methodName(`${actionMap[method] || method}_${resource}`);
@@ -559,7 +590,7 @@ function renderInlinePhpValue(
     };
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   switch (normalizedType) {
     case 'integer': {
       const value = index + 1;
@@ -579,8 +610,8 @@ function renderInlinePhpValue(
       };
     }
     case 'array': {
-      const itemValue = renderInlinePhpValue(ctx, resolvedSchema.items, fallbackName, index, mediaType, depth + 1)
-        || buildScalarPhpValue(fallbackName, resolvedSchema.items, index, mediaType);
+      const itemValue = renderInlinePhpValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, index, mediaType, depth + 1)
+        || buildScalarPhpValue(fallbackName, getArrayItemSchema(resolvedSchema), index, mediaType);
       return {
         phpExpression: `[${itemValue.phpExpression}]`,
         jsonValue: [itemValue.jsonValue],
@@ -610,7 +641,7 @@ function buildScalarPhpValue(
   index: number,
   mediaType?: string,
 ): PhpNamedValue {
-  const normalizedType = normalizeSchemaType(schema?.type) || inferImplicitObjectType(schema);
+  const normalizedType = resolveSchemaType(schema).effectiveType;
   if (normalizedType === 'integer') {
     const value = index + 1;
     return { phpExpression: String(value), jsonValue: value, stringValue: String(value), modelImports: [] };
@@ -660,7 +691,7 @@ function buildHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: nu
     };
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema?.type);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   if (normalizedType === 'integer' || normalizedType === 'number') {
     const value = String(index + 1);
     return {
@@ -679,7 +710,13 @@ function buildHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: nu
       modelImports: [],
     };
   }
-  return buildScalarPhpValue(parameter.name || `header${index + 1}`, resolvedSchema, index);
+  const value = parameter.name || `header${index + 1}`;
+  return {
+    phpExpression: quotePhpString(value),
+    jsonValue: value,
+    stringValue: value,
+    modelImports: [],
+  };
 }
 
 function buildLiteralValue(value: unknown): PhpNamedValue {
@@ -720,7 +757,7 @@ function buildJsonSampleValue(
     return enumValues[0];
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   switch (normalizedType) {
     case 'integer':
       return depth + 1;
@@ -729,7 +766,7 @@ function buildJsonSampleValue(
     case 'boolean':
       return true;
     case 'array':
-      return [buildJsonSampleValue(ctx, resolvedSchema.items, fallbackName, depth + 1)];
+      return [buildJsonSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1)];
     case 'object': {
       const properties = resolvedSchema.properties ? Object.entries(resolvedSchema.properties) : [];
       if (properties.length > 0) {
@@ -781,8 +818,7 @@ function buildResponseAssertions(
       ? `$result->${PHP_CONFIG.namingConventions.propertyName(propertyName)}`
       : `$result?->${PHP_CONFIG.namingConventions.propertyName(propertyName)}`;
     const resolvedPropertySchema = resolveSchema(ctx, propertySchema);
-    const normalizedType = normalizeSchemaType(resolvedPropertySchema?.type)
-      || inferImplicitObjectType(resolvedPropertySchema);
+    const normalizedType = resolveSchemaType(resolvedPropertySchema).effectiveType;
     if (propertySchema?.$ref) {
       assertions.push(`self::assertNotNull(${propertyAccess});`);
       continue;
@@ -948,38 +984,9 @@ function sampleStringValue(fallbackName: string, index: number, schema?: ApiSche
   return normalizedName ? normalizedName.replace(/[^a-z0-9]+/g, '-') : `value${index + 1}`;
 }
 
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: ApiSchema | undefined): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  return schema.properties || schema.additionalProperties ? 'object' : undefined;
-}
-
 function getRequiredPropertyNames(schema: ApiSchema | undefined): string[] {
   const required = (schema as { required?: unknown } | undefined)?.required;
   return Array.isArray(required) ? required.filter((value): value is string => typeof value === 'string') : [];
-}
-
-function pickComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    return values.find((entry) => entry && normalizeSchemaType(entry.type) !== 'null') || values[0];
-  }
-  return undefined;
 }
 
 function quotePhpString(value: string): string {

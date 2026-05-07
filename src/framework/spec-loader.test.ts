@@ -59,6 +59,90 @@ paths:
     expect(spec.paths['/users']).toBeDefined();
   });
 
+  it('parses local json specs from files', async () => {
+    const workDir = createTempDir('sdkwork-spec-loader-json-');
+    const specPath = join(workDir, 'openapi.json');
+    writeFileSync(specPath, JSON.stringify({
+      openapi: '3.2.0',
+      info: {
+        title: 'Local JSON API',
+        version: '1.0.0',
+      },
+      paths: {
+        '/status': {
+          get: {
+            operationId: 'getStatus',
+            responses: {
+              '200': {
+                description: 'OK',
+              },
+            },
+          },
+        },
+      },
+    }), 'utf-8');
+
+    const spec = await loadOpenApiSpec(specPath) as {
+      openapi: string;
+      info: { title: string };
+      paths: Record<string, unknown>;
+    };
+
+    expect(spec.openapi).toBe('3.2.0');
+    expect(spec.info.title).toBe('Local JSON API');
+    expect(spec.paths['/status']).toBeDefined();
+  });
+
+  it('parses remote json specs from urls without requiring a local file', async () => {
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          get: (name: string) => name.toLowerCase() === 'content-type' ? 'application/json' : null,
+        },
+        text: async () => JSON.stringify({
+          openapi: '3.1.2',
+          info: {
+            title: 'Remote JSON API',
+            version: '1.0.0',
+          },
+          paths: {
+            '/remote': {
+              get: {
+                operationId: 'getRemote',
+                responses: {
+                  '200': {
+                    description: 'OK',
+                  },
+                },
+              },
+            },
+          },
+        }),
+      };
+    }) as typeof fetch;
+
+    try {
+      const spec = await loadOpenApiSpec('https://example.com/openapi.json') as {
+        openapi: string;
+        info: { title: string };
+        paths: Record<string, unknown>;
+      };
+
+      expect(requestedUrls).toEqual(['https://example.com/openapi.json']);
+      expect(spec.openapi).toBe('3.1.2');
+      expect(spec.info.title).toBe('Remote JSON API');
+      expect(spec.paths['/remote']).toBeDefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('does not write console output while loading remote specs', async () => {
     const originalFetch = globalThis.fetch;
     const originalConsoleLog = console.log;

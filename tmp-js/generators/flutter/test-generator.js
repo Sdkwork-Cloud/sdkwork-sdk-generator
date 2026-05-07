@@ -25,9 +25,25 @@ export class TestGenerator {
             : `await ${plan.callExpression};`;
         const assertions = this.indent(this.buildAssertions(plan, expectedPath), 4);
         const responseLines = this.indent(this.buildResponseLines(plan), 8);
+        const needsJsonImport = Boolean(plan.bodyAssertion?.kind === 'json' && plan.bodyAssertion.expectedJsonExpression);
+        const needsQueryCapture = plan.queryExpectations.length > 0;
+        const needsHeaderCapture = plan.headerExpectations.length > 0;
+        const needsBodyCapture = Boolean(plan.bodyAssertion);
+        const needsContentTypeCapture = Boolean(plan.bodyAssertion?.contentType);
+        const capturedQueryDeclaration = needsQueryCapture ? '    var capturedQuery = <String, String>{};\n' : '';
+        const capturedHeadersDeclaration = needsHeaderCapture ? '    var capturedHeaders = <String, String>{};\n' : '';
+        const capturedBodyDeclaration = needsBodyCapture ? '    var capturedBody = <int>[];\n' : '';
+        const capturedContentTypeDeclaration = needsContentTypeCapture ? "    var capturedContentType = '';\n" : '';
+        const capturedQueryAssignment = needsQueryCapture ? '        capturedQuery = Map<String, String>.from(request.uri.queryParameters);\n' : '';
+        const capturedHeadersAssignment = needsHeaderCapture ? '        capturedHeaders = flattenHeaders(request.headers);\n' : '';
+        const capturedBodyAssignment = needsBodyCapture ? '        capturedBody = await readRequestBody(request);\n' : '';
+        const capturedContentTypeAssignment = needsContentTypeCapture ? "        capturedContentType = request.headers.contentType?.toString() ?? '';\n" : '';
+        const helperBlocks = [
+            needsHeaderCapture ? this.flattenHeadersHelper() : '',
+            needsBodyCapture ? this.readRequestBodyHelper() : '',
+        ].filter(Boolean).join('\n\n');
         return this.format(`import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+${needsJsonImport ? "import 'dart:convert';\n" : ''}import 'dart:io';
 
 import 'package:${packageName}/${packageName}.dart';
 import 'package:test/test.dart';
@@ -36,19 +52,11 @@ void main() {
   test('generated sdk forwards request metadata', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     var capturedPath = '';
-    var capturedQuery = <String, String>{};
-    var capturedHeaders = <String, String>{};
-    var capturedBody = <int>[];
-    var capturedContentType = '';
-    final requestHandled = Completer<void>();
+${capturedQueryDeclaration}${capturedHeadersDeclaration}${capturedBodyDeclaration}${capturedContentTypeDeclaration}    final requestHandled = Completer<void>();
     final subscription = server.listen((request) async {
       try {
         capturedPath = request.uri.path;
-        capturedQuery = Map<String, String>.from(request.uri.queryParameters);
-        capturedHeaders = flattenHeaders(request.headers);
-        capturedBody = await readRequestBody(request);
-        capturedContentType = request.headers.contentType?.toString() ?? '';
-${responseLines}
+${capturedQueryAssignment}${capturedHeadersAssignment}${capturedBodyAssignment}${capturedContentTypeAssignment}${responseLines}
       } catch (error, stackTrace) {
         if (!requestHandled.isCompleted) {
           requestHandled.completeError(error, stackTrace);
@@ -70,22 +78,7 @@ ${assertions}
     }
   });
 }
-
-Map<String, String> flattenHeaders(HttpHeaders headers) {
-  final flattened = <String, String>{};
-  headers.forEach((name, values) {
-    flattened[name] = values.join(',');
-  });
-  return flattened;
-}
-
-Future<List<int>> readRequestBody(HttpRequest request) async {
-  final chunks = <int>[];
-  await for (final chunk in request) {
-    chunks.addAll(chunk);
-  }
-  return chunks;
-}
+${helperBlocks ? `\n${helperBlocks}` : ''}
 `);
     }
     buildResponseLines(plan) {
@@ -106,7 +99,16 @@ Future<List<int>> readRequestBody(HttpRequest request) async {
             lines.push(`expect(capturedQuery[${this.quote(expectation.name)}], ${this.quote(expectation.expected)});`);
         }
         for (const expectation of plan.headerExpectations) {
-            lines.push(`expect(capturedHeaders[${this.quote(expectation.name.toLowerCase())}], ${this.quote(expectation.expected)});`);
+            if (expectation.cookie) {
+                const source = expectation.source || this.quote(expectation.expected);
+                lines.push(`expect(capturedHeaders['cookie'], '${this.escapeSingleQuoted(`${expectation.expected}=`)}\${Uri.encodeQueryComponent(${source})}');`);
+            }
+            else if (expectation.source) {
+                lines.push(`expect(capturedHeaders[${this.quote(expectation.name.toLowerCase())}], ${expectation.source});`);
+            }
+            else {
+                lines.push(`expect(capturedHeaders[${this.quote(expectation.name.toLowerCase())}], ${this.quote(expectation.expected)});`);
+            }
         }
         if (plan.bodyAssertion) {
             if (plan.bodyAssertion.contentTypeMatch === 'prefix') {
@@ -128,9 +130,30 @@ Future<List<int>> readRequestBody(HttpRequest request) async {
     quote(value) {
         return `'${String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
     }
+    escapeSingleQuoted(value) {
+        return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
     indent(content, spaces) {
         const prefix = ' '.repeat(Math.max(0, spaces));
         return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
+    }
+    flattenHeadersHelper() {
+        return `Map<String, String> flattenHeaders(HttpHeaders headers) {
+  final flattened = <String, String>{};
+  headers.forEach((name, values) {
+    flattened[name] = values.join(',');
+  });
+  return flattened;
+}`;
+    }
+    readRequestBodyHelper() {
+        return `Future<List<int>> readRequestBody(HttpRequest request) async {
+  final chunks = <int>[];
+  await for (final chunk in request) {
+    chunks.addAll(chunk);
+  }
+  return chunks;
+}`;
     }
     format(content) {
         return content.trim() + '\n';

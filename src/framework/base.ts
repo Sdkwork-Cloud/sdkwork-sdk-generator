@@ -14,6 +14,17 @@ import type {
 import { normalizeReadmeFile } from './readme.js';
 import { buildSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.js';
 import { normalizeOperationId, normalizeTagName } from './naming.js';
+import {
+  findUnexpectedPathItemOperationFields,
+  normalizeOpenApiPathItemOperations,
+} from './http-methods.js';
+import {
+  parseLocalJsonPointerRef,
+  resolveLocalJsonPointerReference,
+  normalizeSchemaTypeValue,
+  resolveSchemaType,
+  toLocalJsonPointerRef,
+} from './schema.js';
 
 export * from './types.js';
 
@@ -62,14 +73,6 @@ export abstract class BaseGenerator {
   protected config!: GeneratorConfig;
   protected spec!: ApiSpec;
   protected ctx!: SchemaContext;
-
-  private static readonly HTTP_METHODS = new Set([
-    'get',
-    'put',
-    'post',
-    'delete',
-    'patch',
-  ]);
 
   private static readonly JSON_MEDIA_TYPES = new Set([
     'application/json',
@@ -155,8 +158,8 @@ export abstract class BaseGenerator {
         );
       }
 
-      const openapiVersion = typeof spec.openapi === 'string' ? spec.openapi : '';
-      if (!openapiVersion.startsWith('3.')) {
+      const openapiVersion = typeof spec.openapi === 'string' ? spec.openapi.trim() : '';
+      if (!this.isSupportedOpenApiVersion(openapiVersion)) {
         const sourceErrorCode = (spec as any)?.code;
         const sourceErrorMsg = (spec as any)?.msg || (spec as any)?.errorMsg;
         if (sourceErrorCode || sourceErrorMsg) {
@@ -165,7 +168,7 @@ export abstract class BaseGenerator {
           );
         }
         throw new Error(
-          `Unsupported OpenAPI version "${spec.openapi || 'unknown'}". SDKWork SDK Generator only supports OpenAPI 3.x.`
+          `Unsupported OpenAPI version "${spec.openapi || 'unknown'}". SDKWork SDK Generator only supports OpenAPI 3.x version strings such as 3.0.4, 3.1.2, or 3.2.0.`
         );
       }
       if (Object.keys(spec.paths || {}).length === 0) {
@@ -230,6 +233,7 @@ export abstract class BaseGenerator {
     const schemas: Record<string, any> = Object.fromEntries(
       Object.entries(spec.components?.schemas || {}).map(([name, schema]) => [name, this.cloneSchema(schema)])
     );
+    this.hoistJsonSchemaDefinitions(spec, schemas);
     const schemaFileMap = new Map<string, string>();
     const auth = this.deriveAuthContext(spec);
     const inlineSchemaNameByObject = new WeakMap<object, string>();
@@ -242,16 +246,7 @@ export abstract class BaseGenerator {
       const item = (pathItem || {}) as Record<string, any>;
       const pathParameters = this.resolveParameters(spec, item.parameters);
 
-      for (const [method, rawOperation] of Object.entries(item)) {
-        const normalizedMethod = method.toLowerCase();
-        if (!BaseGenerator.HTTP_METHODS.has(normalizedMethod)) {
-          continue;
-        }
-
-        const operation = rawOperation as Record<string, any>;
-        if (!operation || typeof operation !== 'object') {
-          continue;
-        }
+      for (const { method: normalizedMethod, httpMethod, operation } of normalizeOpenApiPathItemOperations(item)) {
 
         const operationSchemaBaseName = this.resolveOperationSchemaBaseName(operation, normalizedMethod, path);
         const operationParameters = this.resolveParameters(spec, operation.parameters);
@@ -292,6 +287,7 @@ export abstract class BaseGenerator {
           ...operation,
           path,
           method: normalizedMethod,
+          httpMethod,
           parameters: queryParameters,
           allParameters: visibleParameters,
           requestBody,
@@ -334,6 +330,184 @@ export abstract class BaseGenerator {
 
   protected preservesNamedNonObjectSchemas(): boolean {
     return false;
+  }
+
+  private hoistJsonSchemaDefinitions(spec: ApiSpec, schemas: Record<string, any>): void {
+    const refRewriteMap = new Map<string, string>();
+    const sourceRoot: Record<string, any> = {
+      ...(spec as Record<string, any>),
+      components: {
+        ...((spec as Record<string, any>).components || {}),
+        schemas,
+      },
+    };
+    const visited = new Set<object>();
+
+    const visit = (value: any, pathSegments: string[], namePrefix: string): void => {
+      if (!value || typeof value !== 'object') {
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((entry, index) => visit(entry, [...pathSegments, String(index)], `${namePrefix} ${index + 1}`));
+        return;
+      }
+      if (visited.has(value)) {
+        return;
+      }
+      visited.add(value);
+
+      const definitionEntries = this.collectJsonSchemaDefinitionEntries(value);
+      for (const [definitionContainerKey, definitions] of definitionEntries) {
+        for (const [definitionName, definitionSchema] of Object.entries(definitions)) {
+          if (!definitionSchema || typeof definitionSchema !== 'object') {
+            continue;
+          }
+
+          const definitionPath = [...pathSegments, definitionContainerKey, definitionName];
+          const sourceRef = toLocalJsonPointerRef(definitionPath);
+          const schemaName = this.allocateHoistedDefinitionSchemaName(schemas, namePrefix, definitionName);
+          schemas[schemaName] = this.cloneSchema(definitionSchema);
+          refRewriteMap.set(sourceRef, `#/components/schemas/${schemaName}`);
+          visit(schemas[schemaName], definitionPath, schemaName);
+        }
+      }
+
+      if (value.properties && typeof value.properties === 'object') {
+        for (const [propName, propSchema] of Object.entries(value.properties)) {
+          visit(propSchema, [...pathSegments, 'properties', propName], `${namePrefix} ${propName}`);
+        }
+      }
+      if (value.items && typeof value.items === 'object') {
+        visit(value.items, [...pathSegments, 'items'], `${namePrefix} Item`);
+      }
+      if (Array.isArray(value.prefixItems)) {
+        value.prefixItems.forEach((entry: any, index: number) =>
+          visit(entry, [...pathSegments, 'prefixItems', String(index)], `${namePrefix} Item ${index + 1}`)
+        );
+      }
+      if (value.additionalProperties && typeof value.additionalProperties === 'object') {
+        visit(value.additionalProperties, [...pathSegments, 'additionalProperties'], `${namePrefix} Value`);
+      }
+      if (value.not && typeof value.not === 'object') {
+        visit(value.not, [...pathSegments, 'not'], `${namePrefix} Not`);
+      }
+      for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
+        const composed = value[key];
+        if (Array.isArray(composed)) {
+          composed.forEach((entry: any, index: number) =>
+            visit(entry, [...pathSegments, key, String(index)], `${namePrefix} ${key} ${index + 1}`)
+          );
+        }
+      }
+    };
+
+    visit(sourceRoot, [], '');
+
+    for (const [schemaName, schema] of Object.entries(schemas)) {
+      visit(schema, ['components', 'schemas', schemaName], schemaName);
+    }
+
+    if (refRewriteMap.size === 0) {
+      return;
+    }
+
+    for (const [schemaName, schema] of Object.entries(schemas)) {
+      schemas[schemaName] = this.rewriteSchemaReferences(
+        schema,
+        refRewriteMap,
+        sourceRoot,
+        ['components', 'schemas', schemaName]
+      );
+    }
+  }
+
+  private collectJsonSchemaDefinitionEntries(schema: Record<string, any>): Array<[string, Record<string, any>]> {
+    return ['$defs', 'definitions']
+      .map((key) => [key, schema[key]] as const)
+      .filter((entry): entry is [string, Record<string, any>] =>
+        Boolean(entry[1]) && typeof entry[1] === 'object' && !Array.isArray(entry[1])
+      );
+  }
+
+  private allocateHoistedDefinitionSchemaName(
+    schemas: Record<string, any>,
+    ownerName: string,
+    definitionName: string
+  ): string {
+    const owner = this.toPascalCase(ownerName);
+    const definition = this.toPascalCase(definitionName) || 'Definition';
+    const preferred = !owner || definition.startsWith(owner) ? definition : `${owner}${definition}`;
+    let candidate = preferred;
+    let index = 2;
+    while (schemas[candidate]) {
+      candidate = `${preferred}${index}`;
+      index += 1;
+    }
+    return candidate;
+  }
+
+  private rewriteSchemaReferences(
+    value: any,
+    refRewriteMap: Map<string, string>,
+    sourceRoot: Record<string, any>,
+    currentPath: string[]
+  ): any {
+    if (!value || typeof value !== 'object') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      return value.map((entry, index) =>
+        this.rewriteSchemaReferences(entry, refRewriteMap, sourceRoot, [...currentPath, String(index)])
+      );
+    }
+
+    const rewritten: Record<string, any> = {};
+    for (const [key, entryValue] of Object.entries(value)) {
+      if (key === '$defs' || key === 'definitions') {
+        continue;
+      }
+
+      if (key === '$ref' && typeof entryValue === 'string') {
+        rewritten[key] = this.rewriteLocalJsonPointerReference(entryValue, refRewriteMap, sourceRoot, currentPath);
+        continue;
+      }
+
+      rewritten[key] = this.rewriteSchemaReferences(entryValue, refRewriteMap, sourceRoot, [...currentPath, key]);
+    }
+    return rewritten;
+  }
+
+  private rewriteLocalJsonPointerReference(
+    ref: string,
+    refRewriteMap: Map<string, string>,
+    sourceRoot: Record<string, any>,
+    currentPath: string[]
+  ): string {
+    const pointerSegments = parseLocalJsonPointerRef(ref);
+    if (!pointerSegments) {
+      return ref;
+    }
+    const canonicalRef = toLocalJsonPointerRef(pointerSegments);
+
+    const directRewrite = refRewriteMap.get(canonicalRef);
+    if (directRewrite) {
+      return directRewrite;
+    }
+
+    for (let index = currentPath.length; index >= 0; index -= 1) {
+      const candidate = toLocalJsonPointerRef([...currentPath.slice(0, index), ...pointerSegments]);
+      const rewrittenRef = refRewriteMap.get(candidate);
+      if (rewrittenRef) {
+        return rewrittenRef;
+      }
+    }
+
+    const target = resolveLocalJsonPointerReference(canonicalRef, sourceRoot);
+    if (!target || typeof target !== 'object') {
+      return ref;
+    }
+
+    return ref;
   }
 
   private inlineNamedNonObjectSchemaRefs(
@@ -398,10 +572,7 @@ export abstract class BaseGenerator {
         }
         return [
           mediaType,
-          {
-            ...current,
-            schema: this.rewriteSchemaForNamedNonObjectRefs(current.schema, schemas),
-          },
+          this.rewriteMediaTypeSchemas(current, schemas),
         ];
       })
     );
@@ -428,10 +599,7 @@ export abstract class BaseGenerator {
             }
             return [
               mediaType,
-              {
-                ...current,
-                schema: this.rewriteSchemaForNamedNonObjectRefs(current.schema, schemas),
-              },
+              this.rewriteMediaTypeSchemas(current, schemas),
             ];
           })
         ),
@@ -469,7 +637,12 @@ export abstract class BaseGenerator {
     }
 
     const rewritten = { ...schema } as Record<string, any>;
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      rewritten.prefixItems = schema.prefixItems.map((itemSchema: any) =>
+        this.rewriteSchemaForNamedNonObjectRefs(itemSchema, schemas, trail)
+      );
+    }
+    if (schema.items && typeof schema.items === 'object') {
       rewritten.items = this.rewriteSchemaForNamedNonObjectRefs(schema.items, schemas, trail);
     }
     if (schema.properties && typeof schema.properties === 'object') {
@@ -494,6 +667,17 @@ export abstract class BaseGenerator {
     }
     if (schema.not && typeof schema.not === 'object') {
       rewritten.not = this.rewriteSchemaForNamedNonObjectRefs(schema.not, schemas, trail);
+    }
+    return rewritten;
+  }
+
+  private rewriteMediaTypeSchemas(mediaTypeObject: Record<string, any>, schemas: Record<string, any>): Record<string, any> {
+    const rewritten = { ...mediaTypeObject };
+    if ('schema' in rewritten) {
+      rewritten.schema = this.rewriteSchemaForNamedNonObjectRefs(rewritten.schema, schemas);
+    }
+    if ('itemSchema' in rewritten) {
+      rewritten.itemSchema = this.rewriteSchemaForNamedNonObjectRefs(rewritten.itemSchema, schemas);
     }
     return rewritten;
   }
@@ -532,8 +716,8 @@ export abstract class BaseGenerator {
       return true;
     }
 
-    const schemaType = normalizeSchemaTypeValue(schema.type);
-    if (schema.items || schemaType === 'array') {
+    const schemaType = normalizeSchemaTypeValue(schema.type).type;
+    if (schema.items || Array.isArray(schema.prefixItems) || schemaType === 'array') {
       return false;
     }
     if (schema.additionalProperties && !schema.properties) {
@@ -911,16 +1095,13 @@ export abstract class BaseGenerator {
         issues.add(`Path "${path}" contains external $ref references. Only local "#/" refs are resolved.`);
       }
 
-      for (const [method, rawOperation] of Object.entries(item)) {
-        const normalizedMethod = method.toLowerCase();
-        if (!BaseGenerator.HTTP_METHODS.has(normalizedMethod)) {
-          continue;
-        }
+      for (const unsupportedField of findUnexpectedPathItemOperationFields(item)) {
+        issues.add(
+          `Path "${path}" contains operation-like field "${unsupportedField}". Use OpenAPI 3.2 additionalOperations for custom HTTP methods.`
+        );
+      }
 
-        const operation = rawOperation as Record<string, any>;
-        if (!operation || typeof operation !== 'object') {
-          continue;
-        }
+      for (const { method: normalizedMethod, operation } of normalizeOpenApiPathItemOperations(item)) {
 
         const operationLabel = `${normalizedMethod.toUpperCase()} ${path}`;
         const parameters: any[] = [
@@ -935,9 +1116,32 @@ export abstract class BaseGenerator {
           const paramIn = (param as any)?.in;
           return paramIn === 'header' || paramIn === 'cookie';
         });
+        const queryStringParams = parameters.filter((param) => {
+          if (param && typeof param === 'object' && '$ref' in param) {
+            return false;
+          }
+          return (param as any)?.in === 'querystring';
+        });
+        const queryParams = parameters.filter((param) => {
+          if (param && typeof param === 'object' && '$ref' in param) {
+            return false;
+          }
+          return (param as any)?.in === 'query';
+        });
         if (hasHeaderOrCookieParams && !this.supportsHeaderCookieParameters()) {
           issues.add(
             `${operationLabel} defines header/cookie parameters. Generated methods currently model query/path/body by default.`
+          );
+        }
+        if (queryStringParams.length > 1) {
+          issues.add(`${operationLabel} defines more than one OpenAPI 3.2 querystring parameter.`);
+        }
+        if (queryStringParams.length > 0 && queryParams.length > 0) {
+          issues.add(`${operationLabel} mixes OpenAPI 3.2 querystring parameters with query parameters.`);
+        }
+        if (queryStringParams.some((param) => !param || typeof param !== 'object' || !('content' in param))) {
+          issues.add(
+            `${operationLabel} defines OpenAPI 3.2 querystring parameters without a content media type.`
           );
         }
 
@@ -1112,11 +1316,7 @@ export abstract class BaseGenerator {
     const paths = spec.paths || {};
     for (const pathItem of Object.values(paths)) {
       const item = (pathItem || {}) as Record<string, any>;
-      for (const [method, operation] of Object.entries(item)) {
-        const normalizedMethod = method.toLowerCase();
-        if (!BaseGenerator.HTTP_METHODS.has(normalizedMethod)) {
-          continue;
-        }
+      for (const { operation } of normalizeOpenApiPathItemOperations(item)) {
         if (operation && typeof operation === 'object') {
           collect((operation as any).security);
         }
@@ -1201,6 +1401,20 @@ export abstract class BaseGenerator {
       if (hoistedSchema !== schema) {
         nextRequestBody.content[mediaType] = { ...current, schema: hoistedSchema };
       }
+      const itemSchema = current.itemSchema;
+      const hoistedItemSchema = this.hoistInlineOperationSchema(
+        itemSchema,
+        schemas,
+        `${operationSchemaBaseName}RequestItem`,
+        `${operationSchemaBaseName}${this.toPascalCase(operationMethod)}RequestItem`,
+        inlineSchemaNameByObject
+      );
+      if (hoistedItemSchema !== itemSchema) {
+        nextRequestBody.content[mediaType] = {
+          ...(nextRequestBody.content[mediaType] as Record<string, any>),
+          itemSchema: hoistedItemSchema,
+        };
+      }
     }
 
     return nextRequestBody;
@@ -1247,6 +1461,20 @@ export abstract class BaseGenerator {
         );
         if (hoistedSchema !== schema) {
           nextResponse.content[mediaType] = { ...current, schema: hoistedSchema };
+        }
+        const itemSchema = current.itemSchema;
+        const hoistedItemSchema = this.hoistInlineOperationSchema(
+          itemSchema,
+          schemas,
+          `${operationSchemaBaseName}${suffix}Item`,
+          `${operationSchemaBaseName}${this.toPascalCase(operationMethod)}${suffix}Item`,
+          inlineSchemaNameByObject
+        );
+        if (hoistedItemSchema !== itemSchema) {
+          nextResponse.content[mediaType] = {
+            ...(nextResponse.content[mediaType] as Record<string, any>),
+            itemSchema: hoistedItemSchema,
+          };
         }
       }
       resolved[statusCode] = nextResponse;
@@ -1317,10 +1545,11 @@ export abstract class BaseGenerator {
     if (!schema || typeof schema !== 'object' || schema.$ref) {
       return false;
     }
-    if (schema.oneOf || schema.anyOf || schema.allOf || schema.properties || schema.additionalProperties || schema.items) {
+    if (schema.oneOf || schema.anyOf || schema.allOf || schema.properties || schema.additionalProperties || schema.items || schema.prefixItems) {
       return true;
     }
-    return schema.type === 'object' || schema.type === 'array';
+    const schemaType = resolveSchemaType(schema).effectiveType;
+    return schemaType === 'object' || schemaType === 'array';
   }
 
   private cloneSchema<T>(schema: T): T {
@@ -1422,6 +1651,10 @@ export abstract class BaseGenerator {
     };
   }
 
+  private isSupportedOpenApiVersion(openapiVersion: string): boolean {
+    return /^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(openapiVersion);
+  }
+
   protected generateReleaseMetadata(config: GeneratorConfig): GeneratedFile[] {
     const author = (config.author || 'SDKWork Team').trim() || 'SDKWork Team';
     const license = (config.license || 'MIT').trim() || 'MIT';
@@ -1486,7 +1719,7 @@ export abstract class BaseGenerator {
       const schemas = schema.oneOf || schema.anyOf || [];
       return schemas.map((s: any) => this.mapType(s)).join(' | ');
     }
-    switch (schema.type) {
+    switch (resolveSchemaType(schema).effectiveType) {
       case 'string':
         if (schema.enum) return schema.enum.map((v: string) => `'${v}'`).join(' | ');
         if (schema.format === 'date-time') return mapping.datetime;
@@ -1498,7 +1731,7 @@ export abstract class BaseGenerator {
       case 'number': return mapping.number;
       case 'integer': return mapping.integer;
       case 'boolean': return mapping.boolean;
-      case 'array': return schema.items ? `${this.mapType(schema.items)}[]` : mapping.array;
+      case 'array': return schema.items && typeof schema.items === 'object' ? `${this.mapType(schema.items)}[]` : mapping.array;
       case 'object': return mapping.object;
       default: return 'unknown';
     }
@@ -1560,15 +1793,4 @@ function toKebabCase(str: string): string {
     .replace(/[\s_]+/g, '-')
     .replace(/[^a-zA-Z0-9-]/g, '')
     .toLowerCase();
-}
-
-function normalizeSchemaTypeValue(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
 }

@@ -42,6 +42,7 @@ export class TestGenerator {
       packageRoot,
       commonImportRoot: commonPkg.importRoot,
       usesModelPackage: plan.usesModelPackage,
+      hasCookieExpectations: plan.headerExpectations.some((expectation) => expectation.cookie),
     });
     const handlerResponse = this.indent(this.buildResponseHandler(plan), 16);
 
@@ -134,6 +135,7 @@ ${assertions}
     packageRoot: string;
     commonImportRoot: string;
     usesModelPackage: boolean;
+    hasCookieExpectations: boolean;
   }): string {
     return [
       `import ${options.commonImportRoot}.Types;`,
@@ -146,6 +148,7 @@ ${assertions}
       'import java.io.OutputStream;',
       'import java.net.InetSocketAddress;',
       'import java.net.URLDecoder;',
+      options.hasCookieExpectations ? 'import java.net.URLEncoder;' : '',
       'import java.nio.charset.StandardCharsets;',
       'import java.util.LinkedHashMap;',
       'import java.util.Map;',
@@ -179,7 +182,14 @@ ${assertions}
       lines.push(`assertEquals(${this.quote(expectation.expected)}, capturedQuery.get(${this.quote(expectation.name)}));`);
     }
     for (const expectation of plan.headerExpectations) {
-      lines.push(`assertEquals(${this.quote(expectation.expected)}, capturedHeaders.get(${this.quote(expectation.name)}));`);
+      if (expectation.cookie) {
+        const source = expectation.source || this.quote(expectation.expected);
+        lines.push(`assertEquals(${this.quote(`${expectation.expected}=`)} + URLEncoder.encode(${source}, StandardCharsets.UTF_8), capturedHeaders.get("Cookie"));`);
+      } else if (expectation.source) {
+        lines.push(`assertEquals(${expectation.source}, capturedHeaders.get(${this.quote(expectation.name)}));`);
+      } else {
+        lines.push(`assertEquals(${this.quote(expectation.expected)}, capturedHeaders.get(${this.quote(expectation.name)}));`);
+      }
     }
     if (plan.bodyAssertion) {
       if (plan.bodyAssertion.contentTypeMatch === 'prefix') {

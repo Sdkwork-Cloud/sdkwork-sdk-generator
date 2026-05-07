@@ -35,6 +35,7 @@ import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import java.net.InetSocketAddress
 import java.net.URLDecoder
+${plan.headerExpectations.some((expectation) => expectation.cookie) ? 'import java.net.URLEncoder\n' : ''}import java.nio.charset.StandardCharsets
 import java.nio.charset.StandardCharsets
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -142,7 +143,16 @@ ${assertions}
             lines.push(`assertEquals(${this.quote(expectation.expected)}, capturedQuery[${this.quote(expectation.name)}])`);
         }
         for (const expectation of plan.headerExpectations) {
-            lines.push(`assertEquals(${this.quote(expectation.expected)}, capturedHeaders[${this.quote(expectation.name)}])`);
+            if (expectation.cookie) {
+                const source = expectation.source || this.quote(expectation.expected);
+                lines.push(`assertEquals(${this.quote(`${expectation.expected}=`)} + URLEncoder.encode(${source}, StandardCharsets.UTF_8), capturedHeaders["Cookie"])`);
+            }
+            else if (expectation.source) {
+                lines.push(`assertEquals(${expectation.source}, capturedHeaders[${this.quote(expectation.name)}])`);
+            }
+            else {
+                lines.push(`assertEquals(${this.quote(expectation.expected)}, capturedHeaders[${this.quote(expectation.name)}])`);
+            }
         }
         if (plan.bodyAssertion) {
             if (plan.bodyAssertion.contentTypeMatch === 'prefix') {

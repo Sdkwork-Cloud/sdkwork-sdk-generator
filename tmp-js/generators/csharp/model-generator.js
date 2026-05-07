@@ -1,15 +1,17 @@
+import { resolveModelSchema } from '../../framework/schema.js';
 import { CSHARP_CONFIG, getCSharpNamespace, getCSharpType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
         const files = [];
         for (const [name, schema] of Object.entries(ctx.schemas)) {
-            files.push(this.generateClass(name, schema, config));
+            files.push(this.generateClass(name, schema, ctx.schemas, config));
         }
         return files;
     }
-    generateClass(name, schema, config) {
+    generateClass(name, schema, schemas, config) {
+        const modelSchema = resolveModelSchema(schema, schemas);
         const className = CSHARP_CONFIG.namingConventions.modelName(name);
-        const props = schema.properties || {};
+        const props = modelSchema.properties || {};
         const fields = Object.entries(props).map(([propName, propSchema]) => {
             const fieldName = CSHARP_CONFIG.namingConventions.propertyName(propName);
             const fieldType = getCSharpType(propSchema, CSHARP_CONFIG);

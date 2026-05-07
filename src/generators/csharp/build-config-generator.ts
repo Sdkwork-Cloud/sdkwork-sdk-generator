@@ -59,6 +59,11 @@ ${commonReferenceGroup}
     <PackageReference Include="System.Net.Http.Json" Version="6.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
+    <None Include="Tests/**/*.cs" />
+  </ItemGroup>
+
 </Project>
 `),
       language: 'csharp',

@@ -1,5 +1,8 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { CSHARP_CONFIG, getCSharpNamespace, getCSharpType } from './config.js';
 const CSHARP_RESERVED_WORDS = new Set([
     'abstract',
@@ -128,6 +131,14 @@ export class ApiGenerator {
         const methods = operations
             .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'Operation', knownModels, namespace))
             .join('\n\n');
+        const needsRequestHeaderHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        });
+        const needsQuerySerializationHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+        });
         return {
             path: `Api/${className}.cs`,
             content: this.format(`using System;
@@ -148,6 +159,8 @@ namespace ${namespace}.Api
         }
 
 ${methods}
+${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
+${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     }
 }
 `),
@@ -158,14 +171,21 @@ ${methods}
     generateMethod(op, config, methodName, knownModels, namespace) {
         const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
-        const hasQuery = allParameters.some((param) => param?.in === 'query');
-        const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        const queryParams = allParameters.filter((param) => param?.in === 'query');
+        const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
+        const headerParams = allParameters.filter((param) => param?.in === 'header');
+        const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const hasQuery = queryParams.length > 0;
+        const hasRawQueryString = queryStringParams.length > 0;
+        const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
         const method = String(op.method || '').toLowerCase();
-        const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+        const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const supportsRequestBody = supportsRequestBodyByDefault(method);
         const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
         const hasBody = Boolean(requestBodyInfo);
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestBodySchema = requestBodyInfo?.schema;
+        const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
             : '';
@@ -179,17 +199,38 @@ ${methods}
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => toSafeCamelIdentifier(value, CSHARP_RESERVED_WORDS), [
             hasBody ? 'body' : '',
             hasQuery ? 'query' : '',
-            hasHeaders ? 'headers' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'requestHeaders' : '',
         ]);
         const pathParams = rawPathParams.map((rawName) => ({
             rawName,
             safeName: pathParamNames.get(rawName) || rawName,
         }));
+        const parameterReservedNames = [
+            ...pathParams.map((param) => param.safeName),
+            hasBody ? 'body' : '',
+            hasQuery ? 'query' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'requestHeaders' : '',
+        ];
+        const queryBindings = hasExplicitQuerySerialization
+            ? this.createQueryParameterBindings(queryParams, knownModels, namespace, parameterReservedNames)
+            : [];
+        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, namespace, parameterReservedNames);
+        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, namespace, [
+            ...parameterReservedNames,
+            ...queryBindings.map((binding) => binding.safeName),
+            ...headerBindings.map((binding) => binding.safeName),
+        ]);
+        const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+        const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+        const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+        const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = [];
         if (pathParams.length) {
             params.push(...pathParams.map((param) => `string ${param.safeName}`));
         }
-        if (hasBody) {
+        if (hasBody && requestBodyRequired) {
             if (requestBodyRequired) {
                 params.push(`${requestType} body`);
             }
@@ -197,12 +238,19 @@ ${methods}
                 params.push(`${requestType}? body = null`);
             }
         }
-        if (hasQuery) {
+        if (hasRawQueryString) {
+            params.push('string rawQueryString');
+        }
+        params.push(...requiredQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+        params.push(...requiredHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
+        if (hasBody && !requestBodyRequired) {
+            params.push(`${requestType}? body = null`);
+        }
+        if (hasQuery && !hasExplicitQuerySerialization) {
             params.push('Dictionary<string, object>? query = null');
         }
-        if (hasHeaders) {
-            params.push('Dictionary<string, string>? headers = null');
-        }
+        params.push(...optionalQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+        params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
             const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, CSHARP_RESERVED_WORDS);
@@ -210,136 +258,443 @@ ${methods}
         });
         const pathExpression = pathParams.length > 0 ? `$\"${pathTemplate}\"` : `\"${pathTemplate}\"`;
         const pathCall = `ApiPaths.${CSHARP_CONFIG.namingConventions.modelName(config.sdkType)}Path(${pathExpression})`;
+        const requestPathCall = hasRawQueryString
+            ? `ApiPaths.AppendQueryString(${pathCall}, rawQueryString)`
+            : hasExplicitQuerySerialization
+                ? `ApiPaths.AppendQueryString(${pathCall}, queryString)`
+                : pathCall;
         let call = '';
         switch (method) {
             case 'get':
                 if (hasQuery && hasHeaders) {
-                    call = `await _client.GetAsync<${responseType}>(${pathCall}, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.GetAsync<${responseType}>(${requestPathCall}, null, requestHeaders)`
+                        : `await _client.GetAsync<${responseType}>(${requestPathCall}, query, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `await _client.GetAsync<${responseType}>(${pathCall}, query)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.GetAsync<${responseType}>(${requestPathCall})`
+                        : `await _client.GetAsync<${responseType}>(${requestPathCall}, query)`;
                 }
                 else if (hasHeaders) {
-                    call = `await _client.GetAsync<${responseType}>(${pathCall}, null, headers)`;
+                    call = `await _client.GetAsync<${responseType}>(${requestPathCall}, null, requestHeaders)`;
                 }
                 else {
-                    call = `await _client.GetAsync<${responseType}>(${pathCall})`;
+                    call = `await _client.GetAsync<${responseType}>(${requestPathCall})`;
                 }
                 break;
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, query, headers${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `await _client.PostAsync<${responseType}>(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+                            : `await _client.PostAsync<${responseType}>(${requestPathCall}, body, query, requestHeaders${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, query, null${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `await _client.PostAsync<${responseType}>(${requestPathCall}, body, null, null${contentTypeArg})`
+                            : `await _client.PostAsync<${responseType}>(${requestPathCall}, body, query, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, null, headers${contentTypeArg})`;
+                        call = `await _client.PostAsync<${responseType}>(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
                     }
                     else {
-                        call = `await _client.PostAsync<${responseType}>(${pathCall}, body, null, null${contentTypeArg})`;
+                        call = `await _client.PostAsync<${responseType}>(${requestPathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `await _client.PostAsync<${responseType}>(${pathCall}, null, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.PostAsync<${responseType}>(${requestPathCall}, null, null, requestHeaders)`
+                        : `await _client.PostAsync<${responseType}>(${requestPathCall}, null, query, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `await _client.PostAsync<${responseType}>(${pathCall}, null, query)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.PostAsync<${responseType}>(${requestPathCall}, null)`
+                        : `await _client.PostAsync<${responseType}>(${requestPathCall}, null, query)`;
                 }
                 else if (hasHeaders) {
-                    call = `await _client.PostAsync<${responseType}>(${pathCall}, null, null, headers)`;
+                    call = `await _client.PostAsync<${responseType}>(${requestPathCall}, null, null, requestHeaders)`;
                 }
                 else {
-                    call = `await _client.PostAsync<${responseType}>(${pathCall}, null)`;
+                    call = `await _client.PostAsync<${responseType}>(${requestPathCall}, null)`;
                 }
                 break;
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, query, headers${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `await _client.PutAsync<${responseType}>(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+                            : `await _client.PutAsync<${responseType}>(${requestPathCall}, body, query, requestHeaders${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, query, null${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `await _client.PutAsync<${responseType}>(${requestPathCall}, body, null, null${contentTypeArg})`
+                            : `await _client.PutAsync<${responseType}>(${requestPathCall}, body, query, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, null, headers${contentTypeArg})`;
+                        call = `await _client.PutAsync<${responseType}>(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
                     }
                     else {
-                        call = `await _client.PutAsync<${responseType}>(${pathCall}, body, null, null${contentTypeArg})`;
+                        call = `await _client.PutAsync<${responseType}>(${requestPathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `await _client.PutAsync<${responseType}>(${pathCall}, null, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.PutAsync<${responseType}>(${requestPathCall}, null, null, requestHeaders)`
+                        : `await _client.PutAsync<${responseType}>(${requestPathCall}, null, query, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `await _client.PutAsync<${responseType}>(${pathCall}, null, query)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.PutAsync<${responseType}>(${requestPathCall}, null)`
+                        : `await _client.PutAsync<${responseType}>(${requestPathCall}, null, query)`;
                 }
                 else if (hasHeaders) {
-                    call = `await _client.PutAsync<${responseType}>(${pathCall}, null, null, headers)`;
+                    call = `await _client.PutAsync<${responseType}>(${requestPathCall}, null, null, requestHeaders)`;
                 }
                 else {
-                    call = `await _client.PutAsync<${responseType}>(${pathCall}, null)`;
+                    call = `await _client.PutAsync<${responseType}>(${requestPathCall}, null)`;
                 }
                 break;
             case 'delete':
                 if (hasQuery && hasHeaders) {
-                    call = `await _client.DeleteAsync<${responseType}>(${pathCall}, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.DeleteAsync<${responseType}>(${requestPathCall}, null, requestHeaders)`
+                        : `await _client.DeleteAsync<${responseType}>(${requestPathCall}, query, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `await _client.DeleteAsync<${responseType}>(${pathCall}, query)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.DeleteAsync<${responseType}>(${requestPathCall})`
+                        : `await _client.DeleteAsync<${responseType}>(${requestPathCall}, query)`;
                 }
                 else if (hasHeaders) {
-                    call = `await _client.DeleteAsync<${responseType}>(${pathCall}, null, headers)`;
+                    call = `await _client.DeleteAsync<${responseType}>(${requestPathCall}, null, requestHeaders)`;
                 }
                 else {
-                    call = `await _client.DeleteAsync<${responseType}>(${pathCall})`;
+                    call = `await _client.DeleteAsync<${responseType}>(${requestPathCall})`;
                 }
                 break;
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, headers${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `await _client.PatchAsync<${responseType}>(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+                            : `await _client.PatchAsync<${responseType}>(${requestPathCall}, body, query, requestHeaders${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, query, null${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `await _client.PatchAsync<${responseType}>(${requestPathCall}, body, null, null${contentTypeArg})`
+                            : `await _client.PatchAsync<${responseType}>(${requestPathCall}, body, query, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, headers${contentTypeArg})`;
+                        call = `await _client.PatchAsync<${responseType}>(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
                     }
                     else {
-                        call = `await _client.PatchAsync<${responseType}>(${pathCall}, body, null, null${contentTypeArg})`;
+                        call = `await _client.PatchAsync<${responseType}>(${requestPathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `await _client.PatchAsync<${responseType}>(${pathCall}, null, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.PatchAsync<${responseType}>(${requestPathCall}, null, null, requestHeaders)`
+                        : `await _client.PatchAsync<${responseType}>(${requestPathCall}, null, query, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `await _client.PatchAsync<${responseType}>(${pathCall}, null, query)`;
+                    call = hasExplicitQuerySerialization
+                        ? `await _client.PatchAsync<${responseType}>(${requestPathCall}, null)`
+                        : `await _client.PatchAsync<${responseType}>(${requestPathCall}, null, query)`;
                 }
                 else if (hasHeaders) {
-                    call = `await _client.PatchAsync<${responseType}>(${pathCall}, null, null, headers)`;
+                    call = `await _client.PatchAsync<${responseType}>(${requestPathCall}, null, null, requestHeaders)`;
                 }
                 else {
-                    call = `await _client.PatchAsync<${responseType}>(${pathCall}, null)`;
+                    call = `await _client.PatchAsync<${responseType}>(${requestPathCall}, null)`;
                 }
                 break;
             default:
-                call = `await _client.GetAsync<${responseType}>(${pathCall})`;
+                call = `await _client.RequestAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
         }
         const docComment = op.summary ? `        /// <summary>\n        /// ${op.summary}\n        /// </summary>\n` : '';
         const effectiveCall = responseType === 'void'
             ? call.replace('<void>', '<object>')
             : call;
+        const requestHeaderBlock = hasHeaders
+            ? `            var requestHeaders = BuildRequestHeaders(
+${this.renderNamedParameterDictionary(headerBindings, 16)},
+${this.renderNamedParameterDictionary(cookieBindings, 16)}
+            );
+`
+            : '';
+        const queryBlock = hasExplicitQuerySerialization
+            ? `            var queryString = BuildQueryString(new[]
+            {
+${this.renderQueryParameterSpecs(queryBindings, 16)}
+            });
+`
+            : '';
         if (responseType === 'void') {
             return `${docComment}        public async Task ${methodName}Async(${params.join(', ')})
         {
-            ${effectiveCall};
+${queryBlock}${requestHeaderBlock}            ${effectiveCall};
         }`;
         }
         return `${docComment}        public async Task<${responseType}?> ${methodName}Async(${params.join(', ')})
         {
-            return ${effectiveCall};
+${queryBlock}${requestHeaderBlock}            return ${effectiveCall};
+        }`;
+    }
+    createNamedParameterBindings(parameters, knownModels, namespace, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => toSafeCamelIdentifier(rawNameByKey.get(key) || 'value', CSHARP_RESERVED_WORDS), reservedNames);
+        return parameters.map((parameter, index) => {
+            const key = keys[index];
+            return {
+                parameter,
+                safeName: safeNameByKey.get(key) || `value${index + 1}`,
+                required: Boolean(parameter?.required),
+                type: this.getNamedParameterType(parameter, knownModels, namespace),
+            };
+        });
+    }
+    createQueryParameterBindings(parameters, knownModels, namespace, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, namespace, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    getNamedParameterType(parameter, knownModels, namespace) {
+        const contentSchema = extractOpenApiParameterContentSchema(parameter);
+        if (contentSchema) {
+            return this.qualifyKnownModelTypes(getCSharpType(contentSchema, CSHARP_CONFIG), knownModels, namespace);
+        }
+        return parameter?.schema
+            ? this.qualifyKnownModelTypes(getCSharpType(parameter.schema, CSHARP_CONFIG), knownModels, namespace)
+            : 'object';
+    }
+    renderMethodParameter(binding) {
+        return binding.required
+            ? `${binding.type} ${binding.safeName}`
+            : `${binding.type}? ${binding.safeName} = null`;
+    }
+    renderNamedParameterDictionary(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        if (bindings.length === 0) {
+            return `${indent}new Dictionary<string, object?>()`;
+        }
+        const lines = bindings.map((binding) => {
+            return `${indent}    [${this.formatCSharpString(String(binding.parameter?.name || binding.safeName))}] = ${binding.safeName},`;
+        });
+        return [`${indent}new Dictionary<string, object?>`, `${indent}{`, ...lines, `${indent}}`].join('\n');
+    }
+    formatCSharpString(value) {
+        return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    renderQueryParameterSpecs(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        return bindings.map((binding) => {
+            return `${indent}new QueryParameterSpec(${[
+                this.formatCSharpString(String(binding.parameter?.name || binding.safeName)),
+                binding.safeName,
+                this.formatCSharpString(binding.style),
+                binding.explode ? 'true' : 'false',
+                binding.allowReserved ? 'true' : 'false',
+                binding.contentType ? this.formatCSharpString(binding.contentType) : 'null',
+            ].join(', ')}),`;
+        }).join('\n');
+    }
+    generateQuerySerializationHelpers() {
+        return `        private sealed record QueryParameterSpec(
+            string Name,
+            object? Value,
+            string Style,
+            bool Explode,
+            bool AllowReserved,
+            string? ContentType);
+
+        private static string BuildQueryString(IEnumerable<QueryParameterSpec> parameters)
+        {
+            var pairs = new List<string>();
+            foreach (var parameter in parameters)
+            {
+                AppendSerializedParameter(pairs, parameter);
+            }
+            return string.Join("&", pairs);
+        }
+
+        private static void AppendSerializedParameter(List<string> pairs, QueryParameterSpec parameter)
+        {
+            if (parameter.Value is null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(parameter.ContentType))
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(parameter.Value);
+                pairs.Add(Uri.EscapeDataString(parameter.Name) + "=" + EncodeQueryValue(json, parameter.AllowReserved));
+                return;
+            }
+
+            var style = string.IsNullOrWhiteSpace(parameter.Style) ? "form" : parameter.Style;
+            if (style == "deepObject" && parameter.Value is System.Collections.IDictionary deepObject)
+            {
+                AppendDeepObjectParameter(pairs, parameter.Name, deepObject, parameter.AllowReserved);
+            }
+            else if (parameter.Value is System.Collections.IEnumerable enumerable && parameter.Value is not string && parameter.Value is not System.Collections.IDictionary)
+            {
+                AppendArrayParameter(pairs, parameter.Name, enumerable, style, parameter.Explode, parameter.AllowReserved);
+            }
+            else if (parameter.Value is System.Collections.IDictionary dictionary)
+            {
+                AppendObjectParameter(pairs, parameter.Name, dictionary, style, parameter.Explode, parameter.AllowReserved);
+            }
+            else
+            {
+                pairs.Add(Uri.EscapeDataString(parameter.Name) + "=" + EncodeQueryValue(parameter.Value.ToString() ?? string.Empty, parameter.AllowReserved));
+            }
+        }
+
+        private static void AppendArrayParameter(List<string> pairs, string name, System.Collections.IEnumerable values, string style, bool explode, bool allowReserved)
+        {
+            var serialized = new List<string>();
+            foreach (var item in values)
+            {
+                if (item is not null)
+                {
+                    serialized.Add(item.ToString() ?? string.Empty);
+                }
+            }
+            if (serialized.Count == 0)
+            {
+                return;
+            }
+            if (style == "form" && explode)
+            {
+                foreach (var item in serialized)
+                {
+                    pairs.Add(Uri.EscapeDataString(name) + "=" + EncodeQueryValue(item, allowReserved));
+                }
+                return;
+            }
+            pairs.Add(Uri.EscapeDataString(name) + "=" + EncodeQueryValue(string.Join(",", serialized), allowReserved));
+        }
+
+        private static void AppendObjectParameter(List<string> pairs, string name, System.Collections.IDictionary values, string style, bool explode, bool allowReserved)
+        {
+            var serialized = new List<string>();
+            foreach (System.Collections.DictionaryEntry item in values)
+            {
+                if (item.Value is null)
+                {
+                    continue;
+                }
+                if (style == "form" && explode)
+                {
+                    pairs.Add(Uri.EscapeDataString(item.Key.ToString() ?? string.Empty) + "=" + EncodeQueryValue(item.Value.ToString() ?? string.Empty, allowReserved));
+                }
+                else
+                {
+                    serialized.Add(item.Key.ToString() ?? string.Empty);
+                    serialized.Add(item.Value.ToString() ?? string.Empty);
+                }
+            }
+            if (serialized.Count > 0)
+            {
+                pairs.Add(Uri.EscapeDataString(name) + "=" + EncodeQueryValue(string.Join(",", serialized), allowReserved));
+            }
+        }
+
+        private static void AppendDeepObjectParameter(List<string> pairs, string name, System.Collections.IDictionary values, bool allowReserved)
+        {
+            foreach (System.Collections.DictionaryEntry item in values)
+            {
+                if (item.Value is not null)
+                {
+                    pairs.Add(Uri.EscapeDataString(name + "[" + item.Key + "]") + "=" + EncodeQueryValue(item.Value.ToString() ?? string.Empty, allowReserved));
+                }
+            }
+        }
+
+        private static string EncodeQueryValue(string value, bool allowReserved)
+        {
+            var encoded = Uri.EscapeDataString(value);
+            if (!allowReserved)
+            {
+                return encoded;
+            }
+            return encoded
+                .Replace("%3A", ":").Replace("%2F", "/").Replace("%3F", "?").Replace("%23", "#")
+                .Replace("%5B", "[").Replace("%5D", "]").Replace("%40", "@").Replace("%21", "!")
+                .Replace("%24", "$").Replace("%26", "&").Replace("%27", "'").Replace("%28", "(")
+                .Replace("%29", ")").Replace("%2A", "*").Replace("%2B", "+").Replace("%2C", ",")
+                .Replace("%3B", ";").Replace("%3D", "=");
+        }`;
+    }
+    generateRequestHeaderHelpers() {
+        return `        private static Dictionary<string, string>? BuildRequestHeaders(
+            Dictionary<string, object?> headers,
+            Dictionary<string, object?> cookies)
+        {
+            var requestHeaders = new Dictionary<string, string>();
+            foreach (var item in headers)
+            {
+                var serialized = SerializeParameterValue(item.Value);
+                if (serialized is not null)
+                {
+                    requestHeaders[item.Key] = serialized;
+                }
+            }
+
+            var cookieHeader = BuildCookieHeader(cookies);
+            if (!string.IsNullOrEmpty(cookieHeader))
+            {
+                requestHeaders["Cookie"] = requestHeaders.TryGetValue("Cookie", out var existing) && !string.IsNullOrEmpty(existing)
+                    ? existing + "; " + cookieHeader
+                    : cookieHeader;
+            }
+
+            return requestHeaders.Count == 0 ? null : requestHeaders;
+        }
+
+        private static string BuildCookieHeader(Dictionary<string, object?> cookies)
+        {
+            var pairs = new List<string>();
+            foreach (var item in cookies)
+            {
+                var serialized = SerializeParameterValue(item.Value);
+                if (serialized is not null)
+                {
+                    pairs.Add(Uri.EscapeDataString(item.Key) + "=" + Uri.EscapeDataString(serialized));
+                }
+            }
+            return string.Join("; ", pairs);
+        }
+
+        private static string? SerializeParameterValue(object? value)
+        {
+            if (value is null)
+            {
+                return null;
+            }
+            if (value is System.Collections.IEnumerable enumerable && value is not string)
+            {
+                var values = new List<string>();
+                foreach (var item in enumerable)
+                {
+                    var serialized = SerializeParameterValue(item);
+                    if (serialized is not null)
+                    {
+                        values.Add(serialized);
+                    }
+                }
+                return string.Join(",", values);
+            }
+            return value.ToString();
         }`;
     }
     generateOperationId(method, path, op, tag) {
@@ -355,6 +710,10 @@ ${methods}
             put: 'Update',
             patch: 'Patch',
             delete: 'Delete',
+            options: 'Options',
+            head: 'Head',
+            trace: 'Trace',
+            query: 'Query',
         };
         return `${actionMap[method] || CSHARP_CONFIG.namingConventions.modelName(method)}${CSHARP_CONFIG.namingConventions.modelName(resource)}`;
     }
@@ -371,7 +730,7 @@ ${methods}
         if (!mediaType) {
             return undefined;
         }
-        const schema = content[mediaType]?.schema;
+        const schema = resolveMediaTypeSchema(content[mediaType]);
         if (!schema) {
             return undefined;
         }
@@ -409,8 +768,11 @@ ${methods}
                 continue;
             }
             const mediaType = this.pickJsonMediaType(content);
-            if (mediaType && content[mediaType]?.schema) {
-                return content[mediaType].schema;
+            if (mediaType) {
+                const schema = resolveMediaTypeSchema(content[mediaType]);
+                if (schema) {
+                    return schema;
+                }
             }
         }
         return undefined;
@@ -509,6 +871,13 @@ ${methods}
             if (string.IsNullOrEmpty(normalizedPrefix)) return normalizedPath;
             if (normalizedPath == normalizedPrefix || normalizedPath.StartsWith(normalizedPrefix + "/")) return normalizedPath;
             return normalizedPrefix + normalizedPath;
+        }
+
+        public static string AppendQueryString(string path, string rawQueryString)
+        {
+            var query = (rawQueryString ?? string.Empty).TrimStart('?');
+            if (string.IsNullOrEmpty(query)) return path;
+            return path.Contains("?") ? path + "&" + query : path + "?" + query;
         }
     }
 }

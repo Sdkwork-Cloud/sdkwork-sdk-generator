@@ -1,3 +1,4 @@
+import { collectSchemaReferences, resolveModelSchema } from '../../framework/schema.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
@@ -10,16 +11,17 @@ export class ModelGenerator {
             return [modelName, fileName];
         }));
         for (const [name, schema] of Object.entries(ctx.schemas)) {
-            files.push(this.generateModel(name, schema, packageRoot, knownModels, modelNameToFile));
+            files.push(this.generateModel(name, schema, ctx.schemas, packageRoot, knownModels, modelNameToFile));
         }
         files.push(this.generateModelsIndex(ctx, packageRoot));
         return files;
     }
-    generateModel(name, schema, packageRoot, knownModels, modelNameToFile) {
+    generateModel(name, schema, schemas, packageRoot, knownModels, modelNameToFile) {
+        const modelSchema = resolveModelSchema(schema, schemas);
         const modelName = PYTHON_CONFIG.namingConventions.modelName(name);
-        const props = schema.properties || {};
-        const required = schema.required || [];
-        const referencedModels = Array.from(this.collectReferencedModels(schema, knownModels))
+        const props = modelSchema.properties || {};
+        const required = modelSchema.required || [];
+        const referencedModels = Array.from(collectSchemaReferences(modelSchema, PYTHON_CONFIG.namingConventions.modelName, knownModels))
             .filter((refModel) => refModel !== modelName)
             .sort((a, b) => a.localeCompare(b));
         const importBlock = referencedModels.length > 0
@@ -30,6 +32,28 @@ export class ModelGenerator {
             })
                 .join('\n')
             : '';
+        const typingImports = ['TYPE_CHECKING', 'Optional', 'List', 'Dict', 'Any'];
+        const normalizedType = getPythonType(modelSchema, PYTHON_CONFIG);
+        if (Object.keys(props).length === 0 && normalizedType !== 'Dict[str, Any]') {
+            const imports = new Set(['TYPE_CHECKING', 'Optional', 'List', 'Dict', 'Any']);
+            if (normalizedType.includes('Tuple[')) {
+                imports.add('Tuple');
+            }
+            if (normalizedType.includes('Literal[')) {
+                imports.add('Literal');
+            }
+            return {
+                path: `${packageRoot}/models/${PYTHON_CONFIG.namingConventions.fileName(name)}.py`,
+                content: this.format(`from __future__ import annotations
+from typing import ${Array.from(imports).join(', ')}
+${importBlock ? `\nif TYPE_CHECKING:\n${importBlock}\n` : ''}
+
+${modelName} = ${normalizedType}
+`),
+                language: 'python',
+                description: `${modelName} model`,
+            };
+        }
         const orderedEntries = [
             ...Object.entries(props).filter(([propName]) => required.includes(propName)),
             ...Object.entries(props).filter(([propName]) => !required.includes(propName)),
@@ -37,19 +61,25 @@ export class ModelGenerator {
         const fields = orderedEntries.map(([propName, propSchema]) => {
             const isRequired = required.includes(propName);
             const pyType = getPythonType(propSchema, PYTHON_CONFIG);
+            if (pyType.includes('Tuple[') && !typingImports.includes('Tuple')) {
+                typingImports.push('Tuple');
+            }
+            if (pyType.includes('Literal[') && !typingImports.includes('Literal')) {
+                typingImports.push('Literal');
+            }
             const fieldType = this.renderFieldType(pyType, propSchema, isRequired);
             const defaultValue = isRequired ? '' : ' = None';
             const pyName = PYTHON_CONFIG.namingConventions.propertyName(propName);
             return `    ${pyName}: ${fieldType}${defaultValue}`;
         }).join('\n');
-        const docComment = schema.description
-            ? `    """${schema.description}"""\n`
+        const docComment = modelSchema.description
+            ? `    """${modelSchema.description}"""\n`
             : '';
         return {
             path: `${packageRoot}/models/${PYTHON_CONFIG.namingConventions.fileName(name)}.py`,
             content: this.format(`from __future__ import annotations
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, List, Dict, Any
+from typing import ${typingImports.join(', ')}
 ${importBlock ? `\nif TYPE_CHECKING:\n${importBlock}\n` : ''}
 
 @dataclass
@@ -86,46 +116,6 @@ ${docComment}${fields || '    pass'}
             }
         }
         return false;
-    }
-    collectReferencedModels(schema, knownModels, refs = new Set(), visited = new Set()) {
-        if (!schema || typeof schema !== 'object') {
-            return refs;
-        }
-        if (visited.has(schema)) {
-            return refs;
-        }
-        visited.add(schema);
-        if (schema.$ref) {
-            const refName = schema.$ref.split('/').pop();
-            const modelName = PYTHON_CONFIG.namingConventions.modelName(refName ?? '');
-            if (knownModels.has(modelName)) {
-                refs.add(modelName);
-            }
-            return refs;
-        }
-        for (const key of ['oneOf', 'anyOf', 'allOf']) {
-            const candidates = schema[key];
-            if (Array.isArray(candidates)) {
-                for (const candidate of candidates) {
-                    this.collectReferencedModels(candidate, knownModels, refs, visited);
-                }
-            }
-        }
-        if (schema.items) {
-            this.collectReferencedModels(schema.items, knownModels, refs, visited);
-        }
-        if (schema.properties && typeof schema.properties === 'object') {
-            for (const propSchema of Object.values(schema.properties)) {
-                this.collectReferencedModels(propSchema, knownModels, refs, visited);
-            }
-        }
-        if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-            this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
-        }
-        if (schema.not) {
-            this.collectReferencedModels(schema.not, knownModels, refs, visited);
-        }
-        return refs;
     }
     generateModelsIndex(ctx, packageRoot) {
         const imports = Object.keys(ctx.schemas).map(name => {

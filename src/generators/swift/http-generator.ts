@@ -267,6 +267,45 @@ public class HttpClient {
         return try parseResponse(data, response, as: responseType)
     }
 
+    public func request(
+        _ method: String,
+        _ path: String,
+        body: Any? = nil,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        contentType: String? = nil
+    ) async throws -> Any? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        let requestBody = try createRequestBody(body: body, contentType: contentType)
+        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType)
+        request.httpBody = requestBody.bodyData
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response)
+    }
+
+    public func request<T: Decodable>(
+        _ method: String,
+        _ path: String,
+        body: Any? = nil,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        contentType: String? = nil,
+        responseType: T.Type
+    ) async throws -> T? {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        let requestBody = try createRequestBody(body: body, contentType: contentType)
+        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType)
+        request.httpBody = requestBody.bodyData
+
+        let (data, response) = try await session.data(for: request)
+        return try parseResponse(data, response, as: responseType)
+    }
+
     public func post(
         _ path: String,
         body: Any? = nil,

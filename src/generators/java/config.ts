@@ -1,5 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import { toSafeCamelIdentifier, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const JAVA_CONFIG: LanguageConfig = {
   language: 'java',
@@ -142,7 +143,12 @@ export function getJavaType(schema: any, config: LanguageConfig): string {
     return getJavaType(composed, config);
   }
 
-  const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+  const constInfo = getConstSchemaInfo(schema);
+  if (constInfo) {
+    return getJavaPrimitiveType(constInfo.type);
+  }
+
+  const type = resolveSchemaType(schema).effectiveType;
   
   if (type === 'string') return 'String';
   if (type === 'number') return 'Double';
@@ -150,7 +156,10 @@ export function getJavaType(schema: any, config: LanguageConfig): string {
   if (type === 'boolean') return 'Boolean';
   
   if (type === 'array') {
-    const itemType = schema.items ? getJavaType(schema.items, config) : 'Object';
+    if (getTupleSchemaInfo(schema)) {
+      return 'List<Object>';
+    }
+    const itemType = schema.items && typeof schema.items === 'object' ? getJavaType(schema.items, config) : 'Object';
     return `List<${itemType}>`;
   }
   
@@ -168,39 +177,10 @@ export function getJavaType(schema: any, config: LanguageConfig): string {
   return 'Object';
 }
 
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: any): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.properties && typeof schema.properties === 'object') {
-    return 'object';
-  }
-  if (schema.additionalProperties) {
-    return 'object';
-  }
-  return undefined;
-}
-
-function pickComposedSchema(schema: any): any | undefined {
-  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
-  for (const key of orderedKeys) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-    return candidate || values[0];
-  }
-  return undefined;
+function getJavaPrimitiveType(type: string): string {
+  if (type === 'string') return 'String';
+  if (type === 'number') return 'Double';
+  if (type === 'integer') return 'Integer';
+  if (type === 'boolean') return 'Boolean';
+  return 'Object';
 }

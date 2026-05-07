@@ -188,7 +188,10 @@ describe('Swift generator regressions', () => {
     expect(httpFile).toBeDefined();
 
     expect(apiFile!.content).toContain('body: PlusTenantQueryListForm? = nil');
-    expect(apiFile!.content).toContain('return try await client.post(ApiPaths.appPath("/tenant/list"), body: body, params: params, headers: nil, contentType: "application/json", responseType: PlusApiResultPagePlusTenantVO.self)');
+    expect(apiFile!.content).toContain('page: Int? = nil');
+    expect(apiFile!.content).toContain('let query = buildQueryString([');
+    expect(apiFile!.content).toContain('QueryParameterSpec(name: "page", value: page, style: "form", explode: true, allowReserved: false, contentType: nil)');
+    expect(apiFile!.content).toContain('return try await client.post(ApiPaths.appendQueryString(ApiPaths.appPath("/tenant/list"), query), body: body, params: nil, headers: nil, contentType: "application/json", responseType: PlusApiResultPagePlusTenantVO.self)');
 
     expect(httpFile!.content).toContain('if let encodableBody = body as? any Encodable');
     expect(httpFile!.content).toContain('return (try encoder.encode(AnyEncodable(encodableBody)), "application/json")');

@@ -1,4 +1,5 @@
 import { toSafeCamelIdentifier, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const JAVA_CONFIG = {
     language: 'java',
     displayName: 'Java',
@@ -132,7 +133,11 @@ export function getJavaType(schema, config) {
     if (composed) {
         return getJavaType(composed, config);
     }
-    const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+    const constInfo = getConstSchemaInfo(schema);
+    if (constInfo) {
+        return getJavaPrimitiveType(constInfo.type);
+    }
+    const type = resolveSchemaType(schema).effectiveType;
     if (type === 'string')
         return 'String';
     if (type === 'number')
@@ -142,7 +147,10 @@ export function getJavaType(schema, config) {
     if (type === 'boolean')
         return 'Boolean';
     if (type === 'array') {
-        const itemType = schema.items ? getJavaType(schema.items, config) : 'Object';
+        if (getTupleSchemaInfo(schema)) {
+            return 'List<Object>';
+        }
+        const itemType = schema.items && typeof schema.items === 'object' ? getJavaType(schema.items, config) : 'Object';
         return `List<${itemType}>`;
     }
     if (type === 'object') {
@@ -157,37 +165,14 @@ export function getJavaType(schema, config) {
     }
     return 'Object';
 }
-function normalizeSchemaType(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
-}
-function inferImplicitObjectType(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return undefined;
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-        return 'object';
-    }
-    if (schema.additionalProperties) {
-        return 'object';
-    }
-    return undefined;
-}
-function pickComposedSchema(schema) {
-    const orderedKeys = ['allOf', 'oneOf', 'anyOf'];
-    for (const key of orderedKeys) {
-        const values = schema?.[key];
-        if (!Array.isArray(values) || values.length === 0) {
-            continue;
-        }
-        const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-        return candidate || values[0];
-    }
-    return undefined;
+function getJavaPrimitiveType(type) {
+    if (type === 'string')
+        return 'String';
+    if (type === 'number')
+        return 'Double';
+    if (type === 'integer')
+        return 'Integer';
+    if (type === 'boolean')
+        return 'Boolean';
+    return 'Object';
 }

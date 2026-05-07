@@ -1,5 +1,6 @@
 import { toSafeSnakeIdentifier } from '../../framework/identifiers.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const RUBY_CONFIG = {
     language: 'ruby',
     displayName: 'Ruby',
@@ -86,39 +87,6 @@ function toSnakeCase(str) {
         .replace(/^_+|_+$/g, '')
         .toLowerCase();
 }
-function normalizeSchemaType(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
-}
-function inferImplicitObjectType(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return undefined;
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-        return 'object';
-    }
-    if (schema.additionalProperties) {
-        return 'object';
-    }
-    return undefined;
-}
-function pickComposedSchema(schema) {
-    for (const key of ['allOf', 'oneOf', 'anyOf']) {
-        const values = schema?.[key];
-        if (!Array.isArray(values) || values.length === 0) {
-            continue;
-        }
-        const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-        return candidate || values[0];
-    }
-    return undefined;
-}
 export function getRubyType(schema, config) {
     if (!schema || typeof schema !== 'object') {
         return 'Object';
@@ -131,7 +99,11 @@ export function getRubyType(schema, config) {
     if (composed) {
         return getRubyType(composed, config);
     }
-    const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+    const constInfo = getConstSchemaInfo(schema);
+    if (constInfo) {
+        return getRubyPrimitiveType(constInfo.type);
+    }
+    const type = resolveSchemaType(schema).effectiveType;
     if (type === 'string') {
         return 'String';
     }
@@ -145,11 +117,25 @@ export function getRubyType(schema, config) {
         return 'Boolean';
     }
     if (type === 'array') {
+        if (getTupleSchemaInfo(schema)) {
+            return 'Array';
+        }
         return 'Array';
     }
     if (type === 'object') {
         return 'Hash';
     }
+    return 'Object';
+}
+function getRubyPrimitiveType(type) {
+    if (type === 'string')
+        return 'String';
+    if (type === 'number')
+        return 'Float';
+    if (type === 'integer')
+        return 'Integer';
+    if (type === 'boolean')
+        return 'Boolean';
     return 'Object';
 }
 export function getRubyGemName(config) {

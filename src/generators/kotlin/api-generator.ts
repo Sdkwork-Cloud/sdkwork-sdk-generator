@@ -8,7 +8,28 @@ import {
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { resolveMediaTypeSchema } from '../../framework/schema.js';
 import { KOTLIN_CONFIG, getKotlinType } from './config.js';
+import {
+  extractOpenApiParameterContentSchema,
+  requiresExplicitOpenApiQuerySerialization,
+  resolveOpenApiParameterSerialization,
+} from '../../framework/parameter-serialization.js';
+
+interface NamedParameterBinding {
+  parameter: any;
+  safeName: string;
+  required: boolean;
+  type: string;
+}
+
+interface QueryParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  allowReserved: boolean;
+  contentType?: string;
+}
 
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -47,18 +68,30 @@ export class ApiGenerator {
     const methods = operations
       .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
       .join('\n\n');
+    const needsRequestHeaderHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    });
+    const needsQuerySerializationHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+    });
 
     return {
       path: `src/main/kotlin/${identity.packagePath}/api/${className}.kt`,
       content: this.format(`package ${identity.packageRoot}.api
 
 import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import ${identity.packageRoot}.*
 import ${identity.packageRoot}.http.HttpClient
 
 class ${className}(private val client: HttpClient) {
 
 ${methods}
+${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
+${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 }
 `),
       language: 'kotlin',
@@ -69,14 +102,21 @@ ${methods}
   private generateMethod(op: any, config: GeneratorConfig, methodName: string, knownModels: Set<string>): string {
     const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
-    const hasQuery = allParameters.some((param: any) => param?.in === 'query');
-    const hasHeaders = allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    const queryParams = allParameters.filter((param: any) => param?.in === 'query');
+    const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
+    const headerParams = allParameters.filter((param: any) => param?.in === 'header');
+    const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const hasQuery = queryParams.length > 0;
+    const hasRawQueryString = queryStringParams.length > 0;
+    const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
     const method = String(op.method || '').toLowerCase();
-    const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+    const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const supportsRequestBody = supportsRequestBodyByDefault(method);
     const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
     const hasBody = Boolean(requestBodyInfo);
     const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
     const requestBodySchema = requestBodyInfo?.schema;
+    const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const contentTypeArg = requestBodyInfo?.mediaType
       ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
       : '';
@@ -94,31 +134,59 @@ ${methods}
       [
         hasBody ? 'body' : '',
         hasQuery ? 'params' : '',
-        hasHeaders ? 'headers' : '',
+        hasRawQueryString ? 'rawQueryString' : '',
+        hasHeaders ? 'requestHeaders' : '',
       ]
     );
     const pathParams = rawPathParams.map((rawName) => ({
       rawName,
       safeName: pathParamNames.get(rawName) || rawName,
     }));
+    const parameterReservedNames = [
+      ...pathParams.map((param) => param.safeName),
+      hasBody ? 'body' : '',
+      hasQuery ? 'params' : '',
+      hasRawQueryString ? 'rawQueryString' : '',
+      hasHeaders ? 'requestHeaders' : '',
+    ];
+    const queryBindings = hasExplicitQuerySerialization
+      ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
+      : [];
+    const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
+    const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+      ...parameterReservedNames,
+      ...queryBindings.map((binding) => binding.safeName),
+      ...headerBindings.map((binding) => binding.safeName),
+    ]);
+    const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+    const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+    const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+    const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
 
     const params: string[] = [];
     if (pathParams.length) {
       params.push(...pathParams.map((param) => `${param.safeName}: String`));
     }
-    if (hasBody) {
+    if (hasBody && requestBodyRequired) {
       if (requestBodyRequired) {
         params.push(`body: ${requestType}`);
       } else {
         params.push(`body: ${requestType}? = null`);
       }
     }
-    if (hasQuery) {
+    if (hasRawQueryString) {
+      params.push('rawQueryString: String');
+    }
+    params.push(...requiredQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+    params.push(...requiredHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
+    if (hasBody && !requestBodyRequired) {
+      params.push(`body: ${requestType}? = null`);
+    }
+    if (hasQuery && !hasExplicitQuerySerialization) {
       params.push('params: Map<String, Any>? = null');
     }
-    if (hasHeaders) {
-      params.push('headers: Map<String, String>? = null');
-    }
+    params.push(...optionalQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+    params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
@@ -126,114 +194,385 @@ ${methods}
       return `$${safeName}`;
     });
     const pathCall = `ApiPaths.${KOTLIN_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
+    const requestPathCall = hasRawQueryString
+      ? `ApiPaths.appendQueryString(${pathCall}, rawQueryString)`
+      : hasExplicitQuerySerialization
+        ? `ApiPaths.appendQueryString(${pathCall}, query)`
+      : pathCall;
     let call = '';
     
     switch (method) {
       case 'get':
         if (hasQuery && hasHeaders) {
-          call = `client.get(${pathCall}, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `client.get(${requestPathCall}, null, requestHeaders)`
+            : `client.get(${requestPathCall}, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `client.get(${pathCall}, params)`;
+          call = hasExplicitQuerySerialization
+            ? `client.get(${requestPathCall})`
+            : `client.get(${requestPathCall}, params)`;
         } else if (hasHeaders) {
-          call = `client.get(${pathCall}, null, headers)`;
+          call = `client.get(${requestPathCall}, null, requestHeaders)`;
         } else {
-          call = `client.get(${pathCall})`;
+          call = `client.get(${requestPathCall})`;
         }
         break;
       case 'post':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = `client.post(${pathCall}, body, params, headers${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `client.post(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+              : `client.post(${requestPathCall}, body, params, requestHeaders${contentTypeArg})`;
           } else if (hasQuery) {
-            call = `client.post(${pathCall}, body, params, null${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `client.post(${requestPathCall}, body, null, null${contentTypeArg})`
+              : `client.post(${requestPathCall}, body, params, null${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = `client.post(${pathCall}, body, null, headers${contentTypeArg})`;
+            call = `client.post(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
           } else {
-            call = `client.post(${pathCall}, body, null, null${contentTypeArg})`;
+            call = `client.post(${requestPathCall}, body, null, null${contentTypeArg})`;
           }
         } else if (hasQuery && hasHeaders) {
-          call = `client.post(${pathCall}, null, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `client.post(${requestPathCall}, null, null, requestHeaders)`
+            : `client.post(${requestPathCall}, null, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `client.post(${pathCall}, null, params)`;
+          call = hasExplicitQuerySerialization
+            ? `client.post(${requestPathCall}, null)`
+            : `client.post(${requestPathCall}, null, params)`;
         } else if (hasHeaders) {
-          call = `client.post(${pathCall}, null, null, headers)`;
+          call = `client.post(${requestPathCall}, null, null, requestHeaders)`;
         } else {
-          call = `client.post(${pathCall}, null)`;
+          call = `client.post(${requestPathCall}, null)`;
         }
         break;
       case 'put':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = `client.put(${pathCall}, body, params, headers${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `client.put(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+              : `client.put(${requestPathCall}, body, params, requestHeaders${contentTypeArg})`;
           } else if (hasQuery) {
-            call = `client.put(${pathCall}, body, params, null${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `client.put(${requestPathCall}, body, null, null${contentTypeArg})`
+              : `client.put(${requestPathCall}, body, params, null${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = `client.put(${pathCall}, body, null, headers${contentTypeArg})`;
+            call = `client.put(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
           } else {
-            call = `client.put(${pathCall}, body, null, null${contentTypeArg})`;
+            call = `client.put(${requestPathCall}, body, null, null${contentTypeArg})`;
           }
         } else if (hasQuery && hasHeaders) {
-          call = `client.put(${pathCall}, null, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `client.put(${requestPathCall}, null, null, requestHeaders)`
+            : `client.put(${requestPathCall}, null, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `client.put(${pathCall}, null, params)`;
+          call = hasExplicitQuerySerialization
+            ? `client.put(${requestPathCall}, null)`
+            : `client.put(${requestPathCall}, null, params)`;
         } else if (hasHeaders) {
-          call = `client.put(${pathCall}, null, null, headers)`;
+          call = `client.put(${requestPathCall}, null, null, requestHeaders)`;
         } else {
-          call = `client.put(${pathCall}, null)`;
+          call = `client.put(${requestPathCall}, null)`;
         }
         break;
       case 'delete':
         if (hasQuery && hasHeaders) {
-          call = `client.delete(${pathCall}, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `client.delete(${requestPathCall}, null, requestHeaders)`
+            : `client.delete(${requestPathCall}, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `client.delete(${pathCall}, params)`;
+          call = hasExplicitQuerySerialization
+            ? `client.delete(${requestPathCall})`
+            : `client.delete(${requestPathCall}, params)`;
         } else if (hasHeaders) {
-          call = `client.delete(${pathCall}, null, headers)`;
+          call = `client.delete(${requestPathCall}, null, requestHeaders)`;
         } else {
-          call = `client.delete(${pathCall})`;
+          call = `client.delete(${requestPathCall})`;
         }
         break;
       case 'patch':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = `client.patch(${pathCall}, body, params, headers${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `client.patch(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+              : `client.patch(${requestPathCall}, body, params, requestHeaders${contentTypeArg})`;
           } else if (hasQuery) {
-            call = `client.patch(${pathCall}, body, params, null${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `client.patch(${requestPathCall}, body, null, null${contentTypeArg})`
+              : `client.patch(${requestPathCall}, body, params, null${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = `client.patch(${pathCall}, body, null, headers${contentTypeArg})`;
+            call = `client.patch(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
           } else {
-            call = `client.patch(${pathCall}, body, null, null${contentTypeArg})`;
+            call = `client.patch(${requestPathCall}, body, null, null${contentTypeArg})`;
           }
         } else if (hasQuery && hasHeaders) {
-          call = `client.patch(${pathCall}, null, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `client.patch(${requestPathCall}, null, null, requestHeaders)`
+            : `client.patch(${requestPathCall}, null, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `client.patch(${pathCall}, null, params)`;
+          call = hasExplicitQuerySerialization
+            ? `client.patch(${requestPathCall}, null)`
+            : `client.patch(${requestPathCall}, null, params)`;
         } else if (hasHeaders) {
-          call = `client.patch(${pathCall}, null, null, headers)`;
+          call = `client.patch(${requestPathCall}, null, null, requestHeaders)`;
         } else {
-          call = `client.patch(${pathCall}, null)`;
+          call = `client.patch(${requestPathCall}, null)`;
         }
         break;
       default:
-        call = `client.get(${pathCall})`;
+        call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
     }
 
     const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
+    const requestHeaderBlock = hasHeaders
+      ? `        val requestHeaders = buildRequestHeaders(
+${this.renderNamedParameterMap(headerBindings, 12)},
+${this.renderNamedParameterMap(cookieBindings, 12)}
+        )
+`
+      : '';
+    const queryBlock = hasExplicitQuerySerialization
+      ? `        val query = buildQueryString(listOf(
+${this.renderQueryParameterSpecs(queryBindings, 12)}
+        ))
+`
+      : '';
     if (responseType === 'Unit') {
       return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): Unit {
-        ${call}
+${queryBlock}${requestHeaderBlock}        ${call}
     }`;
     }
 
     if (responseType === 'Any') {
       return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): Any? {
-        return ${call}
+${queryBlock}${requestHeaderBlock}        return ${call}
     }`;
     }
 
     return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): ${responseType}? {
-        val raw = ${call}
+${queryBlock}${requestHeaderBlock}        val raw = ${call}
         return client.convertValue(raw, object : TypeReference<${responseType}>() {})
+    }`;
+  }
+
+  private createQueryParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): QueryParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
+        allowReserved: serialization.allowReserved,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private createNamedParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): NamedParameterBinding[] {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => KOTLIN_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'),
+      reservedNames,
+    );
+
+    return parameters.map((parameter, index) => {
+      const key = keys[index];
+      return {
+        parameter,
+        safeName: safeNameByKey.get(key) || `value${index + 1}`,
+        required: Boolean(parameter?.required),
+        type: this.getNamedParameterType(parameter, knownModels),
+      };
+    });
+  }
+
+  private getNamedParameterType(parameter: any, knownModels: Set<string>): string {
+    const contentSchema = extractOpenApiParameterContentSchema(parameter);
+    if (contentSchema) {
+      return this.ensureKnownType(getKotlinType(contentSchema, KOTLIN_CONFIG), knownModels);
+    }
+    return parameter?.schema ? this.ensureKnownType(getKotlinType(parameter.schema, KOTLIN_CONFIG), knownModels) : 'Any';
+  }
+
+  private renderMethodParameter(binding: NamedParameterBinding): string {
+    return binding.required
+      ? `${binding.safeName}: ${binding.type}`
+      : `${binding.safeName}: ${binding.type}? = null`;
+  }
+
+  private renderNamedParameterMap(bindings: NamedParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}emptyMap()`;
+    }
+    const lines = bindings.map((binding) => {
+      return `${indent}    ${this.formatKotlinString(String(binding.parameter?.name || binding.safeName))} to ${binding.safeName},`;
+    });
+    return [`${indent}mapOf(`, ...lines, `${indent})`].join('\n');
+  }
+
+  private formatKotlinString(value: string): string {
+    return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+
+  private renderQueryParameterSpecs(bindings: QueryParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    return bindings.map((binding) => {
+      return `${indent}QueryParameterSpec(${[
+        this.formatKotlinString(String(binding.parameter?.name || binding.safeName)),
+        binding.safeName,
+        this.formatKotlinString(binding.style),
+        binding.explode ? 'true' : 'false',
+        binding.allowReserved ? 'true' : 'false',
+        binding.contentType ? this.formatKotlinString(binding.contentType) : 'null',
+      ].join(', ')})`;
+    }).join(',\n');
+  }
+
+  private generateQuerySerializationHelpers(): string {
+    return `    private data class QueryParameterSpec(
+        val name: String,
+        val value: Any?,
+        val style: String,
+        val explode: Boolean,
+        val allowReserved: Boolean,
+        val contentType: String?,
+    )
+
+    private val queryObjectMapper = ObjectMapper().registerKotlinModule()
+
+    private fun buildQueryString(parameters: List<QueryParameterSpec>): String {
+        val pairs = mutableListOf<String>()
+        parameters.forEach { appendSerializedParameter(pairs, it) }
+        return pairs.joinToString("&")
+    }
+
+    private fun appendSerializedParameter(pairs: MutableList<String>, parameter: QueryParameterSpec) {
+        val value = parameter.value ?: return
+        if (!parameter.contentType.isNullOrBlank()) {
+            val json = queryObjectMapper.writeValueAsString(value)
+            pairs += urlEncode(parameter.name) + "=" + encodeQueryValue(json, parameter.allowReserved)
+            return
+        }
+
+        val style = parameter.style.ifBlank { "form" }
+        when (value) {
+            is Iterable<*> -> appendArrayParameter(pairs, parameter.name, value, style, parameter.explode, parameter.allowReserved)
+            is Map<*, *> -> if (style == "deepObject") {
+                appendDeepObjectParameter(pairs, parameter.name, value, parameter.allowReserved)
+            } else {
+                appendObjectParameter(pairs, parameter.name, value, style, parameter.explode, parameter.allowReserved)
+            }
+            else -> pairs += urlEncode(parameter.name) + "=" + encodeQueryValue(value.toString(), parameter.allowReserved)
+        }
+    }
+
+    private fun appendArrayParameter(
+        pairs: MutableList<String>,
+        name: String,
+        values: Iterable<*>,
+        style: String,
+        explode: Boolean,
+        allowReserved: Boolean,
+    ) {
+        val serialized = values.mapNotNull { it?.toString() }
+        if (serialized.isEmpty()) return
+        if (style == "form" && explode) {
+            serialized.forEach { pairs += urlEncode(name) + "=" + encodeQueryValue(it, allowReserved) }
+            return
+        }
+        pairs += urlEncode(name) + "=" + encodeQueryValue(serialized.joinToString(","), allowReserved)
+    }
+
+    private fun appendObjectParameter(
+        pairs: MutableList<String>,
+        name: String,
+        values: Map<*, *>,
+        style: String,
+        explode: Boolean,
+        allowReserved: Boolean,
+    ) {
+        val serialized = mutableListOf<String>()
+        values.forEach { (key, value) ->
+            if (value == null) return@forEach
+            if (style == "form" && explode) {
+                pairs += urlEncode(key.toString()) + "=" + encodeQueryValue(value.toString(), allowReserved)
+            } else {
+                serialized += key.toString()
+                serialized += value.toString()
+            }
+        }
+        if (serialized.isNotEmpty()) {
+            pairs += urlEncode(name) + "=" + encodeQueryValue(serialized.joinToString(","), allowReserved)
+        }
+    }
+
+    private fun appendDeepObjectParameter(pairs: MutableList<String>, name: String, values: Map<*, *>, allowReserved: Boolean) {
+        values.forEach { (key, value) ->
+            if (value != null) {
+                pairs += urlEncode("$name[$key]") + "=" + encodeQueryValue(value.toString(), allowReserved)
+            }
+        }
+    }
+
+    private fun encodeQueryValue(value: String, allowReserved: Boolean): String {
+        var encoded = urlEncode(value)
+        if (!allowReserved) return encoded
+        mapOf(
+            "%3A" to ":", "%2F" to "/", "%3F" to "?", "%23" to "#",
+            "%5B" to "[", "%5D" to "]", "%40" to "@", "%21" to "!",
+            "%24" to "$", "%26" to "&", "%27" to "'", "%28" to "(",
+            "%29" to ")", "%2A" to "*", "%2B" to "+", "%2C" to ",",
+            "%3B" to ";", "%3D" to "=",
+        ).forEach { (escaped, reserved) -> encoded = encoded.replace(escaped, reserved) }
+        return encoded
+    }
+
+    private fun urlEncode(value: String): String {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8)
+    }`;
+  }
+
+  private generateRequestHeaderHelpers(): string {
+    return `    private fun buildRequestHeaders(headers: Map<String, Any?>, cookies: Map<String, Any?>): Map<String, String>? {
+        val requestHeaders = linkedMapOf<String, String>()
+        headers.forEach { (name, value) ->
+            serializeParameterValue(value)?.let { requestHeaders[name] = it }
+        }
+
+        val cookieHeader = buildCookieHeader(cookies)
+        if (cookieHeader.isNotEmpty()) {
+            requestHeaders["Cookie"] = requestHeaders["Cookie"]?.let { "$it; $cookieHeader" } ?: cookieHeader
+        }
+
+        return requestHeaders.takeIf { it.isNotEmpty() }
+    }
+
+    private fun buildCookieHeader(cookies: Map<String, Any?>): String {
+        return cookies.mapNotNull { (name, value) ->
+            serializeParameterValue(value)?.let {
+                java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8) + "=" +
+                    java.net.URLEncoder.encode(it, java.nio.charset.StandardCharsets.UTF_8)
+            }
+        }.joinToString("; ")
+    }
+
+    private fun serializeParameterValue(value: Any?): String? {
+        return when (value) {
+            null -> null
+            is Iterable<*> -> value.mapNotNull { serializeParameterValue(it) }.joinToString(",")
+            else -> value.toString()
+        }
     }`;
   }
 
@@ -252,6 +591,10 @@ ${methods}
       put: 'update',
       patch: 'patch',
       delete: 'delete',
+      options: 'options',
+      head: 'head',
+      trace: 'trace',
+      query: 'query',
     };
     
     return `${actionMap[method] || method}${KOTLIN_CONFIG.namingConventions.modelName(resource)}`;
@@ -272,7 +615,7 @@ ${methods}
     if (!mediaType) {
       return undefined;
     }
-    const schema = (content as Record<string, any>)[mediaType]?.schema;
+    const schema = resolveMediaTypeSchema((content as Record<string, any>)[mediaType]);
     if (!schema) {
       return undefined;
     }
@@ -314,8 +657,11 @@ ${methods}
         continue;
       }
       const mediaType = this.pickJsonMediaType(content);
-      if (mediaType && content[mediaType]?.schema) {
-        return content[mediaType].schema;
+      if (mediaType) {
+        const schema = resolveMediaTypeSchema(content[mediaType]);
+        if (schema) {
+          return schema;
+        }
       }
     }
     return undefined;
@@ -404,6 +750,12 @@ object ApiPaths {
             return normalizedPath
         }
         return normalizedPrefix + normalizedPath
+    }
+
+    fun appendQueryString(path: String, rawQueryString: String): String {
+        val query = rawQueryString.trimStart('?')
+        if (query.isEmpty()) return path
+        return if (path.contains("?")) "$path&$query" else "$path?$query"
     }
 }
 `),

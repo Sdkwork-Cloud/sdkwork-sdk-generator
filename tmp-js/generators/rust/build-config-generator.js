@@ -25,6 +25,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "mul
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
+http = "1.0"
 
 [dev-dependencies]
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }`),

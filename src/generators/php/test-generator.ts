@@ -95,7 +95,14 @@ ${assertions}
       lines.push(`self::assertSame(${quotePhpString(expectation.expected)}, $query[${quotePhpString(expectation.name)}] ?? null);`);
     }
     for (const expectation of plan.headerExpectations) {
-      lines.push(`self::assertSame(${quotePhpString(expectation.expected)}, $request->getHeaderLine(${quotePhpString(expectation.name)}));`);
+      if (expectation.cookie) {
+        const source = expectation.source || quotePhpString(expectation.expected);
+        lines.push(`self::assertSame(${quotePhpString(`${expectation.expected}=`)} . rawurlencode(${source}), $request->getHeaderLine('Cookie'));`);
+      } else if (expectation.source) {
+        lines.push(`self::assertSame(${expectation.source}, $request->getHeaderLine(${quotePhpString(expectation.name)}));`);
+      } else {
+        lines.push(`self::assertSame(${quotePhpString(expectation.expected)}, $request->getHeaderLine(${quotePhpString(expectation.name)}));`);
+      }
     }
     if (plan.bodyAssertion) {
       if (plan.bodyAssertion.contentTypeMatch === 'prefix') {

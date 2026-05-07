@@ -1,12 +1,18 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveModelSchema } from '../../framework/schema.js';
 import { FLUTTER_CONFIG, getFlutterType } from './config.js';
 
 export class ModelGenerator {
   generate(ctx: SchemaContext, _config: GeneratorConfig): GeneratedFile[] {
+    const modelClasses = Object.entries(ctx.schemas).map(([name, schema]) => this.generateClass(name, schema, ctx.schemas));
+    const runtimeHelpers = this.generateRuntimeHelpers({
+      map: modelClasses.some((model) => model.includes('_sdkworkAsMap')),
+      list: modelClasses.some((model) => model.includes('_sdkworkAsList')),
+    });
     const models: string[] = [
-      this.generateRuntimeHelpers(),
-      ...Object.entries(ctx.schemas).map(([name, schema]) => this.generateClass(name, schema)),
+      ...(runtimeHelpers ? [runtimeHelpers] : []),
+      ...modelClasses,
     ];
 
     return [{
@@ -17,8 +23,10 @@ export class ModelGenerator {
     }];
   }
 
-  private generateRuntimeHelpers(): string {
-    return `Map<String, dynamic>? _sdkworkAsMap(dynamic value) {
+  private generateRuntimeHelpers(helpers: { map: boolean; list: boolean }): string {
+    const blocks: string[] = [];
+    if (helpers.map) {
+      blocks.push(`Map<String, dynamic>? _sdkworkAsMap(dynamic value) {
   if (value is Map<String, dynamic>) {
     return value;
   }
@@ -26,16 +34,20 @@ export class ModelGenerator {
     return value.map((key, item) => MapEntry(key.toString(), item));
   }
   return null;
-}
-
-List<dynamic>? _sdkworkAsList(dynamic value) {
+}`);
+    }
+    if (helpers.list) {
+      blocks.push(`List<dynamic>? _sdkworkAsList(dynamic value) {
   return value is List ? value : null;
-}`;
+}`);
+    }
+    return blocks.join('\n\n');
   }
 
-  private generateClass(name: string, schema: any): string {
+  private generateClass(name: string, schema: any, schemas: SchemaContext['schemas']): string {
+    const modelSchema = resolveModelSchema(schema, schemas);
     const className = FLUTTER_CONFIG.namingConventions.modelName(name);
-    const props = schema.properties || {};
+    const props = modelSchema.properties || {};
     const propEntries = Object.entries(props) as Array<[string, any]>;
 
     const fields = propEntries.map(([propName, propSchema]) => {
@@ -103,7 +115,11 @@ ${toJsonBody}
       })()`;
     }
 
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      return `_sdkworkAsList(${valueExpr})`;
+    }
+
+    if (schema.items && typeof schema.items === 'object') {
       const itemType = getFlutterType(schema.items, FLUTTER_CONFIG);
       const itemExpr = this.deserializeArrayItemExpression(schema.items, 'item', currentModelName);
       return `(() {
@@ -167,7 +183,11 @@ ${toJsonBody}
       })()`;
     }
 
-    if (schema?.items) {
+    if (Array.isArray(schema?.prefixItems)) {
+      return `_sdkworkAsList(${itemExpr})`;
+    }
+
+    if (schema?.items && typeof schema.items === 'object') {
       const nestedType = getFlutterType(schema.items, FLUTTER_CONFIG);
       const nestedExpr = this.deserializeArrayItemExpression(schema.items, 'nestedItem', currentModelName);
       return `(() {
@@ -230,7 +250,11 @@ ${toJsonBody}
       return `${valueExpr}?.toJson()`;
     }
 
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      return valueExpr;
+    }
+
+    if (schema.items && typeof schema.items === 'object') {
       const itemExpr = this.serializeArrayItemExpression(schema.items, 'item', currentModelName);
       return `${valueExpr}?.map((item) => ${itemExpr}).toList()`;
     }
@@ -248,7 +272,11 @@ ${toJsonBody}
       return `${itemExpr}.toJson()`;
     }
 
-    if (schema?.items) {
+    if (Array.isArray(schema?.prefixItems)) {
+      return itemExpr;
+    }
+
+    if (schema?.items && typeof schema.items === 'object') {
       const nestedExpr = this.serializeArrayItemExpression(schema.items, 'nestedItem', currentModelName);
       return `${itemExpr}.map((nestedItem) => ${nestedExpr}).toList()`;
     }

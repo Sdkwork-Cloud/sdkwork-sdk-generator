@@ -1,5 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const RUST_CONFIG: LanguageConfig = {
   language: 'rust',
@@ -57,7 +58,12 @@ export function getRustType(schema: any, config: LanguageConfig): string {
     return getRustType(composed, config);
   }
 
-  const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+  const constInfo = getConstSchemaInfo(schema);
+  if (constInfo) {
+    return getRustPrimitiveType(constInfo.type);
+  }
+
+  const type = resolveSchemaType(schema).effectiveType;
 
   if (type === 'string') {
     return 'String';
@@ -73,7 +79,10 @@ export function getRustType(schema: any, config: LanguageConfig): string {
   }
 
   if (type === 'array') {
-    const itemType = schema.items ? getRustType(schema.items, config) : 'serde_json::Value';
+    if (getTupleSchemaInfo(schema)) {
+      return 'Vec<serde_json::Value>';
+    }
+    const itemType = schema.items && typeof schema.items === 'object' ? getRustType(schema.items, config) : 'serde_json::Value';
     return `Vec<${itemType}>`;
   }
 
@@ -94,6 +103,13 @@ export function getRustType(schema: any, config: LanguageConfig): string {
   return 'serde_json::Value';
 }
 
+function getRustPrimitiveType(type: string): string {
+  if (type === 'string') return 'String';
+  if (type === 'number') return 'f64';
+  if (type === 'integer') return 'i64';
+  if (type === 'boolean') return 'bool';
+  return 'serde_json::Value';
+}
 function sanitizePackageName(value: string): string {
   const normalized = value
     .replace(/^@/, '')
@@ -134,41 +150,4 @@ function toKebabCase(str: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
     .toLowerCase();
-}
-
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: any): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.properties && typeof schema.properties === 'object') {
-    return 'object';
-  }
-  if (schema.additionalProperties) {
-    return 'object';
-  }
-  return undefined;
-}
-
-function pickComposedSchema(schema: any): any | undefined {
-  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
-  for (const key of orderedKeys) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-    return candidate || values[0];
-  }
-  return undefined;
 }

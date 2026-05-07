@@ -1,5 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { collectSchemaReferences, resolveModelSchema } from '../../framework/schema.js';
 import { TYPESCRIPT_CONFIG, getTypeScriptType } from './config.js';
 import { resolveTypeScriptCommonPackage } from '../../framework/common-package.js';
 import { resolveTypeScriptConfigTypeName } from '../../framework/sdk-identity.js';
@@ -21,7 +22,7 @@ export class ModelGenerator {
     files.push(this.generateCommonTypes(config));
     
     for (const [name, schema] of Object.entries(ctx.schemas)) {
-      files.push(this.generateModel(name, schema, knownModels, modelNameToFile));
+      files.push(this.generateModel(name, schema, ctx.schemas, knownModels, modelNameToFile));
     }
     
     files.push(this.generateModelIndex(ctx));
@@ -82,14 +83,20 @@ export interface ${configName} {
   private generateModel(
     name: string,
     schema: any,
+    schemas: SchemaContext['schemas'],
     knownModels: Set<string>,
     modelNameToFile: Map<string, string>
   ): GeneratedFile {
-    const props = schema.properties || {};
-    const required = schema.required || [];
+    const modelSchema = resolveModelSchema(schema, schemas);
+    const props = modelSchema.properties || {};
+    const required = modelSchema.required || [];
     const fileName = TYPESCRIPT_CONFIG.namingConventions.fileName(name);
     const modelName = TYPESCRIPT_CONFIG.namingConventions.modelName(name);
-    const referencedModels = Array.from(this.collectReferencedModels(schema, knownModels))
+    const referencedModels = Array.from(collectSchemaReferences(
+      modelSchema,
+      TYPESCRIPT_CONFIG.namingConventions.modelName,
+      knownModels
+    ))
       .filter((refModel) => refModel !== modelName)
       .sort((a, b) => a.localeCompare(b));
     const importBlock = referencedModels.length > 0
@@ -110,8 +117,8 @@ export interface ${configName} {
     }).join('\n  ');
 
     const modelDeclaration = Object.keys(props).length > 0
-      ? `${schema.description ? `/** ${schema.description} */\n` : ''}export interface ${modelName} {\n  ${fields}\n}`
-      : `${schema.description ? `/** ${schema.description} */\n` : ''}export type ${modelName} = ${getTypeScriptType(schema, TYPESCRIPT_CONFIG, knownModels)};`;
+      ? `${modelSchema.description ? `/** ${modelSchema.description} */\n` : ''}export interface ${modelName} {\n  ${fields}\n}`
+      : `${modelSchema.description ? `/** ${modelSchema.description} */\n` : ''}export type ${modelName} = ${getTypeScriptType(modelSchema, TYPESCRIPT_CONFIG, knownModels)};`;
     const content = importBlock ? `${importBlock}\n\n${modelDeclaration}` : modelDeclaration;
 
     return {
@@ -127,57 +134,6 @@ export interface ${configName} {
       return name;
     }
     return `'${name.replace(/'/g, "\\'")}'`;
-  }
-
-  private collectReferencedModels(
-    schema: any,
-    knownModels: Set<string>,
-    refs: Set<string> = new Set<string>(),
-    visited: Set<any> = new Set<any>()
-  ): Set<string> {
-    if (!schema || typeof schema !== 'object') {
-      return refs;
-    }
-
-    if (visited.has(schema)) {
-      return refs;
-    }
-    visited.add(schema);
-
-    if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop();
-      const modelName = TYPESCRIPT_CONFIG.namingConventions.modelName(refName ?? '');
-      if (knownModels.has(modelName)) {
-        refs.add(modelName);
-      }
-      return refs;
-    }
-
-    for (const key of ['oneOf', 'anyOf', 'allOf']) {
-      const candidates = schema[key];
-      if (Array.isArray(candidates)) {
-        for (const candidate of candidates) {
-          this.collectReferencedModels(candidate, knownModels, refs, visited);
-        }
-      }
-    }
-
-    if (schema.items) {
-      this.collectReferencedModels(schema.items, knownModels, refs, visited);
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-      for (const propSchema of Object.values(schema.properties)) {
-        this.collectReferencedModels(propSchema, knownModels, refs, visited);
-      }
-    }
-    if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-      this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
-    }
-    if (schema.not) {
-      this.collectReferencedModels(schema.not, knownModels, refs, visited);
-    }
-
-    return refs;
   }
 
   private generateModelIndex(ctx: SchemaContext): GeneratedFile {

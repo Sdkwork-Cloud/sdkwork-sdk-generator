@@ -26,7 +26,9 @@ export class TestGenerator {
         const assertions = this.indent(this.buildAssertions(plan, expectedPath), 4);
         const fakeMethod = this.indent(this.buildFakeMethod(plan), 4);
         const responseValue = method === 'get' ? '[]' : '{}';
-        return this.format(`from ${packageRoot} import ${clientName}, SdkConfig
+        const needsQuote = plan.headerExpectations.some((expectation) => expectation.cookie);
+        const quoteImport = needsQuote ? 'from urllib.parse import quote\n' : '';
+        return this.format(`${quoteImport}from ${packageRoot} import ${clientName}, SdkConfig
 
 
 def test_generated_sdk_forwards_request_metadata():
@@ -79,8 +81,18 @@ ${assertions}
         if (plan.variables.some((variable) => variable.kind === 'params')) {
             assertions.push("assert captured['params'] == params");
         }
-        if (plan.variables.some((variable) => variable.kind === 'headers')) {
-            assertions.push("assert captured['headers'] == headers");
+        if (plan.headerExpectations.length > 0) {
+            assertions.push("assert captured['headers'] is not None");
+            for (const expectation of plan.headerExpectations) {
+                if (expectation.cookie) {
+                    const source = expectation.source || `'${this.escape(expectation.expected)}'`;
+                    assertions.push(`assert captured['headers']['Cookie'] == f'${this.escape(expectation.expected)}={quote(str(${source}), safe="")}'`);
+                }
+                else {
+                    const source = expectation.source || `'${this.escape(expectation.expected)}'`;
+                    assertions.push(`assert captured['headers']['${this.escape(expectation.name)}'] == ${source}`);
+                }
+            }
         }
         return assertions.join('\n');
     }

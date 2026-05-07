@@ -33,6 +33,7 @@ export class TestGenerator {
             usesTypesImport: plan.requiresTypesImport,
             hasBody,
             hasQuery,
+            hasCookieExpectations: plan.headerExpectations.some((expectation) => expectation.cookie),
             usesJsonHelpers,
             usesMultipartPrefixCheck,
         });
@@ -73,7 +74,7 @@ ${helpers}`);
             options.hasBody ? '\t"io"' : '',
             '\t"net/http"',
             '\t"net/http/httptest"',
-            options.hasQuery ? '\t"net/url"' : '',
+            (options.hasQuery || options.hasCookieExpectations) ? '\t"net/url"' : '',
             options.usesJsonHelpers ? '\t"reflect"' : '',
             options.usesMultipartPrefixCheck ? '\t"strings"' : '',
             '\t"testing"',
@@ -125,7 +126,16 @@ ${helpers}`);
             lines.push(`\tif capturedQuery.Get(${this.quote(expectation.name)}) != ${this.quote(expectation.expected)} {`, `\t\tt.Fatalf("expected query %s=%s, got %s", ${this.quote(expectation.name)}, ${this.quote(expectation.expected)}, capturedQuery.Get(${this.quote(expectation.name)}))`, '\t}');
         }
         for (const expectation of plan.headerExpectations) {
-            lines.push(`\tif capturedHeaders.Get(${this.quote(expectation.name)}) != ${this.quote(expectation.expected)} {`, `\t\tt.Fatalf("expected header %s=%s, got %s", ${this.quote(expectation.name)}, ${this.quote(expectation.expected)}, capturedHeaders.Get(${this.quote(expectation.name)}))`, '\t}');
+            if (expectation.cookie) {
+                const source = expectation.source || this.quote(expectation.expected);
+                lines.push(`\tif capturedHeaders.Get("Cookie") != ${this.quote(`${expectation.expected}=`)}+url.QueryEscape(${source}) {`, `\t\tt.Fatalf("expected cookie header %s=%%s, got %%s", ${this.quote(expectation.expected)}, url.QueryEscape(${source}), capturedHeaders.Get("Cookie"))`, '\t}');
+            }
+            else if (expectation.source) {
+                lines.push(`\tif capturedHeaders.Get(${this.quote(expectation.name)}) != ${expectation.source} {`, `\t\tt.Fatalf("expected header %s=%%s, got %%s", ${this.quote(expectation.name)}, ${expectation.source}, capturedHeaders.Get(${this.quote(expectation.name)}))`, '\t}');
+            }
+            else {
+                lines.push(`\tif capturedHeaders.Get(${this.quote(expectation.name)}) != ${this.quote(expectation.expected)} {`, `\t\tt.Fatalf("expected header %s=%s, got %s", ${this.quote(expectation.name)}, ${this.quote(expectation.expected)}, capturedHeaders.Get(${this.quote(expectation.name)}))`, '\t}');
+            }
         }
         if (plan.bodyAssertion) {
             if (plan.bodyAssertion.contentTypeMatch === 'prefix') {

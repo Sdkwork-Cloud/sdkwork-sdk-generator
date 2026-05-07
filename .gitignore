@@ -49,6 +49,9 @@ test-openapi.json
 **/target/
 **/*.class
 
+# Rust integration library
+rust/Cargo.lock
+
 # .NET
 **/obj/
 **/bin/Debug/

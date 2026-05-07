@@ -1,9 +1,15 @@
+import { resolveModelSchema } from '../../framework/schema.js';
 import { FLUTTER_CONFIG, getFlutterType } from './config.js';
 export class ModelGenerator {
     generate(ctx, _config) {
+        const modelClasses = Object.entries(ctx.schemas).map(([name, schema]) => this.generateClass(name, schema, ctx.schemas));
+        const runtimeHelpers = this.generateRuntimeHelpers({
+            map: modelClasses.some((model) => model.includes('_sdkworkAsMap')),
+            list: modelClasses.some((model) => model.includes('_sdkworkAsList')),
+        });
         const models = [
-            this.generateRuntimeHelpers(),
-            ...Object.entries(ctx.schemas).map(([name, schema]) => this.generateClass(name, schema)),
+            ...(runtimeHelpers ? [runtimeHelpers] : []),
+            ...modelClasses,
         ];
         return [{
                 path: 'lib/src/models.dart',
@@ -12,8 +18,10 @@ export class ModelGenerator {
                 description: 'Data models',
             }];
     }
-    generateRuntimeHelpers() {
-        return `Map<String, dynamic>? _sdkworkAsMap(dynamic value) {
+    generateRuntimeHelpers(helpers) {
+        const blocks = [];
+        if (helpers.map) {
+            blocks.push(`Map<String, dynamic>? _sdkworkAsMap(dynamic value) {
   if (value is Map<String, dynamic>) {
     return value;
   }
@@ -21,15 +29,19 @@ export class ModelGenerator {
     return value.map((key, item) => MapEntry(key.toString(), item));
   }
   return null;
-}
-
-List<dynamic>? _sdkworkAsList(dynamic value) {
+}`);
+        }
+        if (helpers.list) {
+            blocks.push(`List<dynamic>? _sdkworkAsList(dynamic value) {
   return value is List ? value : null;
-}`;
+}`);
+        }
+        return blocks.join('\n\n');
     }
-    generateClass(name, schema) {
+    generateClass(name, schema, schemas) {
+        const modelSchema = resolveModelSchema(schema, schemas);
         const className = FLUTTER_CONFIG.namingConventions.modelName(name);
-        const props = schema.properties || {};
+        const props = modelSchema.properties || {};
         const propEntries = Object.entries(props);
         const fields = propEntries.map(([propName, propSchema]) => {
             const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
@@ -89,7 +101,10 @@ ${toJsonBody}
         return map == null ? null : ${refTarget}.fromJson(map);
       })()`;
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            return `_sdkworkAsList(${valueExpr})`;
+        }
+        if (schema.items && typeof schema.items === 'object') {
             const itemType = getFlutterType(schema.items, FLUTTER_CONFIG);
             const itemExpr = this.deserializeArrayItemExpression(schema.items, 'item', currentModelName);
             return `(() {
@@ -148,7 +163,10 @@ ${toJsonBody}
         return map == null ? null : ${refTarget}.fromJson(map);
       })()`;
         }
-        if (schema?.items) {
+        if (Array.isArray(schema?.prefixItems)) {
+            return `_sdkworkAsList(${itemExpr})`;
+        }
+        if (schema?.items && typeof schema.items === 'object') {
             const nestedType = getFlutterType(schema.items, FLUTTER_CONFIG);
             const nestedExpr = this.deserializeArrayItemExpression(schema.items, 'nestedItem', currentModelName);
             return `(() {
@@ -205,7 +223,10 @@ ${toJsonBody}
         if (schema.$ref) {
             return `${valueExpr}?.toJson()`;
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            return valueExpr;
+        }
+        if (schema.items && typeof schema.items === 'object') {
             const itemExpr = this.serializeArrayItemExpression(schema.items, 'item', currentModelName);
             return `${valueExpr}?.map((item) => ${itemExpr}).toList()`;
         }
@@ -219,7 +240,10 @@ ${toJsonBody}
         if (schema?.$ref) {
             return `${itemExpr}.toJson()`;
         }
-        if (schema?.items) {
+        if (Array.isArray(schema?.prefixItems)) {
+            return itemExpr;
+        }
+        if (schema?.items && typeof schema.items === 'object') {
             const nestedExpr = this.serializeArrayItemExpression(schema.items, 'nestedItem', currentModelName);
             return `${itemExpr}.map((nestedItem) => ${nestedExpr}).toList()`;
         }

@@ -655,6 +655,351 @@ const pythonNullableSpec: ApiSpec = {
   },
 };
 
+const openApi32JsonSchemaSpec: ApiSpec = {
+  openapi: '3.2.0',
+  info: { title: 'OpenAPI 3.2 JSON Schema API', version: '1.0.0' },
+  paths: {
+    '/schema-model': {
+      post: {
+        summary: 'Create schema model',
+        operationId: 'createSchemaModel',
+        tags: ['Schema Model'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/SchemaModel' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SchemaModel' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      UserRef: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      SchemaModel: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+          nullableName: { type: ['string', 'null'] },
+          nullableCount: { oneOf: [{ type: 'null' }, { type: 'integer' }] },
+          nullableFlag: { anyOf: [{ type: ['null'] }, { type: 'boolean' }] },
+          aliasedUser: { allOf: [{ type: 'null' }, { $ref: '#/components/schemas/UserRef' }] },
+          metadata: {
+            additionalProperties: { type: 'string' },
+          },
+          labels: {
+            type: ['array', 'null'],
+            items: { type: ['string', 'null'] },
+          },
+        },
+      },
+    },
+  },
+};
+
+const openApi32AllOfObjectSpec: ApiSpec = {
+  openapi: '3.2.0',
+  info: { title: 'OpenAPI 3.2 AllOf Object API', version: '1.0.0' },
+  paths: {
+    '/composed-user': {
+      get: {
+        summary: 'Get composed user',
+        operationId: 'getComposedUser',
+        tags: ['Composed User'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ComposedUser' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      BaseEntity: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      UserTraits: {
+        type: 'object',
+        required: ['email'],
+        properties: {
+          email: { type: 'string', format: 'email' },
+          displayName: { type: ['string', 'null'] },
+        },
+      },
+      ComposedUser: {
+        allOf: [
+          { $ref: '#/components/schemas/BaseEntity' },
+          { $ref: '#/components/schemas/UserTraits' },
+          {
+            type: 'object',
+            properties: {
+              roles: {
+                type: 'array',
+                items: { type: 'string' },
+              },
+            },
+          },
+        ],
+      },
+    },
+  },
+};
+
+const openApi32ItemSchemaSpec: ApiSpec = {
+  openapi: '3.2.0',
+  info: { title: 'OpenAPI 3.2 Item Schema API', version: '1.0.0' },
+  paths: {
+    '/events': {
+      get: {
+        summary: 'Stream events',
+        operationId: 'streamEvents',
+        tags: ['Event'],
+        responses: {
+          '200': {
+            description: 'Event stream',
+            content: {
+              'application/json-seq': {
+                itemSchema: { $ref: '#/components/schemas/Event' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/inline-events': {
+      get: {
+        summary: 'List inline events',
+        operationId: 'listInlineEvents',
+        tags: ['Event'],
+        responses: {
+          '200': {
+            description: 'Inline event stream',
+            content: {
+              'application/json-seq': {
+                itemSchema: {
+                  type: 'object',
+                  required: ['sequence'],
+                  properties: {
+                    sequence: { type: 'integer' },
+                    value: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      Event: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+const openApi32PrefixItemsSpec: ApiSpec = {
+  openapi: '3.2.0',
+  info: { title: 'OpenAPI 3.2 Prefix Items API', version: '1.0.0' },
+  paths: {
+    '/timeline': {
+      get: {
+        summary: 'Get fixed timeline tuple',
+        operationId: 'getTimeline',
+        tags: ['Timeline'],
+        responses: {
+          '200': {
+            description: 'Timeline tuple',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/TimelineTuple' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      TimelineEvent: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      TimelineTuple: {
+        description: 'Fixed position JSON Schema tuple',
+        type: 'array',
+        prefixItems: [
+          { type: 'string' },
+          { $ref: '#/components/schemas/TimelineEvent' },
+          { type: 'integer' },
+        ],
+        items: false,
+      },
+      TimelineEnvelope: {
+        type: 'object',
+        properties: {
+          tuple: {
+            type: 'array',
+            prefixItems: [
+              { type: 'string' },
+              { $ref: '#/components/schemas/TimelineEvent' },
+              { type: 'integer' },
+            ],
+            items: false,
+          },
+        },
+      },
+    },
+  },
+};
+
+const openApi31DefsSpec = {
+  openapi: '3.1.0',
+  info: { title: 'OpenAPI 3.1 Defs API', version: '1.0.0' },
+  $defs: {
+    AuditRootNote: {
+      type: 'object',
+      properties: {
+        note: { type: 'string' },
+      },
+    },
+  },
+  paths: {
+    '/audit/envelope': {
+      get: {
+        summary: 'Get audit envelope',
+        operationId: 'getAuditEnvelope',
+        tags: ['Audit'],
+        responses: {
+          '200': {
+            description: 'Audit envelope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AuditEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      AuditEnvelope: {
+        type: 'object',
+        required: ['event'],
+        properties: {
+          event: { $ref: '#/components/schemas/AuditEnvelope/$defs/AuditEvent' },
+          actor: { $ref: '#/components/schemas/AuditEnvelope/$defs/AuditActor' },
+          metadata: { $ref: '#/$defs/AuditMetadata' },
+          rootNote: { $ref: '#/$defs/AuditRootNote' },
+        },
+        $defs: {
+          AuditEvent: {
+            type: 'object',
+            required: ['id', 'kind'],
+            properties: {
+              id: { type: 'string' },
+              kind: { enum: ['created', 'updated', 'deleted'] },
+            },
+          },
+          AuditActor: {
+            type: 'object',
+            properties: {
+              userId: { type: 'string' },
+            },
+          },
+          AuditMetadata: {
+            type: 'object',
+            properties: {
+              requestId: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  },
+} as unknown as ApiSpec;
+
+const openApi31ConstSpec = {
+  openapi: '3.1.0',
+  info: { title: 'OpenAPI 3.1 Const API', version: '1.0.0' },
+  paths: {
+    '/const-envelope': {
+      get: {
+        summary: 'Get const envelope',
+        operationId: 'getConstEnvelope',
+        tags: ['Const'],
+        responses: {
+          '200': {
+            description: 'Const envelope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ConstEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      ConstEnvelope: {
+        type: 'object',
+        required: ['kind', 'version', 'enabled'],
+        properties: {
+          kind: { const: 'audit' },
+          version: { const: 1 },
+          ratio: { const: 2.5 },
+          enabled: { const: true },
+          missing: { const: null },
+        },
+      },
+    },
+  },
+} as unknown as ApiSpec;
+
 const pythonKeywordPropertySpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Python Keyword Property API', version: '1.0.0' },
@@ -753,6 +1098,50 @@ const pathParameterIdentifierSpec: ApiSpec = {
         },
       },
     },
+  },
+};
+
+const headerCookieParameterSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Header Cookie Parameter API', version: '1.0.0' },
+  paths: {
+    '/resources': {
+      get: {
+        summary: 'List resources',
+        operationId: 'listResources',
+        tags: ['Resource'],
+        parameters: [
+          { name: 'X-Trace-Id', in: 'header', required: true, schema: { type: 'string' } },
+          { name: 'session_id', in: 'cookie', required: false, schema: { type: 'string' } },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const scalarHeaderCookieParameterSpec: ApiSpec = {
+  openapi: '3.2.0',
+  info: { title: 'Scalar Header Cookie Parameter API', version: '1.0.0' },
+  paths: {
+    '/resources': {
+      get: {
+        summary: 'List resources with scalar transport parameters',
+        operationId: 'listResources',
+        tags: ['Resource'],
+        parameters: [
+          { name: 'X-Retry-Count', in: 'header', required: true, schema: { type: 'integer' } },
+          { name: 'debug_mode', in: 'cookie', required: false, schema: { type: 'boolean' } },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
   },
 };
 
@@ -1718,6 +2107,923 @@ describe('OpenAPI Security And Compliance', () => {
     expect(nullableModelFile!.content).not.toContain('display_name: str = None');
   });
 
+  it('should generate stable model types for OpenAPI 3.2 JSON Schema null and composed branches', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/types/schema-model.ts',
+        expected: [
+          'nullableName?: string | null;',
+          'nullableCount?: number | null;',
+          'nullableFlag?: boolean | null;',
+          'aliasedUser?: UserRef;',
+          'metadata?: Record<string, string>;',
+          'labels?: (string | null)[] | null;',
+        ],
+        forbidden: ['unknown | string', 'unknown | number', 'null |'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/models/schema_model.py',
+        expected: [
+          'nullable_name: Optional[str] = None',
+          'nullable_count: Optional[int] = None',
+          'nullable_flag: Optional[bool] = None',
+          'aliased_user: Optional[UserRef] = None',
+          'metadata: Optional[Dict[str, str]] = None',
+          'labels: Optional[List[str]] = None',
+        ],
+        forbidden: ['Any |', 'Null', 'unknown'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'types/schema_model.go',
+        expected: [
+          'NullableName string `json:"nullableName"`',
+          'NullableCount int `json:"nullableCount"`',
+          'NullableFlag bool `json:"nullableFlag"`',
+          'AliasedUser UserRef `json:"aliasedUser"`',
+          'Metadata map[string]string `json:"metadata"`',
+          'Labels []string `json:"labels"`',
+        ],
+        forbidden: [' Null `json:', ' null `json:', 'interface{} `json:"nullable'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/model/SchemaModel.java',
+        expected: [
+          'private String nullableName;',
+          'private Integer nullableCount;',
+          'private Boolean nullableFlag;',
+          'private UserRef aliasedUser;',
+          'private Map<String, String> metadata;',
+          'private List<String> labels;',
+        ],
+        forbidden: ['private Null ', 'private null ', 'Object nullableCount'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/SchemaModel.kt',
+        expected: [
+          'val nullableName: String? = null',
+          'val nullableCount: Int? = null',
+          'val nullableFlag: Boolean? = null',
+          'val aliasedUser: UserRef? = null',
+          'val metadata: Map<String, String>? = null',
+          'val labels: List<String>? = null',
+        ],
+        forbidden: ['val nullableCount: Any? = null'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Models/SchemaModel.cs',
+        expected: [
+          'public string? NullableName { get; set; }',
+          'public int? NullableCount { get; set; }',
+          'public bool? NullableFlag { get; set; }',
+          'public UserRef? AliasedUser { get; set; }',
+          'public Dictionary<string, string>? Metadata { get; set; }',
+          'public List<string>? Labels { get; set; }',
+        ],
+        forbidden: ['public Null?', 'object? NullableCount'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/models/schema_model.rs',
+        expected: [
+          'pub nullable_name: Option<String>,',
+          'pub nullable_count: Option<i64>,',
+          'pub nullable_flag: Option<bool>,',
+          'pub aliased_user: Option<UserRef>,',
+          'pub metadata: Option<std::collections::HashMap<String, String>>,',
+          'pub labels: Option<Vec<String>>,',
+        ],
+        forbidden: ['Option<Null>', 'serde_json::Value>,'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        openApi32JsonSchemaSpec
+      );
+      const modelFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(modelFile.content).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(modelFile.content).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should merge OpenAPI 3.2 allOf object model branches across SDK languages', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/types/composed-user.ts',
+        expected: [
+          'id: string;',
+          'createdAt?: string;',
+          'email: string;',
+          'displayName?: string | null;',
+          'roles?: string[];',
+        ],
+        forbidden: ['export type ComposedUser =', 'BaseEntity & UserTraits', 'unknown'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/models/composed_user.py',
+        expected: [
+          'id: str',
+          'email: str',
+          'created_at: Optional[str] = None',
+          'display_name: Optional[str] = None',
+          'roles: Optional[List[str]] = None',
+        ],
+        forbidden: ['class ComposedUser:\n    pass'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'types/composed_user.go',
+        expected: [
+          'Id string `json:"id"`',
+          'CreatedAt string `json:"createdAt"`',
+          'Email string `json:"email"`',
+          'DisplayName string `json:"displayName"`',
+          'Roles []string `json:"roles"`',
+        ],
+        forbidden: ['type ComposedUser interface{}', 'BaseEntity'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/model/ComposedUser.java',
+        expected: [
+          'private String id;',
+          'private String createdAt;',
+          'private String email;',
+          'private String displayName;',
+          'private List<String> roles;',
+        ],
+        forbidden: ['private Object', 'BaseEntity'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/ComposedUser.kt',
+        expected: [
+          'val id: String? = null',
+          'val createdAt: String? = null',
+          'val email: String? = null',
+          'val displayName: String? = null',
+          'val roles: List<String>? = null',
+        ],
+        forbidden: ['val baseEntity', 'Any?'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Models/ComposedUser.cs',
+        expected: [
+          'public string? Id { get; set; }',
+          'public string? CreatedAt { get; set; }',
+          'public string? Email { get; set; }',
+          'public string? DisplayName { get; set; }',
+          'public List<string>? Roles { get; set; }',
+        ],
+        forbidden: ['public object?', 'BaseEntity'],
+      },
+      {
+        language: 'swift' as const,
+        generator: new SwiftGenerator(),
+        filePath: 'Sources/Models.swift',
+        expected: [
+          'public struct ComposedUser: Codable',
+          'public let id: String?',
+          'public let createdAt: String?',
+          'public let email: String?',
+          'public let displayName: String?',
+          'public let roles: [String]?',
+        ],
+        forbidden: ['public struct ComposedUser: BaseEntity'],
+      },
+      {
+        language: 'dart' as const,
+        generator: new DartGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'class ComposedUser',
+          'final String? id;',
+          'final String? createdAt;',
+          'final String? email;',
+          'final String? displayName;',
+          'final List<String>? roles;',
+        ],
+        forbidden: ['class ComposedUser extends BaseEntity'],
+      },
+      {
+        language: 'flutter' as const,
+        generator: new FlutterGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'class ComposedUser',
+          'final String? id;',
+          'final String? createdAt;',
+          'final String? email;',
+          'final String? displayName;',
+          'final List<String>? roles;',
+        ],
+        forbidden: ['class ComposedUser extends BaseEntity'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/models/composed_user.rs',
+        expected: [
+          'pub id: String,',
+          'pub created_at: Option<String>,',
+          'pub email: String,',
+          'pub display_name: Option<String>,',
+          'pub roles: Option<Vec<String>>,',
+        ],
+        forbidden: ['additional_properties', 'BaseEntity'],
+      },
+      {
+        language: 'php' as const,
+        generator: new PhpGenerator(),
+        filePath: 'src/Models/ComposedUser.php',
+        expected: [
+          'public ?string $id = null;',
+          'public ?string $createdAt = null;',
+          'public ?string $email = null;',
+          'public ?string $displayName = null;',
+          'public array $roles = [];',
+        ],
+        forbidden: ['OpenAPI schema defines no explicit properties', 'BaseEntity'],
+      },
+      {
+        language: 'ruby' as const,
+        generator: new RubyGenerator(),
+        filePath: 'lib/sdkwork/backend_sdk/models/composed_user.rb',
+        expected: [
+          'attr_accessor :id, :created_at, :email, :display_name, :roles',
+          "@id = attributes['id']",
+          "@created_at = attributes['createdAt']",
+          "@email = attributes['email']",
+          "@display_name = attributes['displayName']",
+          "@roles = attributes['roles'].is_a?(Array) ? attributes['roles'].map { |item| item } : []",
+        ],
+        forbidden: ['No properties to hydrate', 'BaseEntity'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        openApi32AllOfObjectSpec
+      );
+      const modelFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(modelFile.content).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(modelFile.content).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should generate array response types from OpenAPI 3.2 media type itemSchema', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/api/event.ts',
+        expected: [
+          'import type { Event',
+          'async streamEvents(): Promise<Event[]>',
+          'this.client.get<Event[]>',
+        ],
+        forbidden: ['Promise<unknown>', 'Promise<void>'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/api/event.py',
+        expected: [
+          'from ..models import Event',
+          'def stream_events(self) -> List[Event]:',
+        ],
+        forbidden: ['-> Any', '-> None'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'api/event.go',
+        expected: [
+          'func (a *EventApi) StreamEvents() ([]sdktypes.Event, error)',
+          'return decodeResult[[]sdktypes.Event](raw)',
+        ],
+        forbidden: ['interface{}', 'struct{}'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/api/EventApi.java',
+        expected: [
+          'public List<Event> streamEvents() throws Exception',
+          'return client.convertValue(raw, new TypeReference<List<Event>>() {});',
+        ],
+        forbidden: ['public Object streamEvents', 'public Void streamEvents'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/api/EventApi.kt',
+        expected: [
+          'suspend fun streamEvents(): List<Event>?',
+          'return client.convertValue(raw, object : TypeReference<List<Event>>() {})',
+        ],
+        forbidden: ['suspend fun streamEvents(): Any?', 'suspend fun streamEvents(): Unit?'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Api/EventApi.cs',
+        expected: [
+          'public async Task<List<Backend.Models.Event>?> StreamEventsAsync()',
+          'await _client.GetAsync<List<Backend.Models.Event>>',
+        ],
+        forbidden: ['Task<object?> StreamEventsAsync', 'Task<void?> StreamEventsAsync'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/api/event.rs',
+        expected: [
+          'pub async fn stream_events(&self) -> Result<Vec<Event>, SdkworkError>',
+          'self.client.get(&path, None, None).await',
+        ],
+        forbidden: ['serde_json::Value', 'Result<(),'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        openApi32ItemSchemaSpec
+      );
+      const apiFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(apiFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(apiFile.content, `${testCase.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should hoist inline OpenAPI 3.2 media type itemSchema schemas into generated models', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, openApi32ItemSchemaSpec);
+    const apiFile = getGeneratedFile(result.files, 'src/api/event.ts');
+    const modelFile = getGeneratedFile(result.files, 'src/types/list-inline-events-response-item.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile.content).toContain('import type { Event, ListInlineEventsResponseItem } from');
+    expect(apiFile.content).toContain('async listInlineEvents(): Promise<ListInlineEventsResponseItem[]>');
+    expect(modelFile.content).toContain('export interface ListInlineEventsResponseItem');
+    expect(modelFile.content).toContain('sequence: number;');
+    expect(modelFile.content).toContain('value?: string;');
+  });
+
+  it('should generate OpenAPI 3.2 JSON Schema prefixItems tuple models across SDK languages', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/types/timeline-tuple.ts',
+        expected: [
+          "import type { TimelineEvent } from './timeline-event';",
+          'export type TimelineTuple = [string, TimelineEvent, number];',
+        ],
+        forbidden: ['export type TimelineTuple = unknown', 'unknown[]'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/models/timeline_envelope.py',
+        expected: [
+          'from .timeline_event import TimelineEvent',
+          'tuple: Optional[Tuple[str, TimelineEvent, int]] = None',
+        ],
+        forbidden: ['class TimelineTuple:', 'List[Any]'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'types/timeline_tuple.go',
+        expected: [
+          'type TimelineTuple []interface{}',
+        ],
+        forbidden: ['type TimelineTuple interface{}'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/model/TimelineEnvelope.java',
+        expected: [
+          'private List<Object> tuple;',
+        ],
+        forbidden: ['private Object tuple;'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/TimelineEnvelope.kt',
+        expected: [
+          'val tuple: List<Any>? = null',
+        ],
+        forbidden: ['val tuple: Any? = null'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Models/TimelineEnvelope.cs',
+        expected: [
+          'public List<object>? Tuple { get; set; }',
+        ],
+        forbidden: ['public object? Tuple'],
+      },
+      {
+        language: 'swift' as const,
+        generator: new SwiftGenerator(),
+        filePath: 'Sources/Models.swift',
+        expected: [
+          'public let tuple: [Any]?',
+        ],
+        forbidden: ['public let tuple: Any?'],
+      },
+      {
+        language: 'dart' as const,
+        generator: new DartGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final List<dynamic>? tuple;',
+        ],
+        forbidden: ['final dynamic tuple;'],
+      },
+      {
+        language: 'flutter' as const,
+        generator: new FlutterGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final List<dynamic>? tuple;',
+        ],
+        forbidden: ['final dynamic tuple;'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/models/timeline_envelope.rs',
+        expected: [
+          'pub tuple: Option<Vec<serde_json::Value>>,',
+        ],
+        forbidden: ['pub tuple: Option<serde_json::Value>,'],
+      },
+      {
+        language: 'php' as const,
+        generator: new PhpGenerator(),
+        filePath: 'src/Models/TimelineEnvelope.php',
+        expected: [
+          'public array $tuple = [];',
+        ],
+        forbidden: ['public mixed $tuple'],
+      },
+      {
+        language: 'ruby' as const,
+        generator: new RubyGenerator(),
+        filePath: 'lib/sdkwork/backend_sdk/models/timeline_envelope.rb',
+        expected: [
+          "@tuple = attributes['tuple'].is_a?(Array) ? attributes['tuple'].map { |item| item } : []",
+        ],
+        forbidden: ["@tuple = attributes['tuple']\n"],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        openApi32PrefixItemsSpec
+      );
+      const modelFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(modelFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(modelFile.content, `${testCase.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should hoist OpenAPI 3.1 $defs schemas and resolve deep JSON Pointer refs across generated SDKs', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/types/audit-envelope.ts',
+        expected: [
+          "import type { AuditEnvelopeAuditActor } from './audit-envelope-audit-actor';",
+          "import type { AuditEnvelopeAuditEvent } from './audit-envelope-audit-event';",
+          "import type { AuditEnvelopeAuditMetadata } from './audit-envelope-audit-metadata';",
+          "import type { AuditRootNote } from './audit-root-note';",
+          'event: AuditEnvelopeAuditEvent;',
+          'actor?: AuditEnvelopeAuditActor;',
+          'metadata?: AuditEnvelopeAuditMetadata;',
+          'rootNote?: AuditRootNote;',
+        ],
+        forbidden: ['event: unknown;', 'actor?: unknown;', 'metadata?: unknown;', 'rootNote?: unknown;'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/models/audit_envelope.py',
+        expected: [
+          'from .audit_envelope_audit_actor import AuditEnvelopeAuditActor',
+          'from .audit_envelope_audit_event import AuditEnvelopeAuditEvent',
+          'from .audit_envelope_audit_metadata import AuditEnvelopeAuditMetadata',
+          'from .audit_root_note import AuditRootNote',
+          'event: AuditEnvelopeAuditEvent',
+          'actor: Optional[AuditEnvelopeAuditActor] = None',
+          'metadata: Optional[AuditEnvelopeAuditMetadata] = None',
+          'root_note: Optional[AuditRootNote] = None',
+        ],
+        forbidden: ['event: Any', 'actor: Optional[Any]', 'metadata: Optional[Any]', 'root_note: Optional[Any]'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/models/audit_envelope.rs',
+        expected: [
+          'use crate::models::{AuditEnvelopeAuditActor, AuditEnvelopeAuditEvent, AuditEnvelopeAuditMetadata, AuditRootNote};',
+          'pub event: AuditEnvelopeAuditEvent,',
+          'pub actor: Option<AuditEnvelopeAuditActor>,',
+          'pub metadata: Option<AuditEnvelopeAuditMetadata>,',
+          'pub root_note: Option<AuditRootNote>,',
+        ],
+        forbidden: [
+          'pub event: serde_json::Value',
+          'pub actor: Option<serde_json::Value>',
+          'pub metadata: Option<serde_json::Value>',
+          'pub root_note: Option<serde_json::Value>',
+        ],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'types/audit_envelope.go',
+        expected: [
+          'Event AuditEnvelopeAuditEvent `json:"event"`',
+          'Actor AuditEnvelopeAuditActor `json:"actor"`',
+          'Metadata AuditEnvelopeAuditMetadata `json:"metadata"`',
+          'RootNote AuditRootNote `json:"rootNote"`',
+        ],
+        forbidden: ['Event interface{}', 'Actor interface{}', 'Metadata interface{}', 'RootNote interface{}'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/model/AuditEnvelope.java',
+        expected: [
+          'private AuditEnvelopeAuditEvent event;',
+          'private AuditEnvelopeAuditActor actor;',
+          'private AuditEnvelopeAuditMetadata metadata;',
+          'private AuditRootNote rootNote;',
+        ],
+        forbidden: [
+          'private Object event;',
+          'private Object actor;',
+          'private Object metadata;',
+          'private Object rootNote;',
+        ],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/AuditEnvelope.kt',
+        expected: [
+          'val event: AuditEnvelopeAuditEvent? = null',
+          'val actor: AuditEnvelopeAuditActor? = null',
+          'val metadata: AuditEnvelopeAuditMetadata? = null',
+          'val rootNote: AuditRootNote? = null',
+        ],
+        forbidden: [
+          'val event: Any? = null',
+          'val actor: Any? = null',
+          'val metadata: Any? = null',
+          'val rootNote: Any? = null',
+        ],
+      },
+      {
+        language: 'swift' as const,
+        generator: new SwiftGenerator(),
+        filePath: 'Sources/Models.swift',
+        expected: [
+          'public let event: AuditEnvelopeAuditEvent?',
+          'public let actor_: AuditEnvelopeAuditActor?',
+          'public let metadata: AuditEnvelopeAuditMetadata?',
+          'public let rootNote: AuditRootNote?',
+        ],
+        forbidden: [
+          'public let event: Any?',
+          'public let actor_: Any?',
+          'public let metadata: Any?',
+          'public let rootNote: Any?',
+        ],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Models/AuditEnvelope.cs',
+        expected: [
+          'public AuditEnvelopeAuditEvent? Event { get; set; }',
+          'public AuditEnvelopeAuditActor? Actor { get; set; }',
+          'public AuditEnvelopeAuditMetadata? Metadata { get; set; }',
+          'public AuditRootNote? RootNote { get; set; }',
+        ],
+        forbidden: [
+          'public object? Event',
+          'public object? Actor',
+          'public object? Metadata',
+          'public object? RootNote',
+        ],
+      },
+      {
+        language: 'dart' as const,
+        generator: new DartGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final AuditEnvelopeAuditEvent? event;',
+          'final AuditEnvelopeAuditActor? actor;',
+          'final AuditEnvelopeAuditMetadata? metadata;',
+          'final AuditRootNote? rootNote;',
+        ],
+        forbidden: ['final dynamic event;', 'final dynamic actor;', 'final dynamic metadata;', 'final dynamic rootNote;'],
+      },
+      {
+        language: 'flutter' as const,
+        generator: new FlutterGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final AuditEnvelopeAuditEvent? event;',
+          'final AuditEnvelopeAuditActor? actor;',
+          'final AuditEnvelopeAuditMetadata? metadata;',
+          'final AuditRootNote? rootNote;',
+        ],
+        forbidden: ['final dynamic event;', 'final dynamic actor;', 'final dynamic metadata;', 'final dynamic rootNote;'],
+      },
+      {
+        language: 'php' as const,
+        generator: new PhpGenerator(),
+        filePath: 'src/Models/AuditEnvelope.php',
+        expected: [
+          'use SDKWork\\Backend\\Models\\AuditEnvelopeAuditActor;',
+          'use SDKWork\\Backend\\Models\\AuditEnvelopeAuditEvent;',
+          'use SDKWork\\Backend\\Models\\AuditEnvelopeAuditMetadata;',
+          'use SDKWork\\Backend\\Models\\AuditRootNote;',
+          'public ?AuditEnvelopeAuditEvent $event = null;',
+          'public ?AuditEnvelopeAuditActor $actor = null;',
+          'public ?AuditEnvelopeAuditMetadata $metadata = null;',
+          'public ?AuditRootNote $rootNote = null;',
+        ],
+        forbidden: ['public mixed $event', 'public mixed $actor', 'public mixed $metadata', 'public mixed $rootNote'],
+      },
+      {
+        language: 'ruby' as const,
+        generator: new RubyGenerator(),
+        filePath: 'lib/sdkwork/backend_sdk/models/audit_envelope.rb',
+        expected: [
+          "@event = attributes['event'].is_a?(Hash) ? AuditEnvelopeAuditEvent.from_hash(attributes['event']) : nil",
+          "@actor = attributes['actor'].is_a?(Hash) ? AuditEnvelopeAuditActor.from_hash(attributes['actor']) : nil",
+          "@metadata = attributes['metadata'].is_a?(Hash) ? AuditEnvelopeAuditMetadata.from_hash(attributes['metadata']) : nil",
+          "@root_note = attributes['rootNote'].is_a?(Hash) ? AuditRootNote.from_hash(attributes['rootNote']) : nil",
+        ],
+        forbidden: [
+          "@event = attributes['event']\n",
+          "@actor = attributes['actor']\n",
+          "@metadata = attributes['metadata']\n",
+          "@root_note = attributes['rootNote']\n",
+        ],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        openApi31DefsSpec
+      );
+      const modelFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(modelFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(modelFile.content, `${testCase.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should generate OpenAPI 3.1 JSON Schema const fields as precise stable SDK types', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/types/const-envelope.ts',
+        expected: [
+          "kind: 'audit';",
+          'version: 1;',
+          'ratio?: 2.5;',
+          'enabled: true;',
+          'missing?: null;',
+        ],
+        forbidden: ['kind: unknown;', 'version: unknown;', 'enabled: unknown;'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/models/const_envelope.py',
+        expected: [
+          'from typing import TYPE_CHECKING, Optional, List, Dict, Any, Literal',
+          "kind: Literal['audit']",
+          'version: Literal[1]',
+          'ratio: Optional[Literal[2.5]] = None',
+          'enabled: Literal[True]',
+          'missing: Any = None',
+        ],
+        forbidden: ['kind: Any', 'version: Any', 'enabled: Any'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'types/const_envelope.go',
+        expected: [
+          'Kind string `json:"kind"`',
+          'Version int `json:"version"`',
+          'Ratio float64 `json:"ratio"`',
+          'Enabled bool `json:"enabled"`',
+        ],
+        forbidden: ['Kind interface{}', 'Version interface{}', 'Enabled interface{}'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/model/ConstEnvelope.java',
+        expected: [
+          'private String kind;',
+          'private Integer version;',
+          'private Double ratio;',
+          'private Boolean enabled;',
+        ],
+        forbidden: ['private Object kind;', 'private Object version;', 'private Object enabled;'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/ConstEnvelope.kt',
+        expected: [
+          'val kind: String? = null',
+          'val version: Int? = null',
+          'val ratio: Double? = null',
+          'val enabled: Boolean? = null',
+        ],
+        forbidden: ['val kind: Any? = null', 'val version: Any? = null', 'val enabled: Any? = null'],
+      },
+      {
+        language: 'swift' as const,
+        generator: new SwiftGenerator(),
+        filePath: 'Sources/Models.swift',
+        expected: [
+          'public let kind: String?',
+          'public let version: Int?',
+          'public let ratio: Double?',
+          'public let enabled: Bool?',
+        ],
+        forbidden: ['public let kind: Any?', 'public let version: Any?', 'public let enabled: Any?'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Models/ConstEnvelope.cs',
+        expected: [
+          'public string? Kind { get; set; }',
+          'public int? Version { get; set; }',
+          'public double? Ratio { get; set; }',
+          'public bool? Enabled { get; set; }',
+        ],
+        forbidden: ['public object? Kind', 'public object? Version', 'public object? Enabled'],
+      },
+      {
+        language: 'dart' as const,
+        generator: new DartGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final String? kind;',
+          'final int? version;',
+          'final double? ratio;',
+          'final bool? enabled;',
+        ],
+        forbidden: ['final dynamic kind;', 'final dynamic version;', 'final dynamic enabled;'],
+      },
+      {
+        language: 'flutter' as const,
+        generator: new FlutterGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final String? kind;',
+          'final int? version;',
+          'final double? ratio;',
+          'final bool? enabled;',
+        ],
+        forbidden: ['final dynamic kind;', 'final dynamic version;', 'final dynamic enabled;'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/models/const_envelope.rs',
+        expected: [
+          'pub kind: String,',
+          'pub version: i64,',
+          'pub ratio: Option<f64>,',
+          'pub enabled: bool,',
+        ],
+        forbidden: [
+          'pub kind: serde_json::Value',
+          'pub version: serde_json::Value',
+          'pub enabled: serde_json::Value',
+        ],
+      },
+      {
+        language: 'php' as const,
+        generator: new PhpGenerator(),
+        filePath: 'src/Models/ConstEnvelope.php',
+        expected: [
+          'public ?string $kind = null;',
+          'public ?int $version = null;',
+          'public ?float $ratio = null;',
+          'public ?bool $enabled = null;',
+        ],
+        forbidden: ['public mixed $kind', 'public mixed $version', 'public mixed $enabled'],
+      },
+      {
+        language: 'ruby' as const,
+        generator: new RubyGenerator(),
+        filePath: 'lib/sdkwork/backend_sdk/models/const_envelope.rb',
+        expected: [
+          "attr_accessor :kind, :version, :ratio, :enabled, :missing",
+          "@kind = attributes['kind']",
+          "@version = attributes['version']",
+          "@enabled = attributes['enabled']",
+        ],
+        forbidden: [],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        openApi31ConstSpec
+      );
+      const modelFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(modelFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(modelFile.content, `${testCase.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
   it('should escape python keyword property names', async () => {
     const generator = new PythonGenerator();
     const result = await generator.generate(
@@ -1849,9 +3155,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tsApi).toBeDefined();
     expect(tsApi!.content).toContain('class_: string | number');
     expect(tsApi!.content).toContain('userId: string | number');
-    expect(tsApi!.content).toContain('headers_: string | number');
-    expect(tsApi!.content).toContain('headers?: Record<string, string>');
-    expect(tsApi!.content).toContain('/keyword-model/${class_}/${userId}/${headers_}');
+    expect(tsApi!.content).toContain('headers: string | number');
+    expect(tsApi!.content).toContain('xTraceId?: string');
+    expect(tsApi!.content).not.toContain('headers?: Record<string, string>');
+    expect(tsApi!.content).toContain('/keyword-model/${class_}/${userId}/${headers}');
 
     const pyGenerator = new PythonGenerator();
     const pyResult = await pyGenerator.generate({ ...baseConfig, language: 'python' }, pathParameterIdentifierSpec);
@@ -1862,9 +3169,821 @@ describe('OpenAPI Security And Compliance', () => {
     expect(pyApi).toBeDefined();
     expect(pyApi!.content).toContain('class_: str');
     expect(pyApi!.content).toContain('user_id: str');
-    expect(pyApi!.content).toContain('headers_: str');
-    expect(pyApi!.content).toContain('headers: Optional[Dict[str, str]] = None');
-    expect(pyApi!.content).toContain('f"/api/v1/keyword-model/{class_}/{user_id}/{headers_}"');
+    expect(pyApi!.content).toContain('headers: str');
+    expect(pyApi!.content).toContain('x_trace_id: Optional[str] = None');
+    expect(pyApi!.content).not.toContain('headers: Optional[Dict[str, str]] = None');
+    expect(pyApi!.content).toContain('f"/api/v1/keyword-model/{class_}/{user_id}/{headers}"');
+  });
+
+  it('should generate named TypeScript header and cookie parameters with Cookie header assembly', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, headerCookieParameterSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/resource.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('async listResources(xTraceId: string, sessionId?: string): Promise<void>');
+    expect(apiFile!.content).toContain("const requestHeaders = buildRequestHeaders(");
+    expect(apiFile!.content).toContain("'X-Trace-Id': xTraceId");
+    expect(apiFile!.content).toContain("session_id: sessionId");
+    expect(apiFile!.content).toContain('this.client.get<void>(backendApiPath(`/resources`), undefined, requestHeaders)');
+    expect(apiFile!.content).not.toContain('headers?: Record<string, string>');
+  });
+
+  it('should generate TypeScript OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
+    const parameterSerializationSpec: ApiSpec = {
+      openapi: '3.1.1',
+      info: { title: 'Parameter Serialization API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'searchResources',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'tag',
+                in: 'query',
+                required: true,
+                style: 'form',
+                explode: true,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+              {
+                name: 'filter',
+                in: 'query',
+                required: false,
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string' },
+                    owner: { type: 'string' },
+                  },
+                },
+              },
+              {
+                name: 'range',
+                in: 'query',
+                required: false,
+                style: 'form',
+                explode: false,
+                schema: {
+                  type: 'object',
+                  additionalProperties: { type: 'integer' },
+                },
+              },
+              {
+                name: 'json_filter',
+                in: 'query',
+                required: false,
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        state: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+                schema: { type: 'string' },
+              },
+              {
+                name: 'q',
+                in: 'query',
+                required: false,
+                allowReserved: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, parameterSerializationSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/resource.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain(
+      'async searchResources(tag: string[], filter?: Record<string, unknown>, range?: Record<string, number>, jsonFilter?: Record<string, unknown>, q?: string): Promise<void>'
+    );
+    expect(apiFile!.content).toContain('const query = buildQueryString([');
+    expect(apiFile!.content).toContain("name: 'tag'");
+    expect(apiFile!.content).toContain("style: 'form'");
+    expect(apiFile!.content).toContain('explode: true');
+    expect(apiFile!.content).toContain("name: 'filter'");
+    expect(apiFile!.content).toContain("style: 'deepObject'");
+    expect(apiFile!.content).toContain("contentType: 'application/json'");
+    expect(apiFile!.content).toContain('allowReserved: true');
+    expect(apiFile!.content).toContain('appendQueryString(backendApiPath(`/resources`), query)');
+    expect(apiFile!.content).not.toContain('params?: QueryParams');
+    expect(apiFile!.content).not.toContain('captured.params');
+  });
+
+  it('should generate Python OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
+    const parameterSerializationSpec: ApiSpec = {
+      openapi: '3.1.1',
+      info: { title: 'Python Parameter Serialization API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'searchResources',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'tag',
+                in: 'query',
+                required: true,
+                style: 'form',
+                explode: true,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+              {
+                name: 'filter',
+                in: 'query',
+                required: false,
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string' },
+                    owner: { type: 'string' },
+                  },
+                },
+              },
+              {
+                name: 'range',
+                in: 'query',
+                required: false,
+                style: 'form',
+                explode: false,
+                schema: {
+                  type: 'object',
+                  additionalProperties: { type: 'integer' },
+                },
+              },
+              {
+                name: 'json_filter',
+                in: 'query',
+                required: false,
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        state: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+                schema: { type: 'string' },
+              },
+              {
+                name: 'q',
+                in: 'query',
+                required: false,
+                allowReserved: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new PythonGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'python' }, parameterSerializationSpec);
+    const apiFile = result.files.find((file) => file.path === 'sdkwork_backend_sdk/api/resource.py');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain(
+      'def search_resources(self, tag: List[str], filter: Optional[Dict[str, Any]] = None, range: Optional[Dict[str, int]] = None, json_filter: Optional[Dict[str, Any]] = None, q: Optional[str] = None) -> None:'
+    );
+    expect(apiFile!.content).toContain('query = build_query_string([');
+    expect(apiFile!.content).toContain("'name': 'tag'");
+    expect(apiFile!.content).toContain("'style': 'form'");
+    expect(apiFile!.content).toContain("'explode': True");
+    expect(apiFile!.content).toContain("'name': 'filter'");
+    expect(apiFile!.content).toContain("'style': 'deepObject'");
+    expect(apiFile!.content).toContain("'content_type': 'application/json'");
+    expect(apiFile!.content).toContain("'allow_reserved': True");
+    expect(apiFile!.content).toContain('_append_query_string(f"/api/v1/resources", query)');
+    expect(apiFile!.content).not.toContain('params: Optional[Dict[str, Any]] = None');
+  });
+
+  it('should generate Go OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
+    const parameterSerializationSpec: ApiSpec = {
+      openapi: '3.1.1',
+      info: { title: 'Go Parameter Serialization API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'searchResources',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'tag',
+                in: 'query',
+                required: true,
+                style: 'form',
+                explode: true,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+              {
+                name: 'filter',
+                in: 'query',
+                required: false,
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    status: { type: 'string' },
+                    owner: { type: 'string' },
+                  },
+                },
+              },
+              {
+                name: 'range',
+                in: 'query',
+                required: false,
+                style: 'form',
+                explode: false,
+                schema: {
+                  type: 'object',
+                  additionalProperties: { type: 'integer' },
+                },
+              },
+              {
+                name: 'json_filter',
+                in: 'query',
+                required: false,
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        state: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+                schema: { type: 'string' },
+              },
+              {
+                name: 'q',
+                in: 'query',
+                required: false,
+                allowReserved: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new GoGenerator();
+    const result = await generator.generate({ ...baseConfig, language: 'go' }, parameterSerializationSpec);
+    const apiFile = result.files.find((file) => file.path === 'api/resource.go');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain(
+      'func (a *ResourceApi) SearchResources(tag []string, filter *map[string]interface{}, range_ *map[string]int, jsonFilter *map[string]interface{}, q *string) (struct{}, error)'
+    );
+    expect(apiFile!.content).toContain('query := BuildQueryString([]QueryParameterSpec{');
+    expect(apiFile!.content).toContain('Name: "tag"');
+    expect(apiFile!.content).toContain('Style: "form"');
+    expect(apiFile!.content).toContain('Explode: true');
+    expect(apiFile!.content).toContain('Name: "filter"');
+    expect(apiFile!.content).toContain('Style: "deepObject"');
+    expect(apiFile!.content).toContain('ContentType: "application/json"');
+    expect(apiFile!.content).toContain('AllowReserved: true');
+    expect(apiFile!.content).toContain('AppendQueryString(BackendApiPath("/resources"), query)');
+    expect(apiFile!.content).not.toContain('query map[string]interface{}');
+  });
+
+  it('should generate JVM OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
+    const parameterSerializationSpec: ApiSpec = {
+      openapi: '3.1.1',
+      info: { title: 'JVM Parameter Serialization API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'searchResources',
+            tags: ['Resource'],
+            parameters: [
+              { name: 'tag', in: 'query', required: true, style: 'form', explode: true, schema: { type: 'array', items: { type: 'string' } } },
+              { name: 'filter', in: 'query', required: false, style: 'deepObject', explode: true, schema: { type: 'object', properties: { status: { type: 'string' } } } },
+              { name: 'range', in: 'query', required: false, style: 'form', explode: false, schema: { type: 'object', additionalProperties: { type: 'integer' } } },
+              { name: 'json_filter', in: 'query', required: false, content: { 'application/json': { schema: { type: 'object', properties: { state: { type: 'string' } } } } }, schema: { type: 'string' } },
+              { name: 'q', in: 'query', required: false, allowReserved: true, schema: { type: 'string' } },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const javaResult = await new JavaGenerator().generate({ ...baseConfig, language: 'java' }, parameterSerializationSpec);
+    const javaApi = javaResult.files.find((file) => file.path === 'src/main/java/com/sdkwork/backend/api/ResourceApi.java');
+
+    expect(javaResult.errors).toEqual([]);
+    expect(javaApi).toBeDefined();
+    expect(javaApi!.content).toContain(
+      'public Void searchResources(List<String> tag, Map<String, Object> filter, Map<String, Integer> range, Map<String, Object> jsonFilter, String q) throws Exception'
+    );
+    expect(javaApi!.content).toContain('String query = buildQueryString(List.of(');
+    expect(javaApi!.content).toContain('new QueryParameterSpec("tag", tag, "form", true, false, null)');
+    expect(javaApi!.content).toContain('new QueryParameterSpec("filter", filter, "deepObject", true, false, null)');
+    expect(javaApi!.content).toContain('new QueryParameterSpec("json_filter", jsonFilter, "form", true, false, "application/json")');
+    expect(javaApi!.content).toContain('new QueryParameterSpec("q", q, "form", true, true, null)');
+    expect(javaApi!.content).toContain('ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), query)');
+    expect(javaApi!.content).not.toContain('Map<String, Object> params');
+
+    const kotlinResult = await new KotlinGenerator().generate({ ...baseConfig, language: 'kotlin' }, parameterSerializationSpec);
+    const kotlinApi = kotlinResult.files.find((file) => file.path === 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt');
+
+    expect(kotlinResult.errors).toEqual([]);
+    expect(kotlinApi).toBeDefined();
+    expect(kotlinApi!.content).toContain(
+      'suspend fun searchResources(tag: List<String>, filter: Map<String, Any>? = null, range: Map<String, Int>? = null, jsonFilter: Map<String, Any>? = null, q: String? = null): Unit'
+    );
+    expect(kotlinApi!.content).toContain('val query = buildQueryString(listOf(');
+    expect(kotlinApi!.content).toContain('QueryParameterSpec("tag", tag, "form", true, false, null)');
+    expect(kotlinApi!.content).toContain('QueryParameterSpec("filter", filter, "deepObject", true, false, null)');
+    expect(kotlinApi!.content).toContain('QueryParameterSpec("json_filter", jsonFilter, "form", true, false, "application/json")');
+    expect(kotlinApi!.content).toContain('QueryParameterSpec("q", q, "form", true, true, null)');
+    expect(kotlinApi!.content).toContain('private val queryObjectMapper = ObjectMapper().registerKotlinModule()');
+    expect(kotlinApi!.content).toContain('val json = queryObjectMapper.writeValueAsString(value)');
+    expect(kotlinApi!.content).toContain('encodeQueryValue(json, parameter.allowReserved)');
+    expect(kotlinApi!.content).toContain('ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), query)');
+    expect(kotlinApi!.content).not.toContain('params: Map<String, Any>? = null');
+  });
+
+  it('should generate Dart and Flutter OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
+    const parameterSerializationSpec: ApiSpec = {
+      openapi: '3.1.1',
+      info: { title: 'Dart Parameter Serialization API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'searchResources',
+            tags: ['Resource'],
+            parameters: [
+              { name: 'tag', in: 'query', required: true, style: 'form', explode: true, schema: { type: 'array', items: { type: 'string' } } },
+              { name: 'filter', in: 'query', required: false, style: 'deepObject', explode: true, schema: { type: 'object', properties: { status: { type: 'string' } } } },
+              { name: 'range', in: 'query', required: false, style: 'form', explode: false, schema: { type: 'object', additionalProperties: { type: 'integer' } } },
+              { name: 'json_filter', in: 'query', required: false, content: { 'application/json': { schema: { type: 'object', properties: { state: { type: 'string' } } } } }, schema: { type: 'string' } },
+              { name: 'q', in: 'query', required: false, allowReserved: true, schema: { type: 'string' } },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const cases = [
+      {
+        language: 'dart',
+        result: await new DartGenerator().generate({ ...baseConfig, language: 'dart' }, parameterSerializationSpec),
+      },
+      {
+        language: 'flutter',
+        result: await new FlutterGenerator().generate({ ...baseConfig, language: 'flutter' }, parameterSerializationSpec),
+      },
+    ];
+
+    for (const testCase of cases) {
+      const apiFile = testCase.result.files.find((file) => file.path === 'lib/src/api/resource.dart');
+
+      expect(testCase.result.errors, testCase.language).toEqual([]);
+      expect(apiFile, testCase.language).toBeDefined();
+      expect(apiFile!.content, testCase.language).toContain("import 'dart:convert';");
+      expect(apiFile!.content, testCase.language).toContain(
+        'Future<void> searchResources(List<String> tag, [Map<String, dynamic>? filter, Map<String, int>? range, Map<String, dynamic>? jsonFilter, String? q]) async {'
+      );
+      expect(apiFile!.content, testCase.language).toContain('final query = buildQueryString([');
+      expect(apiFile!.content, testCase.language).toContain("QueryParameterSpec('tag', tag, 'form', true, false, null)");
+      expect(apiFile!.content, testCase.language).toContain("QueryParameterSpec('filter', filter, 'deepObject', true, false, null)");
+      expect(apiFile!.content, testCase.language).toContain("QueryParameterSpec('json_filter', jsonFilter, 'form', true, false, 'application/json')");
+      expect(apiFile!.content, testCase.language).toContain("QueryParameterSpec('q', q, 'form', true, true, null)");
+      expect(apiFile!.content, testCase.language).toContain("ApiPaths.appendQueryString(ApiPaths.backendPath('/resources'), query)");
+      expect(apiFile!.content, testCase.language).not.toContain('Map<String, dynamic>? params');
+      expect(apiFile!.content, testCase.language).not.toContain('params: params');
+    }
+  });
+
+  it('should generate Swift C# Rust PHP and Ruby OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
+    const parameterSerializationSpec: ApiSpec = {
+      openapi: '3.1.1',
+      info: { title: 'Native Parameter Serialization API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'searchResources',
+            tags: ['Resource'],
+            parameters: [
+              { name: 'tag', in: 'query', required: true, style: 'form', explode: true, schema: { type: 'array', items: { type: 'string' } } },
+              { name: 'filter', in: 'query', required: false, style: 'deepObject', explode: true, schema: { type: 'object', properties: { status: { type: 'string' } } } },
+              { name: 'range', in: 'query', required: false, style: 'form', explode: false, schema: { type: 'object', additionalProperties: { type: 'integer' } } },
+              { name: 'json_filter', in: 'query', required: false, content: { 'application/json': { schema: { type: 'object', properties: { state: { type: 'string' } } } } }, schema: { type: 'string' } },
+              { name: 'q', in: 'query', required: false, allowReserved: true, schema: { type: 'string' } },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const swiftResult = await new SwiftGenerator().generate({ ...baseConfig, language: 'swift' }, parameterSerializationSpec);
+    const swiftApi = swiftResult.files.find((file) => file.path === 'Sources/API/ResourceApi.swift');
+    expect(swiftResult.errors).toEqual([]);
+    expect(swiftApi).toBeDefined();
+    expect(swiftApi!.content).toContain('public func searchResources(tag: [String], filter: [String: Any]? = nil, range: [String: Int]? = nil, jsonFilter: [String: Any]? = nil, q: String? = nil) async throws -> Void');
+    expect(swiftApi!.content).toContain('let query = buildQueryString([');
+    expect(swiftApi!.content).toContain('QueryParameterSpec(name: "tag", value: tag, style: "form", explode: true, allowReserved: false, contentType: nil)');
+    expect(swiftApi!.content).toContain('QueryParameterSpec(name: "filter", value: filter, style: "deepObject", explode: true, allowReserved: false, contentType: nil)');
+    expect(swiftApi!.content).toContain('QueryParameterSpec(name: "json_filter", value: jsonFilter, style: "form", explode: true, allowReserved: false, contentType: "application/json")');
+    expect(swiftApi!.content).toContain('QueryParameterSpec(name: "q", value: q, style: "form", explode: true, allowReserved: true, contentType: nil)');
+    expect(swiftApi!.content).toContain('ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), query)');
+    expect(swiftApi!.content).not.toContain('params: [String: Any]? = nil');
+
+    const csharpResult = await new CSharpGenerator().generate({ ...baseConfig, language: 'csharp' }, parameterSerializationSpec);
+    const csharpApi = csharpResult.files.find((file) => file.path === 'Api/ResourceApi.cs');
+    expect(csharpResult.errors).toEqual([]);
+    expect(csharpApi).toBeDefined();
+    expect(csharpApi!.content).toContain('public async Task SearchResourcesAsync(List<string> tag, Dictionary<string, object>? filter = null, Dictionary<string, int>? range = null, Dictionary<string, object>? jsonFilter = null, string? q = null)');
+    expect(csharpApi!.content).toContain('var queryString = BuildQueryString(new[]');
+    expect(csharpApi!.content).toContain('new QueryParameterSpec("tag", tag, "form", true, false, null)');
+    expect(csharpApi!.content).toContain('new QueryParameterSpec("filter", filter, "deepObject", true, false, null)');
+    expect(csharpApi!.content).toContain('new QueryParameterSpec("json_filter", jsonFilter, "form", true, false, "application/json")');
+    expect(csharpApi!.content).toContain('new QueryParameterSpec("q", q, "form", true, true, null)');
+    expect(csharpApi!.content).toContain('ApiPaths.AppendQueryString(ApiPaths.BackendPath("/resources"), queryString)');
+    expect(csharpApi!.content).not.toContain('Dictionary<string, object>? query = null');
+
+    const rustResult = await new RustGenerator().generate({ ...baseConfig, language: 'rust' }, parameterSerializationSpec);
+    const rustApi = rustResult.files.find((file) => file.path === 'src/api/resource.rs');
+    expect(rustResult.errors).toEqual([]);
+    expect(rustApi).toBeDefined();
+    expect(rustApi!.content).toContain('pub async fn search_resources(&self, tag: &[String], filter: Option<&serde_json::Value>, range: Option<&std::collections::HashMap<String, i64>>, json_filter: Option<&serde_json::Value>, q: Option<&str>) -> Result<(), SdkworkError>');
+    expect(rustApi!.content).toContain('let query = build_query_string(&[');
+    expect(rustApi!.content).toContain('QueryParameterSpec::new("tag", tag, "form", true, false, None)');
+    expect(rustApi!.content).toContain('QueryParameterSpec::new("filter", filter, "deepObject", true, false, None)');
+    expect(rustApi!.content).toContain('QueryParameterSpec::new("json_filter", json_filter, "form", true, false, Some("application/json"))');
+    expect(rustApi!.content).toContain('QueryParameterSpec::new("q", q, "form", true, true, None)');
+    expect(rustApi!.content).toContain('append_query_string(backend_path(&"/resources".to_string()), &query)');
+    expect(rustApi!.content).not.toContain('query: Option<&QueryParams>');
+
+    const phpResult = await new PhpGenerator().generate({ ...baseConfig, language: 'php' }, parameterSerializationSpec);
+    const phpApi = phpResult.files.find((file) => file.path === 'src/Api/Resource.php');
+    expect(phpResult.errors).toEqual([]);
+    expect(phpApi).toBeDefined();
+    expect(phpApi!.content).toContain('public function searchResources(array $tag, ?array $filter = null, ?array $range = null, ?array $jsonFilter = null, ?string $q = null): void');
+    expect(phpApi!.content).toContain('$query = $this->buildQueryString([');
+    expect(phpApi!.content).toContain("new QueryParameterSpec('tag', $tag, 'form', true, false, null)");
+    expect(phpApi!.content).toContain("new QueryParameterSpec('filter', $filter, 'deepObject', true, false, null)");
+    expect(phpApi!.content).toContain("new QueryParameterSpec('json_filter', $jsonFilter, 'form', true, false, 'application/json')");
+    expect(phpApi!.content).toContain("new QueryParameterSpec('q', $q, 'form', true, true, null)");
+    expect(phpApi!.content).toContain('$path = $this->appendQueryString($path, $query);');
+    expect(phpApi!.content).not.toContain('array $params = []');
+
+    const rubyResult = await new RubyGenerator().generate({ ...baseConfig, language: 'ruby' }, parameterSerializationSpec);
+    const rubyApi = rubyResult.files.find((file) => file.path === 'lib/sdkwork/backend_sdk/api/resource.rb');
+    expect(rubyResult.errors).toEqual([]);
+    expect(rubyApi).toBeDefined();
+    expect(rubyApi!.content).toContain('def search_resources(tag, filter: nil, range: nil, json_filter: nil, q: nil)');
+    expect(rubyApi!.content).toContain('query = build_query_string([');
+    expect(rubyApi!.content).toContain("QueryParameterSpec.new('tag', tag, 'form', true, false, nil)");
+    expect(rubyApi!.content).toContain("QueryParameterSpec.new('filter', filter, 'deepObject', true, false, nil)");
+    expect(rubyApi!.content).toContain("QueryParameterSpec.new('json_filter', json_filter, 'form', true, false, 'application/json')");
+    expect(rubyApi!.content).toContain("QueryParameterSpec.new('q', q, 'form', true, true, nil)");
+    expect(rubyApi!.content).toContain('path = append_query_string(path, query)');
+    expect(rubyApi!.content).not.toContain('params: {}');
+  });
+
+  it('should generate named OpenAPI query parameters for simple primitive query schemas across SDK languages', async () => {
+    const simpleQuerySpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Simple Query Parameter API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'listResources',
+            tags: ['Resource'],
+            parameters: [
+              { name: 'page', in: 'query', required: true, schema: { type: 'integer' } },
+              { name: 'limit', in: 'query', required: false, schema: { type: 'integer' } },
+              { name: 'sort', in: 'query', required: false, schema: { type: 'string' } },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const tsResult = await new TypeScriptGenerator().generate(baseConfig, simpleQuerySpec);
+    const tsApi = getGeneratedFile(tsResult.files, 'src/api/resource.ts');
+    expect(tsResult.errors).toEqual([]);
+    expect(tsApi.content).toContain('async listResources(page: number, limit?: number, sort?: string): Promise<void>');
+    expect(tsApi.content).toContain('const query = buildQueryString([');
+    expect(tsApi.content).toContain("{ name: 'page', value: page, style: 'form', explode: true, allowReserved: false },");
+    expect(tsApi.content).toContain('appendQueryString(backendApiPath(`/resources`), query)');
+    expect(tsApi.content).not.toContain('params?: QueryParams');
+
+    const pythonResult = await new PythonGenerator().generate({ ...baseConfig, language: 'python' }, simpleQuerySpec);
+    const pythonApi = getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/api/resource.py');
+    expect(pythonResult.errors).toEqual([]);
+    expect(pythonApi.content).toContain('def list_resources(self, page: int, limit: Optional[int] = None, sort: Optional[str] = None) -> None:');
+    expect(pythonApi.content).toContain('query = build_query_string([');
+    expect(pythonApi.content).toContain("{'name': 'page', 'value': page, 'style': 'form', 'explode': True, 'allow_reserved': False},");
+    expect(pythonApi.content).toContain('_append_query_string(f"/api/v1/resources", query)');
+    expect(pythonApi.content).not.toContain('params: Optional[Dict[str, Any]] = None');
+
+    const goResult = await new GoGenerator().generate({ ...baseConfig, language: 'go' }, simpleQuerySpec);
+    const goApi = getGeneratedFile(goResult.files, 'api/resource.go');
+    expect(goResult.errors).toEqual([]);
+    expect(goApi.content).toContain('func (a *ResourceApi) ListResources(page int, limit *int, sort *string) (struct{}, error)');
+    expect(goApi.content).toContain('query := BuildQueryString([]QueryParameterSpec{');
+    expect(goApi.content).toContain('{Name: "page", Value: page, Style: "form", Explode: true, AllowReserved: false}');
+    expect(goApi.content).toContain('AppendQueryString(BackendApiPath("/resources"), query)');
+    expect(goApi.content).not.toContain('query map[string]interface{}');
+
+    const javaResult = await new JavaGenerator().generate({ ...baseConfig, language: 'java' }, simpleQuerySpec);
+    const javaApi = getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/api/ResourceApi.java');
+    expect(javaResult.errors).toEqual([]);
+    expect(javaApi.content).toContain('public Void listResources(Integer page, Integer limit, String sort) throws Exception');
+    expect(javaApi.content).toContain('String query = buildQueryString(List.of(');
+    expect(javaApi.content).toContain('new QueryParameterSpec("page", page, "form", true, false, null)');
+    expect(javaApi.content).toContain('ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), query)');
+    expect(javaApi.content).not.toContain('Map<String, Object> params');
+
+    const kotlinResult = await new KotlinGenerator().generate({ ...baseConfig, language: 'kotlin' }, simpleQuerySpec);
+    const kotlinApi = getGeneratedFile(kotlinResult.files, 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt');
+    expect(kotlinResult.errors).toEqual([]);
+    expect(kotlinApi.content).toContain('suspend fun listResources(page: Int, limit: Int? = null, sort: String? = null): Unit');
+    expect(kotlinApi.content).toContain('val query = buildQueryString(listOf(');
+    expect(kotlinApi.content).toContain('QueryParameterSpec("page", page, "form", true, false, null)');
+    expect(kotlinApi.content).toContain('ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), query)');
+    expect(kotlinApi.content).not.toContain('params: Map<String, Any>? = null');
+
+    const dartCases = [
+      {
+        language: 'dart',
+        result: await new DartGenerator().generate({ ...baseConfig, language: 'dart' }, simpleQuerySpec),
+      },
+      {
+        language: 'flutter',
+        result: await new FlutterGenerator().generate({ ...baseConfig, language: 'flutter' }, simpleQuerySpec),
+      },
+    ];
+    for (const testCase of dartCases) {
+      const apiFile = getGeneratedFile(testCase.result.files, 'lib/src/api/resource.dart');
+      expect(testCase.result.errors, testCase.language).toEqual([]);
+      expect(apiFile.content, testCase.language).toContain('Future<void> listResources(int page, [int? limit, String? sort]) async {');
+      expect(apiFile.content, testCase.language).toContain('final query = buildQueryString([');
+      expect(apiFile.content, testCase.language).toContain("QueryParameterSpec('page', page, 'form', true, false, null)");
+      expect(apiFile.content, testCase.language).toContain("ApiPaths.appendQueryString(ApiPaths.backendPath('/resources'), query)");
+      expect(apiFile.content, testCase.language).not.toContain('Map<String, dynamic>? params');
+    }
+
+    const swiftResult = await new SwiftGenerator().generate({ ...baseConfig, language: 'swift' }, simpleQuerySpec);
+    const swiftApi = getGeneratedFile(swiftResult.files, 'Sources/API/ResourceApi.swift');
+    expect(swiftResult.errors).toEqual([]);
+    expect(swiftApi.content).toContain('public func listResources(page: Int, limit: Int? = nil, sort: String? = nil) async throws -> Void');
+    expect(swiftApi.content).toContain('let query = buildQueryString([');
+    expect(swiftApi.content).toContain('QueryParameterSpec(name: "page", value: page, style: "form", explode: true, allowReserved: false, contentType: nil)');
+    expect(swiftApi.content).toContain('ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), query)');
+    expect(swiftApi.content).not.toContain('params: [String: Any]? = nil');
+
+    const csharpResult = await new CSharpGenerator().generate({ ...baseConfig, language: 'csharp' }, simpleQuerySpec);
+    const csharpApi = getGeneratedFile(csharpResult.files, 'Api/ResourceApi.cs');
+    expect(csharpResult.errors).toEqual([]);
+    expect(csharpApi.content).toContain('public async Task ListResourcesAsync(int page, int? limit = null, string? sort = null)');
+    expect(csharpApi.content).toContain('var queryString = BuildQueryString(new[]');
+    expect(csharpApi.content).toContain('new QueryParameterSpec("page", page, "form", true, false, null)');
+    expect(csharpApi.content).toContain('ApiPaths.AppendQueryString(ApiPaths.BackendPath("/resources"), queryString)');
+    expect(csharpApi.content).not.toContain('Dictionary<string, object>? query = null');
+
+    const rustResult = await new RustGenerator().generate({ ...baseConfig, language: 'rust' }, simpleQuerySpec);
+    const rustApi = getGeneratedFile(rustResult.files, 'src/api/resource.rs');
+    expect(rustResult.errors).toEqual([]);
+    expect(rustApi.content).toContain('pub async fn list_resources(&self, page: i64, limit: Option<i64>, sort: Option<&str>) -> Result<(), SdkworkError>');
+    expect(rustApi.content).toContain('let query = build_query_string(&[');
+    expect(rustApi.content).toContain('QueryParameterSpec::new("page", page, "form", true, false, None)');
+    expect(rustApi.content).toContain('append_query_string(backend_path(&"/resources".to_string()), &query)');
+    expect(rustApi.content).not.toContain('query: Option<&QueryParams>');
+
+    const phpResult = await new PhpGenerator().generate({ ...baseConfig, language: 'php' }, simpleQuerySpec);
+    const phpApi = getGeneratedFile(phpResult.files, 'src/Api/Resource.php');
+    expect(phpResult.errors).toEqual([]);
+    expect(phpApi.content).toContain('public function listResources(int $page, ?int $limit = null, ?string $sort = null): void');
+    expect(phpApi.content).toContain('$query = $this->buildQueryString([');
+    expect(phpApi.content).toContain("new QueryParameterSpec('page', $page, 'form', true, false, null)");
+    expect(phpApi.content).toContain('$path = $this->appendQueryString($path, $query);');
+    expect(phpApi.content).not.toContain('array $params = []');
+
+    const rubyResult = await new RubyGenerator().generate({ ...baseConfig, language: 'ruby' }, simpleQuerySpec);
+    const rubyApi = getGeneratedFile(rubyResult.files, 'lib/sdkwork/backend_sdk/api/resource.rb');
+    expect(rubyResult.errors).toEqual([]);
+    expect(rubyApi.content).toContain('def list_resources(page, limit: nil, sort: nil)');
+    expect(rubyApi.content).toContain('query = build_query_string([');
+    expect(rubyApi.content).toContain("QueryParameterSpec.new('page', page, 'form', true, false, nil)");
+    expect(rubyApi.content).toContain('path = append_query_string(path, query)');
+    expect(rubyApi.content).not.toContain('params: {}');
+  });
+
+  it('should generate named header and cookie parameters across SDK languages', async () => {
+    const cases = [
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const },
+        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        expected: [
+          'def list_resources(self, x_trace_id: str, session_id: Optional[str] = None) -> None:',
+          'request_headers = build_request_headers(',
+          "'X-Trace-Id': x_trace_id",
+          "'session_id': session_id",
+          'headers=request_headers',
+        ],
+        forbidden: ['headers: Optional[Dict[str, str]] = None'],
+      },
+      {
+        generator: new DartGenerator(),
+        config: { ...baseConfig, language: 'dart' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expected: [
+          'Future<void> listResources(String xTraceId, [String? sessionId]) async {',
+          'final requestHeaders = buildRequestHeaders(',
+          "'X-Trace-Id': xTraceId",
+          "'session_id': sessionId",
+          'headers: requestHeaders',
+        ],
+        forbidden: ['Map<String, String>? headers'],
+      },
+      {
+        generator: new FlutterGenerator(),
+        config: { ...baseConfig, language: 'flutter' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expected: [
+          'Future<void> listResources(String xTraceId, [String? sessionId]) async {',
+          'final requestHeaders = buildRequestHeaders(',
+          "'X-Trace-Id': xTraceId",
+          "'session_id': sessionId",
+          'headers: requestHeaders',
+        ],
+        forbidden: ['Map<String, String>? headers'],
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const },
+        apiPath: 'api/resource.go',
+        expected: [
+          'func (a *ResourceApi) ListResources(xTraceId string, sessionId *string)',
+          'headers := BuildRequestHeaders(',
+          '"X-Trace-Id": xTraceId',
+          '"session_id": func() interface{} { if sessionId == nil { return nil }; return *sessionId }()',
+          'a.client.Get(BackendApiPath("/resources"), nil, headers)',
+        ],
+        forbidden: ['headers map[string]string'],
+      },
+      {
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const },
+        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        expected: [
+          'public Void listResources(String xTraceId, String sessionId)',
+          'Map<String, String> requestHeaders = buildRequestHeaders(',
+          '"X-Trace-Id", xTraceId',
+          '"session_id", sessionId',
+          'client.get(ApiPaths.backendPath("/resources"), null, requestHeaders)',
+        ],
+        forbidden: ['Map<String, String> headers'],
+      },
+      {
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const },
+        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        expected: [
+          'suspend fun listResources(xTraceId: String, sessionId: String? = null)',
+          'val requestHeaders = buildRequestHeaders(',
+          '"X-Trace-Id" to xTraceId',
+          '"session_id" to sessionId',
+          'client.get(ApiPaths.backendPath("/resources"), null, requestHeaders)',
+        ],
+        forbidden: ['headers: Map<String, String>? = null'],
+      },
+      {
+        generator: new SwiftGenerator(),
+        config: { ...baseConfig, language: 'swift' as const },
+        apiPath: 'Sources/API/ResourceApi.swift',
+        expected: [
+          'public func listResources(xTraceId: String, sessionId: String? = nil) async throws -> Void',
+          'let requestHeaders = buildRequestHeaders(',
+          '"X-Trace-Id": xTraceId',
+          '"session_id": sessionId',
+          'headers: requestHeaders',
+        ],
+        forbidden: ['headers: [String: String]? = nil'],
+      },
+      {
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const },
+        apiPath: 'Api/ResourceApi.cs',
+        expected: [
+          'public async Task ListResourcesAsync(string xTraceId, string? sessionId = null)',
+          'var requestHeaders = BuildRequestHeaders(',
+          '["X-Trace-Id"] = xTraceId',
+          '["session_id"] = sessionId',
+          '_client.GetAsync<object>(ApiPaths.BackendPath("/resources"), null, requestHeaders)',
+        ],
+        forbidden: ['Dictionary<string, string>? headers = null'],
+      },
+      {
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const },
+        apiPath: 'src/api/resource.rs',
+        expected: [
+          'pub async fn list_resources(&self, x_trace_id: &str, session_id: Option<&str>) -> Result<(), SdkworkError>',
+          'let headers = build_request_headers(',
+          '("X-Trace-Id", serialize_parameter_value(&x_trace_id))',
+          '("session_id", session_id.as_ref().and_then(serialize_parameter_value))',
+          'self.client.get(&path, None, headers.as_ref()).await',
+        ],
+        forbidden: ['headers: Option<&RequestHeaders>'],
+      },
+      {
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const },
+        apiPath: 'src/Api/Resource.php',
+        expected: [
+          'public function listResources(string $xTraceId, ?string $sessionId = null): void',
+          '$requestHeaders = $this->buildRequestHeaders(',
+          "'X-Trace-Id' => $xTraceId",
+          "'session_id' => $sessionId",
+          "'headers' => $requestHeaders",
+        ],
+        forbidden: ['array $headers = []'],
+      },
+      {
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const },
+        apiPath: 'lib/sdkwork/backend_sdk/api/resource.rb',
+        expected: [
+          'def list_resources(x_trace_id, session_id: nil)',
+          'request_headers = build_request_headers(',
+          "'X-Trace-Id' => x_trace_id",
+          "'session_id' => session_id",
+          'options[:headers] = request_headers unless request_headers.empty?',
+        ],
+        forbidden: ['headers: {}'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, headerCookieParameterSpec);
+      const apiFile = result.files.find((file) => file.path === testCase.apiPath);
+
+      expect(result.errors, testCase.config.language).toEqual([]);
+      expect(apiFile, testCase.config.language).toBeDefined();
+      for (const expected of testCase.expected) {
+        expect(apiFile!.content, `${testCase.config.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(apiFile!.content, `${testCase.config.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should serialize Rust scalar header and cookie parameters instead of requiring string references', async () => {
+    const result = await new RustGenerator().generate({ ...baseConfig, language: 'rust' }, scalarHeaderCookieParameterSpec);
+    const rustApi = getGeneratedFile(result.files, 'src/api/resource.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(rustApi.content).toContain('pub async fn list_resources(&self, x_retry_count: i64, debug_mode: Option<bool>) -> Result<(), SdkworkError>');
+    expect(rustApi.content).toContain('("X-Retry-Count", serialize_parameter_value(&x_retry_count))');
+    expect(rustApi.content).toContain('("debug_mode", debug_mode.as_ref().and_then(serialize_parameter_value))');
+    expect(rustApi.content).toContain('fn build_request_headers(headers: &[(&str, Option<String>)], cookies: &[(&str, Option<String>)])');
+    expect(rustApi.content).toContain('fn serialize_parameter_value<T: serde::Serialize>(value: &T) -> Option<String>');
+    expect(rustApi.content).not.toContain('x_retry_count: &str');
+    expect(rustApi.content).not.toContain('debug_mode: Option<&str>');
   });
 
   it('should sanitize unsafe path parameters in go java kotlin swift and csharp apis', async () => {
@@ -1878,7 +3997,8 @@ describe('OpenAPI Security And Compliance', () => {
     expect(goApi!.content).toContain('class string');
     expect(goApi!.content).toContain('userId string');
     expect(goApi!.content).toContain('headers_ string');
-    expect(goApi!.content).toContain('headers map[string]string');
+    expect(goApi!.content).toContain('xTraceId *string');
+    expect(goApi!.content).not.toContain('headers map[string]string');
     expect(goApi!.content).toContain('fmt.Sprintf("/keyword-model/%s/%s/%s", class, userId, headers_)');
 
     const javaGenerator = new JavaGenerator();
@@ -1888,9 +4008,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(javaApi).toBeDefined();
     expect(javaApi!.content).toContain('String class_');
     expect(javaApi!.content).toContain('String userId');
-    expect(javaApi!.content).toContain('String headers_');
-    expect(javaApi!.content).toContain('Map<String, String> headers');
-    expect(javaApi!.content).toContain('/keyword-model/" + class_ + "/" + userId + "/" + headers_ + "');
+    expect(javaApi!.content).toContain('String headers');
+    expect(javaApi!.content).toContain('String xTraceId');
+    expect(javaApi!.content).not.toContain('Map<String, String> headers');
+    expect(javaApi!.content).toContain('/keyword-model/" + class_ + "/" + userId + "/" + headers + "');
 
     const kotlinGenerator = new KotlinGenerator();
     const kotlinResult = await kotlinGenerator.generate(
@@ -1902,9 +4023,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(kotlinApi).toBeDefined();
     expect(kotlinApi!.content).toContain('class_: String');
     expect(kotlinApi!.content).toContain('userId: String');
-    expect(kotlinApi!.content).toContain('headers_: String');
-    expect(kotlinApi!.content).toContain('headers: Map<String, String>? = null');
-    expect(kotlinApi!.content).toContain('"/keyword-model/$class_/$userId/$headers_"');
+    expect(kotlinApi!.content).toContain('headers: String');
+    expect(kotlinApi!.content).toContain('xTraceId: String? = null');
+    expect(kotlinApi!.content).not.toContain('headers: Map<String, String>? = null');
+    expect(kotlinApi!.content).toContain('"/keyword-model/$class_/$userId/$headers"');
 
     const swiftGenerator = new SwiftGenerator();
     const swiftResult = await swiftGenerator.generate(
@@ -1916,9 +4038,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(swiftApi).toBeDefined();
     expect(swiftApi!.content).toContain('class_: String');
     expect(swiftApi!.content).toContain('userId: String');
-    expect(swiftApi!.content).toContain('headers_: String');
-    expect(swiftApi!.content).toContain('headers: [String: String]? = nil');
-    expect(swiftApi!.content).toContain('"/keyword-model/\\(class_)/\\(userId)/\\(headers_)"');
+    expect(swiftApi!.content).toContain('headers: String');
+    expect(swiftApi!.content).toContain('xTraceId: String? = nil');
+    expect(swiftApi!.content).not.toContain('headers: [String: String]? = nil');
+    expect(swiftApi!.content).toContain('"/keyword-model/\\(class_)/\\(userId)/\\(headers)"');
 
     const csharpGenerator = new CSharpGenerator();
     const csharpResult = await csharpGenerator.generate(
@@ -1930,9 +4053,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(csharpApi).toBeDefined();
     expect(csharpApi!.content).toContain('string class_');
     expect(csharpApi!.content).toContain('string userId');
-    expect(csharpApi!.content).toContain('string headers_');
-    expect(csharpApi!.content).toContain('Dictionary<string, string>? headers = null');
-    expect(csharpApi!.content).toContain('$"/keyword-model/{class_}/{userId}/{headers_}"');
+    expect(csharpApi!.content).toContain('string headers');
+    expect(csharpApi!.content).toContain('string? xTraceId = null');
+    expect(csharpApi!.content).not.toContain('Dictionary<string, string>? headers = null');
+    expect(csharpApi!.content).toContain('$"/keyword-model/{class_}/{userId}/{headers}"');
   });
 
   it('should sanitize unsafe path parameters in php ruby dart and flutter apis', async () => {
@@ -1945,11 +4069,12 @@ describe('OpenAPI Security And Compliance', () => {
     expect(phpApi).toBeDefined();
     expect(phpApi!.content).toContain('string $class_');
     expect(phpApi!.content).toContain('string $userId');
-    expect(phpApi!.content).toContain('string $headers_');
-    expect(phpApi!.content).toContain('array $headers = []');
+    expect(phpApi!.content).toContain('string $headers');
+    expect(phpApi!.content).toContain('?string $xTraceId = null');
+    expect(phpApi!.content).not.toContain('array $headers = []');
     expect(phpApi!.content).toContain("'class' => $class_");
     expect(phpApi!.content).toContain("'user-id' => $userId");
-    expect(phpApi!.content).toContain("'headers' => $headers_");
+    expect(phpApi!.content).toContain("'headers' => $headers");
 
     const rubyGenerator = new RubyGenerator();
     const rubyResult = await rubyGenerator.generate({ ...baseConfig, language: 'ruby' }, pathParameterIdentifierSpec);
@@ -1958,8 +4083,8 @@ describe('OpenAPI Security And Compliance', () => {
     );
 
     expect(rubyApi).toBeDefined();
-    expect(rubyApi!.content).toContain('def get_keyword_model_by_path(class_, user_id, headers_, headers: {})');
-    expect(rubyApi!.content).toContain("class: class_, 'user-id': user_id, headers: headers_");
+    expect(rubyApi!.content).toContain('def get_keyword_model_by_path(class_, user_id, headers, x_trace_id: nil)');
+    expect(rubyApi!.content).toContain("class: class_, 'user-id': user_id, headers: headers");
 
     const dartGenerator = new DartGenerator();
     const dartResult = await dartGenerator.generate({ ...baseConfig, language: 'dart' } as any, pathParameterIdentifierSpec);
@@ -1970,9 +4095,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(dartApi).toBeDefined();
     expect(dartApi!.content).toContain('String class_');
     expect(dartApi!.content).toContain('String userId');
-    expect(dartApi!.content).toContain('String headers_');
-    expect(dartApi!.content).toContain('Map<String, String>? headers');
-    expect(dartApi!.content).toContain("'/keyword-model/$class_/$userId/$headers_'");
+    expect(dartApi!.content).toContain('String headers');
+    expect(dartApi!.content).toContain('String? xTraceId');
+    expect(dartApi!.content).not.toContain('Map<String, String>? headers');
+    expect(dartApi!.content).toContain("'/keyword-model/$class_/$userId/$headers'");
 
     const flutterGenerator = new FlutterGenerator();
     const flutterResult = await flutterGenerator.generate(
@@ -1986,9 +4112,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(flutterApi).toBeDefined();
     expect(flutterApi!.content).toContain('String class_');
     expect(flutterApi!.content).toContain('String userId');
-    expect(flutterApi!.content).toContain('String headers_');
-    expect(flutterApi!.content).toContain('Map<String, String>? headers');
-    expect(flutterApi!.content).toContain("'/keyword-model/$class_/$userId/$headers_'");
+    expect(flutterApi!.content).toContain('String headers');
+    expect(flutterApi!.content).toContain('String? xTraceId');
+    expect(flutterApi!.content).not.toContain('Map<String, String>? headers');
+    expect(flutterApi!.content).toContain("'/keyword-model/$class_/$userId/$headers'");
   });
 
   it('should sanitize unsafe path parameters in rust apis', async () => {
@@ -2002,7 +4129,8 @@ describe('OpenAPI Security And Compliance', () => {
     expect(rustApi!.content).toContain('class: &str');
     expect(rustApi!.content).toContain('user_id: &str');
     expect(rustApi!.content).toContain('headers_: &str');
-    expect(rustApi!.content).toContain('headers: Option<&RequestHeaders>');
+    expect(rustApi!.content).toContain('x_trace_id: Option<&str>');
+    expect(rustApi!.content).not.toContain('headers: Option<&RequestHeaders>');
     expect(rustApi!.content).toContain('format!("/keyword-model/{}/{}/{}", class, user_id, headers_)');
   });
 
@@ -2165,11 +4293,15 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(tenantApi).toBeDefined();
     expect(tenantApi!.content).toContain(
-      'async listByPage(body?: PlusTenantQueryListForm, params?: QueryParams): Promise<PlusApiResultPagePlusTenantVO>'
+      'async listByPage(body?: PlusTenantQueryListForm, page?: number, size?: number): Promise<PlusApiResultPagePlusTenantVO>'
     );
+    expect(tenantApi!.content).toContain('const query = buildQueryString([');
+    expect(tenantApi!.content).toContain("{ name: 'page', value: page, style: 'form', explode: true, allowReserved: false },");
+    expect(tenantApi!.content).toContain("{ name: 'size', value: size, style: 'form', explode: true, allowReserved: false },");
     expect(tenantApi!.content).toContain(
-      'return this.client.post<PlusApiResultPagePlusTenantVO>(backendApiPath(`/tenant/list`), body, params'
+      'return this.client.post<PlusApiResultPagePlusTenantVO>(appendQueryString(backendApiPath(`/tenant/list`), query), body, undefined'
     );
+    expect(tenantApi!.content).not.toContain('params?: QueryParams');
     expect(tenantApi!.content).toContain(`'application/json'`);
   });
 
@@ -2527,6 +4659,567 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.stats.apis).toBe(0);
   });
 
+  it('should accept current OpenAPI 3.x semantic version strings including 3.2.0', async () => {
+    const generator = new TypeScriptGenerator();
+    const openApi32Spec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'OpenAPI 3.2 API', version: '1.0.0' },
+      paths: {
+        '/ping': {
+          get: {
+            operationId: 'getPing',
+            tags: ['Health'],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const result = await generator.generate(baseConfig, openApi32Spec);
+    expect(result.errors).toEqual([]);
+    expect(result.files.some((file) => file.path === 'src/api/health.ts')).toBe(true);
+  });
+
+  it('should reject malformed OpenAPI 3.x version strings instead of accepting any 3 prefix', async () => {
+    const generator = new TypeScriptGenerator();
+    const invalidVersionSpec = {
+      openapi: '3.foo',
+      info: { title: 'Malformed Version API', version: '1.0.0' },
+      paths: {
+        '/ping': {
+          get: {
+            operationId: 'getPing',
+            tags: ['Health'],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+    } as ApiSpec;
+
+    const result = await generator.generate(baseConfig, invalidVersionSpec);
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain('OpenAPI 3.x version strings');
+    expect(result.files.length).toBe(0);
+    expect(result.stats.apis).toBe(0);
+  });
+
+  it('should generate SDK operations for every OpenAPI 3.x path item HTTP method', async () => {
+    const methodSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Full HTTP API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'listResources',
+            tags: ['Resource'],
+            responses: { '200': { description: 'OK' } },
+          },
+          put: {
+            operationId: 'replaceResources',
+            tags: ['Resource'],
+            responses: { '200': { description: 'OK' } },
+          },
+          post: {
+            operationId: 'createResource',
+            tags: ['Resource'],
+            responses: { '201': { description: 'Created' } },
+          },
+          delete: {
+            operationId: 'deleteResources',
+            tags: ['Resource'],
+            responses: { '204': { description: 'Deleted' } },
+          },
+          options: {
+            operationId: 'optionsResources',
+            tags: ['Resource'],
+            responses: { '204': { description: 'No Content' } },
+          },
+          head: {
+            operationId: 'headResources',
+            tags: ['Resource'],
+            responses: { '204': { description: 'No Content' } },
+          },
+          patch: {
+            operationId: 'patchResources',
+            tags: ['Resource'],
+            responses: { '200': { description: 'OK' } },
+          },
+          trace: {
+            operationId: 'traceResources',
+            tags: ['Resource'],
+            responses: { '200': { description: 'OK' } },
+          },
+          query: {
+            operationId: 'queryResources',
+            tags: ['Resource'],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const cases = [
+      {
+        generator: new TypeScriptGenerator(),
+        config: baseConfig,
+        apiPath: 'src/api/resource.ts',
+        expectedSnippets: [
+          'async listResources',
+          'method: \'HEAD\' as any',
+          'method: \'OPTIONS\' as any',
+          'method: \'TRACE\' as any',
+          'method: \'QUERY\' as any',
+        ],
+      },
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const },
+        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        expectedSnippets: [
+          'def list_resources',
+          'self._client.request(\'HEAD\'',
+          'self._client.request(\'OPTIONS\'',
+          'self._client.request(\'TRACE\'',
+          'self._client.request(\'QUERY\'',
+        ],
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const },
+        apiPath: 'api/resource.go',
+        expectedSnippets: [
+          'func (a *ResourceApi) ListResources',
+          'a.client.Request("HEAD"',
+          'a.client.Request("OPTIONS"',
+          'a.client.Request("TRACE"',
+          'a.client.Request("QUERY"',
+        ],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, methodSpec);
+      const apiFile = result.files.find((file) => file.path === testCase.apiPath);
+
+      expect(result.errors).toEqual([]);
+      expect(apiFile).toBeDefined();
+      for (const snippet of testCase.expectedSnippets) {
+        expect(apiFile!.content).toContain(snippet);
+      }
+    }
+  });
+
+  it('should generate SDK operations from OpenAPI 3.2 additionalOperations', async () => {
+    const additionalOperationSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Additional Operations API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'listResources',
+            tags: ['Resource'],
+            responses: { '200': { description: 'OK' } },
+          },
+          additionalOperations: {
+            'PURGE': {
+              operationId: 'purgeResources',
+              tags: ['Resource'],
+              responses: { '204': { description: 'Purged' } },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, additionalOperationSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/resource.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('async purgeResources');
+    expect(apiFile!.content).toContain('method: \'PURGE\' as any');
+  });
+
+  it('should preserve OpenAPI 3.2 additionalOperations method token casing', async () => {
+    const additionalOperationSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Case Sensitive Additional Operations API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          additionalOperations: {
+            'x-example-method': {
+              operationId: 'runExampleMethod',
+              tags: ['Resource'],
+              responses: { '200': { description: 'OK' } },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, additionalOperationSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/resource.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('async runExampleMethod');
+    expect(apiFile!.content).toContain('method: \'x-example-method\' as any');
+  });
+
+  it('should generate raw query string parameters for OpenAPI 3.2 querystring parameters', async () => {
+    const queryStringSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Query String API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          query: {
+            operationId: 'queryResources',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'filter',
+                in: 'querystring',
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        status: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+                schema: { type: 'string' },
+              },
+            ],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, queryStringSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/resource.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('async queryResources(rawQueryString: string)');
+    expect(apiFile!.content).toContain('appendQueryString(backendApiPath(`/resources`), rawQueryString)');
+    expect(apiFile!.content).toContain("method: 'QUERY' as any");
+  });
+
+  it('should generate OpenAPI 3.2 raw query string support across SDK languages', async () => {
+    const queryStringSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Cross Language Query String API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          query: {
+            operationId: 'queryResources',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'filter',
+                in: 'querystring',
+                required: true,
+                content: {
+                  'application/x-www-form-urlencoded': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        status: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+                schema: { type: 'string' },
+              },
+            ],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const cases = [
+      {
+        generator: new TypeScriptGenerator(),
+        config: baseConfig,
+        apiPath: 'src/api/resource.ts',
+        expectedSnippets: [
+          'async queryResources(rawQueryString: string)',
+          'appendQueryString(backendApiPath(`/resources`), rawQueryString)',
+        ],
+      },
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const },
+        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        expectedSnippets: [
+          'def query_resources(self, raw_query_string: str)',
+          '_append_query_string(f"/api/v1/resources", raw_query_string)',
+        ],
+      },
+      {
+        generator: new DartGenerator(),
+        config: { ...baseConfig, language: 'dart' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expectedSnippets: [
+          'Future<void> queryResources(String rawQueryString)',
+          'ApiPaths.appendQueryString(ApiPaths.backendPath(\'/resources\'), rawQueryString)',
+        ],
+      },
+      {
+        generator: new FlutterGenerator(),
+        config: { ...baseConfig, language: 'flutter' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expectedSnippets: [
+          'Future<void> queryResources(String rawQueryString)',
+          'ApiPaths.appendQueryString(ApiPaths.backendPath(\'/resources\'), rawQueryString)',
+        ],
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const },
+        apiPath: 'api/resource.go',
+        expectedSnippets: [
+          'func (a *ResourceApi) QueryResources(rawQueryString string)',
+          'AppendQueryString(BackendApiPath("/resources"), rawQueryString)',
+        ],
+      },
+      {
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const },
+        apiPath: 'src/api/resource.rs',
+        expectedSnippets: [
+          'pub async fn query_resources(&self, raw_query_string: &str)',
+          'append_query_string(backend_path(&"/resources".to_string()), raw_query_string)',
+        ],
+      },
+      {
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const },
+        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        expectedSnippets: [
+          'public Void queryResources(String rawQueryString)',
+          'ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), rawQueryString)',
+        ],
+      },
+      {
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const },
+        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        expectedSnippets: [
+          'suspend fun queryResources(rawQueryString: String): Unit',
+          'ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), rawQueryString)',
+        ],
+      },
+      {
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const },
+        apiPath: 'Api/ResourceApi.cs',
+        expectedSnippets: [
+          'public async Task QueryResourcesAsync(string rawQueryString)',
+          'ApiPaths.AppendQueryString(ApiPaths.BackendPath("/resources"), rawQueryString)',
+        ],
+      },
+      {
+        generator: new SwiftGenerator(),
+        config: { ...baseConfig, language: 'swift' as const },
+        apiPath: 'Sources/API/ResourceApi.swift',
+        expectedSnippets: [
+          'public func queryResources(rawQueryString: String) async throws -> Void',
+          'ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), rawQueryString)',
+        ],
+      },
+      {
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const },
+        apiPath: 'src/Api/Resource.php',
+        expectedSnippets: [
+          'public function queryResources(string $rawQueryString): void',
+          '$this->appendQueryString($path, $rawQueryString)',
+        ],
+      },
+      {
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const },
+        apiPath: 'lib/sdkwork/backend_sdk/api/resource.rb',
+        expectedSnippets: [
+          'def query_resources(raw_query_string:)',
+          'path = append_query_string(path, raw_query_string)',
+        ],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, queryStringSpec);
+      const apiFile = result.files.find((file) => file.path === testCase.apiPath);
+
+      expect(result.errors).toEqual([]);
+      expect(apiFile).toBeDefined();
+      for (const snippet of testCase.expectedSnippets) {
+        expect(apiFile!.content).toContain(snippet);
+      }
+    }
+  });
+
+  it('should preserve OpenAPI 3.2 additionalOperations method tokens across SDK languages', async () => {
+    const additionalOperationSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Cross Language Additional Operations API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          additionalOperations: {
+            'x-example-method': {
+              operationId: 'runExampleMethod',
+              tags: ['Resource'],
+              responses: { '204': { description: 'OK' } },
+            },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const cases = [
+      {
+        generator: new TypeScriptGenerator(),
+        config: baseConfig,
+        apiPath: 'src/api/resource.ts',
+        expectedSnippet: "method: 'x-example-method' as any",
+      },
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const },
+        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        expectedSnippet: "self._client.request('x-example-method'",
+      },
+      {
+        generator: new DartGenerator(),
+        config: { ...baseConfig, language: 'dart' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expectedSnippet: "_client.request('x-example-method'",
+      },
+      {
+        generator: new FlutterGenerator(),
+        config: { ...baseConfig, language: 'flutter' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expectedSnippet: "_client.request('x-example-method'",
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const },
+        apiPath: 'api/resource.go',
+        expectedSnippet: 'a.client.Request("x-example-method"',
+      },
+      {
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const },
+        apiPath: 'src/api/resource.rs',
+        expectedSnippet: 'Method::from_bytes(b"x-example-method")',
+      },
+      {
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const },
+        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        expectedSnippet: 'client.request("x-example-method"',
+      },
+      {
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const },
+        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        expectedSnippet: 'client.request("x-example-method"',
+      },
+      {
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const },
+        apiPath: 'Api/ResourceApi.cs',
+        expectedSnippet: '_client.RequestAsync<object>("x-example-method"',
+      },
+      {
+        generator: new SwiftGenerator(),
+        config: { ...baseConfig, language: 'swift' as const },
+        apiPath: 'Sources/API/ResourceApi.swift',
+        expectedSnippet: 'client.request("x-example-method"',
+      },
+      {
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const },
+        apiPath: 'src/Api/Resource.php',
+        expectedSnippet: "$this->client->request('x-example-method'",
+      },
+      {
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const },
+        apiPath: 'lib/sdkwork/backend_sdk/api/resource.rb',
+        expectedSnippet: "@client.request('x-example-method'",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, additionalOperationSpec);
+      const apiFile = result.files.find((file) => file.path === testCase.apiPath);
+
+      expect(result.errors).toEqual([]);
+      expect(apiFile).toBeDefined();
+      expect(apiFile!.content).toContain(testCase.expectedSnippet);
+    }
+  });
+
+  it('should fail explicitly when OpenAPI 3.2 querystring parameters are mixed with query parameters', async () => {
+    const queryStringSpec: ApiSpec = {
+      openapi: '3.2.0',
+      info: { title: 'Mixed Query API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          query: {
+            operationId: 'queryResources',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'filter',
+                in: 'querystring',
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { type: 'object' },
+                  },
+                },
+                schema: { type: 'string' },
+              },
+              {
+                name: 'page',
+                in: 'query',
+                required: false,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    };
+
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, queryStringSpec);
+
+    expect(result.errors.length).toBe(1);
+    expect(result.errors[0].message).toContain('mixes OpenAPI 3.2 querystring parameters with query parameters');
+    expect(result.files).toEqual([]);
+  });
+
   it('should surface source error payloads when input is not an OpenAPI document', async () => {
     const generator = new TypeScriptGenerator();
     const upstreamErrorSpec = {
@@ -2640,9 +5333,273 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(readmeFile).toBeDefined();
-    expect(readmeFile!.content).toContain('const headers = {');
-    expect(readmeFile!.content).toContain("  'X-Trace-Id': 'trace-token',");
-    expect(readmeFile!.content).toContain('const result = await client.tenant.listByPage(headers);');
+    expect(readmeFile!.content).toContain("const xTraceId = 'trace-token';");
+    expect(readmeFile!.content).toContain('const result = await client.tenant.listByPage(xTraceId);');
+  });
+
+  it('should generate named header and cookie usage examples instead of generic headers maps across languages', async () => {
+    const cases = [
+      {
+        language: 'typescript',
+        generator: new TypeScriptGenerator(),
+        config: { ...baseConfig, language: 'typescript' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'test/sdk.smoke.test.mjs',
+        expectedReadme: [
+          "const xTraceId = 'X-Trace-Id';",
+          "const sessionId = 'session_id';",
+          'const result = await client.resource.listResources(xTraceId, sessionId);',
+        ],
+        expectedSmoke: [
+          "const xTraceId = 'X-Trace-Id';",
+          "const sessionId = 'session_id';",
+          'await client.resource.listResources(xTraceId, sessionId);',
+          "assert.equal(captured.headers['X-Trace-Id'], xTraceId);",
+          "assert.equal(captured.headers.Cookie, `session_id=${encodeURIComponent(sessionId)}`);",
+        ],
+        forbidden: ['const headers = {', 'assert.deepEqual(captured.headers, headers);'],
+      },
+      {
+        language: 'python',
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'tests/test_sdk_smoke.py',
+        expectedReadme: [
+          "x_trace_id = 'X-Trace-Id'",
+          "session_id = 'session_id'",
+          'result = client.resource.list_resources(x_trace_id, session_id)',
+        ],
+        expectedSmoke: [
+          "x_trace_id = 'X-Trace-Id'",
+          "session_id = 'session_id'",
+          'client.resource.list_resources(x_trace_id, session_id)',
+          "assert captured['headers']['X-Trace-Id'] == x_trace_id",
+          "assert captured['headers']['Cookie'] == f'session_id={quote(str(session_id), safe=\"\")}'",
+        ],
+        forbidden: ['headers = {', "assert captured['headers'] == headers"],
+      },
+      {
+        language: 'go',
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'sdk_smoke_test.go',
+        expectedReadme: [
+          'xTraceId := "X-Trace-Id"',
+          'sessionId := "session_id"',
+          'result, err := client.Resource.ListResources(xTraceId, &sessionId)',
+        ],
+        expectedSmoke: [
+          'xTraceId := "X-Trace-Id"',
+          'sessionId := "session_id"',
+          '_, err := client.Resource.ListResources(xTraceId, &sessionId)',
+          'if capturedHeaders.Get("X-Trace-Id") != xTraceId {',
+          'if capturedHeaders.Get("Cookie") != "session_id="+url.QueryEscape(sessionId) {',
+        ],
+        forbidden: ['headers := map[string]string{', 'client.Resource.ListResources(headers)'],
+      },
+      {
+        language: 'java',
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java',
+        expectedReadme: [
+          'String xTraceId = "X-Trace-Id";',
+          'String sessionId = "session_id";',
+          'client.getResource().listResources(xTraceId, sessionId);',
+        ],
+        expectedSmoke: [
+          'String xTraceId = "X-Trace-Id";',
+          'String sessionId = "session_id";',
+          'client.getResource().listResources(xTraceId, sessionId);',
+          'assertEquals(xTraceId, capturedHeaders.get("X-Trace-Id"));',
+          'assertEquals("session_id=" + URLEncoder.encode(sessionId, StandardCharsets.UTF_8), capturedHeaders.get("Cookie"));',
+        ],
+        forbidden: ['Map<String, String> headers = new LinkedHashMap<>();', 'listResources(headers)'],
+      },
+      {
+        language: 'kotlin',
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt',
+        expectedReadme: [
+          'val xTraceId = "X-Trace-Id"',
+          'val sessionId = "session_id"',
+          'client.resource.listResources(xTraceId, sessionId)',
+        ],
+        expectedSmoke: [
+          'val xTraceId = "X-Trace-Id"',
+          'val sessionId = "session_id"',
+          'client.resource.listResources(xTraceId, sessionId)',
+          'assertEquals(xTraceId, capturedHeaders["X-Trace-Id"])',
+          'assertEquals("session_id=" + URLEncoder.encode(sessionId, StandardCharsets.UTF_8), capturedHeaders["Cookie"])',
+        ],
+        forbidden: ['val headers = linkedMapOf<String, String>(', 'listResources(headers)'],
+      },
+      {
+        language: 'dart',
+        generator: new DartGenerator(),
+        config: { ...baseConfig, language: 'dart' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'test/generated_sdk_smoke_test.dart',
+        expectedReadme: [
+          "final xTraceId = 'X-Trace-Id';",
+          "final sessionId = 'session_id';",
+          'await client.resource.listResources(xTraceId, sessionId);',
+        ],
+        expectedSmoke: [
+          "final xTraceId = 'X-Trace-Id';",
+          "final sessionId = 'session_id';",
+          'await client.resource.listResources(xTraceId, sessionId);',
+          "expect(capturedHeaders['x-trace-id'], xTraceId);",
+          "expect(capturedHeaders['cookie'], 'session_id=${Uri.encodeQueryComponent(sessionId)}');",
+        ],
+        forbidden: ['final headers = <String, String>{', 'listResources(headers)'],
+      },
+      {
+        language: 'flutter',
+        generator: new FlutterGenerator(),
+        config: { ...baseConfig, language: 'flutter' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'test/generated_sdk_smoke_test.dart',
+        expectedReadme: [
+          "final xTraceId = 'X-Trace-Id';",
+          "final sessionId = 'session_id';",
+          'await client.resource.listResources(xTraceId, sessionId);',
+        ],
+        expectedSmoke: [
+          "final xTraceId = 'X-Trace-Id';",
+          "final sessionId = 'session_id';",
+          'await client.resource.listResources(xTraceId, sessionId);',
+          "expect(capturedHeaders['x-trace-id'], xTraceId);",
+          "expect(capturedHeaders['cookie'], 'session_id=${Uri.encodeQueryComponent(sessionId)}');",
+        ],
+        forbidden: ['final headers = <String, String>{', 'listResources(headers)'],
+      },
+      {
+        language: 'swift',
+        generator: new SwiftGenerator(),
+        config: { ...baseConfig, language: 'swift' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'Tests/BackendSDKTests/GeneratedSdkSmokeTests.swift',
+        expectedReadme: [
+          'let xTraceId = "X-Trace-Id"',
+          'let sessionId = "session_id"',
+          'try await client.resource.listResources(xTraceId: xTraceId, sessionId: sessionId)',
+        ],
+        expectedSmoke: [
+          'let xTraceId = "X-Trace-Id"',
+          'let sessionId = "session_id"',
+          'try await client.resource.listResources(xTraceId: xTraceId, sessionId: sessionId)',
+          'XCTAssertEqual(xTraceId, capturedHeaders["X-Trace-Id"])',
+          'XCTAssertEqual("session_id=\\(percentEncode(sessionId))", capturedHeaders["Cookie"])',
+        ],
+        forbidden: ['let headers: [String: String] = [', 'headers: headers'],
+      },
+      {
+        language: 'csharp',
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'Tests/GeneratedSdkSmokeTests.cs',
+        expectedReadme: [
+          'var xTraceId = "X-Trace-Id";',
+          'var sessionId = "session_id";',
+          'await client.Resource.ListResourcesAsync(xTraceId, sessionId);',
+        ],
+        expectedSmoke: [
+          'var xTraceId = "X-Trace-Id";',
+          'var sessionId = "session_id";',
+          'await client.Resource.ListResourcesAsync(xTraceId, sessionId);',
+          'Assert.Equal(xTraceId, capturedHeaders["X-Trace-Id"]);',
+          'Assert.Equal("session_id=" + Uri.EscapeDataString(sessionId), capturedHeaders["Cookie"]);',
+        ],
+        forbidden: ['var headers = new Dictionary<string, string>', 'ListResourcesAsync(headers)'],
+      },
+      {
+        language: 'rust',
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'tests/generated_sdk_smoke.rs',
+        expectedReadme: [
+          'let x_trace_id = "X-Trace-Id";',
+          'let session_id = "session_id";',
+          'client.resource().list_resources(x_trace_id, Some(session_id)).await?;',
+        ],
+        expectedSmoke: [
+          'let x_trace_id = "X-Trace-Id";',
+          'let session_id = "session_id";',
+          'client.resource().list_resources(x_trace_id, Some(session_id)).await?;',
+          'assert_eq!(captured.headers.get("x-trace-id").map(String::as_str), Some(x_trace_id));',
+          'assert_eq!(captured.headers.get("cookie").map(String::as_str), Some(&format!("session_id={}", percent_encode(session_id))));',
+        ],
+        forbidden: ['client.resource().list_resources(Some(&headers))', 'list_resources(x_trace_id, Some(&headers))'],
+      },
+      {
+        language: 'php',
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'tests/GeneratedSdkSmokeTest.php',
+        expectedReadme: [
+          "$xTraceId = 'X-Trace-Id';",
+          "$sessionId = 'session_id';",
+          '$client->resource->listResources($xTraceId, $sessionId);',
+        ],
+        expectedSmoke: [
+          "$xTraceId = 'X-Trace-Id';",
+          "$sessionId = 'session_id';",
+          '$client->resource->listResources($xTraceId, $sessionId);',
+          "self::assertSame($xTraceId, $request->getHeaderLine('X-Trace-Id'));",
+          "self::assertSame('session_id=' . rawurlencode($sessionId), $request->getHeaderLine('Cookie'));",
+        ],
+        forbidden: ['$headers = [', 'listResources($headers)'],
+      },
+      {
+        language: 'ruby',
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const, generateTests: true },
+        readmePath: 'README.md',
+        smokePath: 'test/generated_sdk_smoke_test.rb',
+        expectedReadme: [
+          "x_trace_id = 'X-Trace-Id'",
+          "session_id = 'session_id'",
+          'client.resource.list_resources(x_trace_id, session_id: session_id)',
+        ],
+        expectedSmoke: [
+          "x_trace_id = 'X-Trace-Id'",
+          "session_id = 'session_id'",
+          'client.resource.list_resources(x_trace_id, session_id: session_id)',
+          "assert_equal x_trace_id, captured[:headers]['X-Trace-Id']",
+          "assert_equal \"session_id=#{CGI.escape(session_id)}\", captured[:headers]['Cookie']",
+        ],
+        forbidden: ['headers = {', 'headers: headers'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, headerCookieParameterSpec);
+      const readmeFile = result.files.find((file) => file.path === testCase.readmePath);
+      const smokeTestFile = result.files.find((file) => file.path === testCase.smokePath);
+
+      expect(result.errors, testCase.language).toEqual([]);
+      expect(readmeFile, testCase.language).toBeDefined();
+      expect(smokeTestFile, testCase.language).toBeDefined();
+      for (const expected of testCase.expectedReadme) {
+        expect(readmeFile!.content, `${testCase.language} README: ${expected}`).toContain(expected);
+      }
+      for (const expected of testCase.expectedSmoke) {
+        expect(smokeTestFile!.content, `${testCase.language} smoke: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(readmeFile!.content, `${testCase.language} README forbidden: ${forbidden}`).not.toContain(forbidden);
+        expect(smokeTestFile!.content, `${testCase.language} smoke forbidden: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
   });
 
   it('should generate standardized Dart smoke tests when generateTests is enabled', async () => {
@@ -2655,7 +5612,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(pubspecFile).toBeDefined();
     expect(smokeTestFile).toBeDefined();
     expect(pubspecFile!.content).toContain('test: ^1.24.0');
-    expect(smokeTestFile!.content).toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
     expect(smokeTestFile!.content).toContain("import 'dart:io';");
     expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
     expect(smokeTestFile!.content).toContain("import 'package:sdkwork_backend_sdk_dart/sdkwork_backend_sdk_dart.dart';");
@@ -3030,9 +5987,9 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(smokeTestFile).toBeDefined();
-    expect(smokeTestFile!.content).toContain('headers := map[string]string{');
-    expect(smokeTestFile!.content).toContain('"X-Trace-Id": "trace-token"');
-    expect(smokeTestFile!.content).toContain('if capturedHeaders.Get("X-Trace-Id") != "trace-token" {');
+    expect(smokeTestFile!.content).toContain('xTraceId := "trace-token"');
+    expect(smokeTestFile!.content).toContain('_, err := client.Tenant.ListByPage(&xTraceId)');
+    expect(smokeTestFile!.content).toContain('if capturedHeaders.Get("X-Trace-Id") != xTraceId {');
   });
 
   it('should sample composed referenced query parameters correctly in Go smoke tests', async () => {
@@ -3054,9 +6011,9 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(smokeTestFile).toBeDefined();
-    expect(smokeTestFile!.content).toContain('headers := map[string]string{');
-    expect(smokeTestFile!.content).toContain('"X-Trace-Id": "trace-token"');
-    expect(smokeTestFile!.content).toContain('if capturedHeaders.Get("X-Trace-Id") != "trace-token" {');
+    expect(smokeTestFile!.content).toContain('xTraceId := "trace-token"');
+    expect(smokeTestFile!.content).toContain('_, err := client.Tenant.ListByPage(&xTraceId)');
+    expect(smokeTestFile!.content).toContain('if capturedHeaders.Get("X-Trace-Id") != xTraceId {');
   });
 
   it('should preserve named non-object component schemas in TypeScript and Go', async () => {
@@ -3373,7 +6330,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(pubspecFile).toBeDefined();
     expect(smokeTestFile).toBeDefined();
     expect(pubspecFile!.content).toContain('test: ^1.24.0');
-    expect(smokeTestFile!.content).toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
     expect(smokeTestFile!.content).toContain("import 'dart:io';");
     expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
     expect(smokeTestFile!.content).toContain("import 'package:backend_sdk/backend_sdk.dart';");

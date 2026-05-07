@@ -198,6 +198,31 @@ class HttpClient(
         return mapper.convertValue(value, typeReference)
     }
 
+    suspend fun request(
+        method: String,
+        path: String,
+        body: Any? = null,
+        params: Map<String, Any>? = null,
+        requestHeaders: Map<String, String>? = null,
+        contentType: String? = null
+    ): Any? {
+        val requestBuilder = Request.Builder()
+            .url(buildUrl(path, params))
+            .headers(mergeHeaders(requestHeaders))
+
+        val requestBody = if (body == null) null else createRequestBody(body, contentType)
+        val request = requestBuilder
+            .method(method, requestBody)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw RuntimeException("HTTP ${'$'}{response.code()}: ${'$'}{response.body()?.string() ?: ""}")
+            }
+            return parseResponse(response.body()?.string())
+        }
+    }
+
     suspend fun get(path: String, params: Map<String, Any>? = null, requestHeaders: Map<String, String>? = null): Any? {
         val request = Request.Builder()
             .url(buildUrl(path, params))

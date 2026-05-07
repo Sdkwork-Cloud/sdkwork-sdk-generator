@@ -40,6 +40,7 @@ environment:
   sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
+  http: ^1.2.0
   ${commonPkg.packageName}: ${commonPkg.version}
 
 dev_dependencies:

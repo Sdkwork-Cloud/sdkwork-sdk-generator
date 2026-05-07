@@ -1,6 +1,8 @@
 import { normalizeReadmeFile } from './readme.js';
 import { buildSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.js';
 import { normalizeOperationId, normalizeTagName } from './naming.js';
+import { findUnexpectedPathItemOperationFields, normalizeOpenApiPathItemOperations, } from './http-methods.js';
+import { parseLocalJsonPointerRef, resolveLocalJsonPointerReference, normalizeSchemaTypeValue, resolveSchemaType, toLocalJsonPointerRef, } from './schema.js';
 export * from './types.js';
 export class BaseGenerator {
     constructor(languageConfig) {
@@ -31,14 +33,14 @@ export class BaseGenerator {
             if (config.generateTests === true && !this.supportsTests) {
                 throw new Error(`The ${this.language} generator does not support generateTests=true yet. Disable generateTests or implement generator-backed test scaffolding for ${this.language}.`);
             }
-            const openapiVersion = typeof spec.openapi === 'string' ? spec.openapi : '';
-            if (!openapiVersion.startsWith('3.')) {
+            const openapiVersion = typeof spec.openapi === 'string' ? spec.openapi.trim() : '';
+            if (!this.isSupportedOpenApiVersion(openapiVersion)) {
                 const sourceErrorCode = spec?.code;
                 const sourceErrorMsg = spec?.msg || spec?.errorMsg;
                 if (sourceErrorCode || sourceErrorMsg) {
                     throw new Error(`Input is not a valid OpenAPI document. Source returned error payload (code=${sourceErrorCode ?? 'unknown'}, msg=${sourceErrorMsg ?? 'unknown'}).`);
                 }
-                throw new Error(`Unsupported OpenAPI version "${spec.openapi || 'unknown'}". SDKWork SDK Generator only supports OpenAPI 3.x.`);
+                throw new Error(`Unsupported OpenAPI version "${spec.openapi || 'unknown'}". SDKWork SDK Generator only supports OpenAPI 3.x version strings such as 3.0.4, 3.1.2, or 3.2.0.`);
             }
             if (Object.keys(spec.paths || {}).length === 0) {
                 throw new Error('OpenAPI document has no paths. This usually means the source group endpoint is empty or misconfigured.');
@@ -93,6 +95,7 @@ export class BaseGenerator {
     }
     createSchemaContext(spec) {
         const schemas = Object.fromEntries(Object.entries(spec.components?.schemas || {}).map(([name, schema]) => [name, this.cloneSchema(schema)]));
+        this.hoistJsonSchemaDefinitions(spec, schemas);
         const schemaFileMap = new Map();
         const auth = this.deriveAuthContext(spec);
         const inlineSchemaNameByObject = new WeakMap();
@@ -102,15 +105,7 @@ export class BaseGenerator {
         for (const [path, pathItem] of Object.entries(paths)) {
             const item = (pathItem || {});
             const pathParameters = this.resolveParameters(spec, item.parameters);
-            for (const [method, rawOperation] of Object.entries(item)) {
-                const normalizedMethod = method.toLowerCase();
-                if (!BaseGenerator.HTTP_METHODS.has(normalizedMethod)) {
-                    continue;
-                }
-                const operation = rawOperation;
-                if (!operation || typeof operation !== 'object') {
-                    continue;
-                }
+            for (const { method: normalizedMethod, httpMethod, operation } of normalizeOpenApiPathItemOperations(item)) {
                 const operationSchemaBaseName = this.resolveOperationSchemaBaseName(operation, normalizedMethod, path);
                 const operationParameters = this.resolveParameters(spec, operation.parameters);
                 const mergedParameters = this.mergeParameters(pathParameters, operationParameters);
@@ -135,6 +130,7 @@ export class BaseGenerator {
                     ...operation,
                     path,
                     method: normalizedMethod,
+                    httpMethod,
                     parameters: queryParameters,
                     allParameters: visibleParameters,
                     requestBody,
@@ -171,6 +167,137 @@ export class BaseGenerator {
     }
     preservesNamedNonObjectSchemas() {
         return false;
+    }
+    hoistJsonSchemaDefinitions(spec, schemas) {
+        const refRewriteMap = new Map();
+        const sourceRoot = {
+            ...spec,
+            components: {
+                ...(spec.components || {}),
+                schemas,
+            },
+        };
+        const visited = new Set();
+        const visit = (value, pathSegments, namePrefix) => {
+            if (!value || typeof value !== 'object') {
+                return;
+            }
+            if (Array.isArray(value)) {
+                value.forEach((entry, index) => visit(entry, [...pathSegments, String(index)], `${namePrefix} ${index + 1}`));
+                return;
+            }
+            if (visited.has(value)) {
+                return;
+            }
+            visited.add(value);
+            const definitionEntries = this.collectJsonSchemaDefinitionEntries(value);
+            for (const [definitionContainerKey, definitions] of definitionEntries) {
+                for (const [definitionName, definitionSchema] of Object.entries(definitions)) {
+                    if (!definitionSchema || typeof definitionSchema !== 'object') {
+                        continue;
+                    }
+                    const definitionPath = [...pathSegments, definitionContainerKey, definitionName];
+                    const sourceRef = toLocalJsonPointerRef(definitionPath);
+                    const schemaName = this.allocateHoistedDefinitionSchemaName(schemas, namePrefix, definitionName);
+                    schemas[schemaName] = this.cloneSchema(definitionSchema);
+                    refRewriteMap.set(sourceRef, `#/components/schemas/${schemaName}`);
+                    visit(schemas[schemaName], definitionPath, schemaName);
+                }
+            }
+            if (value.properties && typeof value.properties === 'object') {
+                for (const [propName, propSchema] of Object.entries(value.properties)) {
+                    visit(propSchema, [...pathSegments, 'properties', propName], `${namePrefix} ${propName}`);
+                }
+            }
+            if (value.items && typeof value.items === 'object') {
+                visit(value.items, [...pathSegments, 'items'], `${namePrefix} Item`);
+            }
+            if (Array.isArray(value.prefixItems)) {
+                value.prefixItems.forEach((entry, index) => visit(entry, [...pathSegments, 'prefixItems', String(index)], `${namePrefix} Item ${index + 1}`));
+            }
+            if (value.additionalProperties && typeof value.additionalProperties === 'object') {
+                visit(value.additionalProperties, [...pathSegments, 'additionalProperties'], `${namePrefix} Value`);
+            }
+            if (value.not && typeof value.not === 'object') {
+                visit(value.not, [...pathSegments, 'not'], `${namePrefix} Not`);
+            }
+            for (const key of ['allOf', 'oneOf', 'anyOf']) {
+                const composed = value[key];
+                if (Array.isArray(composed)) {
+                    composed.forEach((entry, index) => visit(entry, [...pathSegments, key, String(index)], `${namePrefix} ${key} ${index + 1}`));
+                }
+            }
+        };
+        visit(sourceRoot, [], '');
+        for (const [schemaName, schema] of Object.entries(schemas)) {
+            visit(schema, ['components', 'schemas', schemaName], schemaName);
+        }
+        if (refRewriteMap.size === 0) {
+            return;
+        }
+        for (const [schemaName, schema] of Object.entries(schemas)) {
+            schemas[schemaName] = this.rewriteSchemaReferences(schema, refRewriteMap, sourceRoot, ['components', 'schemas', schemaName]);
+        }
+    }
+    collectJsonSchemaDefinitionEntries(schema) {
+        return ['$defs', 'definitions']
+            .map((key) => [key, schema[key]])
+            .filter((entry) => Boolean(entry[1]) && typeof entry[1] === 'object' && !Array.isArray(entry[1]));
+    }
+    allocateHoistedDefinitionSchemaName(schemas, ownerName, definitionName) {
+        const owner = this.toPascalCase(ownerName);
+        const definition = this.toPascalCase(definitionName) || 'Definition';
+        const preferred = !owner || definition.startsWith(owner) ? definition : `${owner}${definition}`;
+        let candidate = preferred;
+        let index = 2;
+        while (schemas[candidate]) {
+            candidate = `${preferred}${index}`;
+            index += 1;
+        }
+        return candidate;
+    }
+    rewriteSchemaReferences(value, refRewriteMap, sourceRoot, currentPath) {
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+        if (Array.isArray(value)) {
+            return value.map((entry, index) => this.rewriteSchemaReferences(entry, refRewriteMap, sourceRoot, [...currentPath, String(index)]));
+        }
+        const rewritten = {};
+        for (const [key, entryValue] of Object.entries(value)) {
+            if (key === '$defs' || key === 'definitions') {
+                continue;
+            }
+            if (key === '$ref' && typeof entryValue === 'string') {
+                rewritten[key] = this.rewriteLocalJsonPointerReference(entryValue, refRewriteMap, sourceRoot, currentPath);
+                continue;
+            }
+            rewritten[key] = this.rewriteSchemaReferences(entryValue, refRewriteMap, sourceRoot, [...currentPath, key]);
+        }
+        return rewritten;
+    }
+    rewriteLocalJsonPointerReference(ref, refRewriteMap, sourceRoot, currentPath) {
+        const pointerSegments = parseLocalJsonPointerRef(ref);
+        if (!pointerSegments) {
+            return ref;
+        }
+        const canonicalRef = toLocalJsonPointerRef(pointerSegments);
+        const directRewrite = refRewriteMap.get(canonicalRef);
+        if (directRewrite) {
+            return directRewrite;
+        }
+        for (let index = currentPath.length; index >= 0; index -= 1) {
+            const candidate = toLocalJsonPointerRef([...currentPath.slice(0, index), ...pointerSegments]);
+            const rewrittenRef = refRewriteMap.get(candidate);
+            if (rewrittenRef) {
+                return rewrittenRef;
+            }
+        }
+        const target = resolveLocalJsonPointerReference(canonicalRef, sourceRoot);
+        if (!target || typeof target !== 'object') {
+            return ref;
+        }
+        return ref;
     }
     inlineNamedNonObjectSchemaRefs(schemas, apiGroups) {
         const sourceSchemas = { ...schemas };
@@ -223,10 +350,7 @@ export class BaseGenerator {
             }
             return [
                 mediaType,
-                {
-                    ...current,
-                    schema: this.rewriteSchemaForNamedNonObjectRefs(current.schema, schemas),
-                },
+                this.rewriteMediaTypeSchemas(current, schemas),
             ];
         }));
         return { ...requestBody, content: nextContent };
@@ -247,10 +371,7 @@ export class BaseGenerator {
                     }
                     return [
                         mediaType,
-                        {
-                            ...current,
-                            schema: this.rewriteSchemaForNamedNonObjectRefs(current.schema, schemas),
-                        },
+                        this.rewriteMediaTypeSchemas(current, schemas),
                     ];
                 })),
             };
@@ -276,7 +397,10 @@ export class BaseGenerator {
             return this.rewriteSchemaForNamedNonObjectRefs(this.cloneSchema(target), schemas, new Set([...trail, refName]));
         }
         const rewritten = { ...schema };
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            rewritten.prefixItems = schema.prefixItems.map((itemSchema) => this.rewriteSchemaForNamedNonObjectRefs(itemSchema, schemas, trail));
+        }
+        if (schema.items && typeof schema.items === 'object') {
             rewritten.items = this.rewriteSchemaForNamedNonObjectRefs(schema.items, schemas, trail);
         }
         if (schema.properties && typeof schema.properties === 'object') {
@@ -295,6 +419,16 @@ export class BaseGenerator {
         }
         if (schema.not && typeof schema.not === 'object') {
             rewritten.not = this.rewriteSchemaForNamedNonObjectRefs(schema.not, schemas, trail);
+        }
+        return rewritten;
+    }
+    rewriteMediaTypeSchemas(mediaTypeObject, schemas) {
+        const rewritten = { ...mediaTypeObject };
+        if ('schema' in rewritten) {
+            rewritten.schema = this.rewriteSchemaForNamedNonObjectRefs(rewritten.schema, schemas);
+        }
+        if ('itemSchema' in rewritten) {
+            rewritten.itemSchema = this.rewriteSchemaForNamedNonObjectRefs(rewritten.itemSchema, schemas);
         }
         return rewritten;
     }
@@ -320,8 +454,8 @@ export class BaseGenerator {
         if (schema.properties && typeof schema.properties === 'object') {
             return true;
         }
-        const schemaType = normalizeSchemaTypeValue(schema.type);
-        if (schema.items || schemaType === 'array') {
+        const schemaType = normalizeSchemaTypeValue(schema.type).type;
+        if (schema.items || Array.isArray(schema.prefixItems) || schemaType === 'array') {
             return false;
         }
         if (schema.additionalProperties && !schema.properties) {
@@ -626,15 +760,10 @@ export class BaseGenerator {
             if (this.hasExternalRef(pathLevelParameters)) {
                 issues.add(`Path "${path}" contains external $ref references. Only local "#/" refs are resolved.`);
             }
-            for (const [method, rawOperation] of Object.entries(item)) {
-                const normalizedMethod = method.toLowerCase();
-                if (!BaseGenerator.HTTP_METHODS.has(normalizedMethod)) {
-                    continue;
-                }
-                const operation = rawOperation;
-                if (!operation || typeof operation !== 'object') {
-                    continue;
-                }
+            for (const unsupportedField of findUnexpectedPathItemOperationFields(item)) {
+                issues.add(`Path "${path}" contains operation-like field "${unsupportedField}". Use OpenAPI 3.2 additionalOperations for custom HTTP methods.`);
+            }
+            for (const { method: normalizedMethod, operation } of normalizeOpenApiPathItemOperations(item)) {
                 const operationLabel = `${normalizedMethod.toUpperCase()} ${path}`;
                 const parameters = [
                     ...(Array.isArray(pathLevelParameters) ? pathLevelParameters : []),
@@ -647,8 +776,29 @@ export class BaseGenerator {
                     const paramIn = param?.in;
                     return paramIn === 'header' || paramIn === 'cookie';
                 });
+                const queryStringParams = parameters.filter((param) => {
+                    if (param && typeof param === 'object' && '$ref' in param) {
+                        return false;
+                    }
+                    return param?.in === 'querystring';
+                });
+                const queryParams = parameters.filter((param) => {
+                    if (param && typeof param === 'object' && '$ref' in param) {
+                        return false;
+                    }
+                    return param?.in === 'query';
+                });
                 if (hasHeaderOrCookieParams && !this.supportsHeaderCookieParameters()) {
                     issues.add(`${operationLabel} defines header/cookie parameters. Generated methods currently model query/path/body by default.`);
+                }
+                if (queryStringParams.length > 1) {
+                    issues.add(`${operationLabel} defines more than one OpenAPI 3.2 querystring parameter.`);
+                }
+                if (queryStringParams.length > 0 && queryParams.length > 0) {
+                    issues.add(`${operationLabel} mixes OpenAPI 3.2 querystring parameters with query parameters.`);
+                }
+                if (queryStringParams.some((param) => !param || typeof param !== 'object' || !('content' in param))) {
+                    issues.add(`${operationLabel} defines OpenAPI 3.2 querystring parameters without a content media type.`);
                 }
                 if (this.hasExternalRef(operation.parameters)) {
                     issues.add(`${operationLabel} contains external parameter $ref references. Only local "#/" refs are resolved.`);
@@ -792,11 +942,7 @@ export class BaseGenerator {
         const paths = spec.paths || {};
         for (const pathItem of Object.values(paths)) {
             const item = (pathItem || {});
-            for (const [method, operation] of Object.entries(item)) {
-                const normalizedMethod = method.toLowerCase();
-                if (!BaseGenerator.HTTP_METHODS.has(normalizedMethod)) {
-                    continue;
-                }
+            for (const { operation } of normalizeOpenApiPathItemOperations(item)) {
                 if (operation && typeof operation === 'object') {
                     collect(operation.security);
                 }
@@ -855,6 +1001,14 @@ export class BaseGenerator {
             if (hoistedSchema !== schema) {
                 nextRequestBody.content[mediaType] = { ...current, schema: hoistedSchema };
             }
+            const itemSchema = current.itemSchema;
+            const hoistedItemSchema = this.hoistInlineOperationSchema(itemSchema, schemas, `${operationSchemaBaseName}RequestItem`, `${operationSchemaBaseName}${this.toPascalCase(operationMethod)}RequestItem`, inlineSchemaNameByObject);
+            if (hoistedItemSchema !== itemSchema) {
+                nextRequestBody.content[mediaType] = {
+                    ...nextRequestBody.content[mediaType],
+                    itemSchema: hoistedItemSchema,
+                };
+            }
         }
         return nextRequestBody;
     }
@@ -885,6 +1039,14 @@ export class BaseGenerator {
                 const hoistedSchema = this.hoistInlineOperationSchema(schema, schemas, `${operationSchemaBaseName}${suffix}`, `${operationSchemaBaseName}${this.toPascalCase(operationMethod)}${suffix}`, inlineSchemaNameByObject);
                 if (hoistedSchema !== schema) {
                     nextResponse.content[mediaType] = { ...current, schema: hoistedSchema };
+                }
+                const itemSchema = current.itemSchema;
+                const hoistedItemSchema = this.hoistInlineOperationSchema(itemSchema, schemas, `${operationSchemaBaseName}${suffix}Item`, `${operationSchemaBaseName}${this.toPascalCase(operationMethod)}${suffix}Item`, inlineSchemaNameByObject);
+                if (hoistedItemSchema !== itemSchema) {
+                    nextResponse.content[mediaType] = {
+                        ...nextResponse.content[mediaType],
+                        itemSchema: hoistedItemSchema,
+                    };
                 }
             }
             resolved[statusCode] = nextResponse;
@@ -939,10 +1101,11 @@ export class BaseGenerator {
         if (!schema || typeof schema !== 'object' || schema.$ref) {
             return false;
         }
-        if (schema.oneOf || schema.anyOf || schema.allOf || schema.properties || schema.additionalProperties || schema.items) {
+        if (schema.oneOf || schema.anyOf || schema.allOf || schema.properties || schema.additionalProperties || schema.items || schema.prefixItems) {
             return true;
         }
-        return schema.type === 'object' || schema.type === 'array';
+        const schemaType = resolveSchemaType(schema).effectiveType;
+        return schemaType === 'object' || schemaType === 'array';
     }
     cloneSchema(schema) {
         return JSON.parse(JSON.stringify(schema));
@@ -1031,6 +1194,9 @@ export class BaseGenerator {
             description: 'SDKWork generator metadata',
         };
     }
+    isSupportedOpenApiVersion(openapiVersion) {
+        return /^3\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(openapiVersion);
+    }
     generateReleaseMetadata(config) {
         const author = (config.author || 'SDKWork Team').trim() || 'SDKWork Team';
         const license = (config.license || 'MIT').trim() || 'MIT';
@@ -1093,7 +1259,7 @@ export class BaseGenerator {
             const schemas = schema.oneOf || schema.anyOf || [];
             return schemas.map((s) => this.mapType(s)).join(' | ');
         }
-        switch (schema.type) {
+        switch (resolveSchemaType(schema).effectiveType) {
             case 'string':
                 if (schema.enum)
                     return schema.enum.map((v) => `'${v}'`).join(' | ');
@@ -1111,19 +1277,12 @@ export class BaseGenerator {
             case 'number': return mapping.number;
             case 'integer': return mapping.integer;
             case 'boolean': return mapping.boolean;
-            case 'array': return schema.items ? `${this.mapType(schema.items)}[]` : mapping.array;
+            case 'array': return schema.items && typeof schema.items === 'object' ? `${this.mapType(schema.items)}[]` : mapping.array;
             case 'object': return mapping.object;
             default: return 'unknown';
         }
     }
 }
-BaseGenerator.HTTP_METHODS = new Set([
-    'get',
-    'put',
-    'post',
-    'delete',
-    'patch',
-]);
 BaseGenerator.JSON_MEDIA_TYPES = new Set([
     'application/json',
     'application/problem+json',
@@ -1205,14 +1364,4 @@ function toKebabCase(str) {
         .replace(/[\s_]+/g, '-')
         .replace(/[^a-zA-Z0-9-]/g, '')
         .toLowerCase();
-}
-function normalizeSchemaTypeValue(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
 }

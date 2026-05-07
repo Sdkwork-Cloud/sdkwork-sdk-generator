@@ -1,16 +1,18 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveModelSchema } from '../../framework/schema.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
 
 export class ModelGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
-    return Object.entries(ctx.schemas).map(([name, schema]) => this.generateModel(name, schema, config));
+    return Object.entries(ctx.schemas).map(([name, schema]) => this.generateModel(name, schema, ctx.schemas, config));
   }
 
-  private generateModel(name: string, schema: any, config: GeneratorConfig): GeneratedFile {
+  private generateModel(name: string, schema: any, schemas: SchemaContext['schemas'], config: GeneratorConfig): GeneratedFile {
+    const modelSchema = resolveModelSchema(schema, schemas);
     const moduleSegments = [...getRubyModuleSegments(config), 'Models'];
     const modelName = RUBY_CONFIG.namingConventions.modelName(name);
-    const properties = Object.entries(schema?.properties || {}) as Array<[string, any]>;
+    const properties = Object.entries(modelSchema?.properties || {}) as Array<[string, any]>;
     const attrAccessors = properties.length > 0
       ? `        attr_accessor ${properties.map(([propName]) => `:${RUBY_CONFIG.namingConventions.propertyName(propName)}`).join(', ')}`
       : '';
@@ -20,7 +22,7 @@ export class ModelGenerator {
     const exports = properties.length > 0
       ? properties.map(([propName, propSchema]) => this.generateExport(propName, propSchema)).join('\n')
       : '            # No properties to serialize.';
-    const description = schema?.description ? `        # ${sanitizeComment(schema.description)}\n` : '';
+    const description = modelSchema?.description ? `        # ${sanitizeComment(modelSchema.description)}\n` : '';
     const body = `class ${modelName}
 ${description}${attrAccessors ? `${attrAccessors}\n\n` : ''}        def initialize(attributes = {})
           attributes = (attributes || {}).transform_keys(&:to_s)
@@ -68,7 +70,11 @@ ${exports}
       return `${valueExpr}.is_a?(Hash) ? ${modelName}.from_hash(${valueExpr}) : nil`;
     }
 
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      return `${valueExpr}.is_a?(Array) ? ${valueExpr}.map { |item| item } : []`;
+    }
+
+    if (schema.items && typeof schema.items === 'object') {
       const itemExpr = this.deserializeArrayItemExpression(schema.items, 'item');
       return `${valueExpr}.is_a?(Array) ? ${valueExpr}.map { |item| ${itemExpr} } : []`;
     }
@@ -94,7 +100,11 @@ ${exports}
       return `${itemExpr}.is_a?(Hash) ? ${modelName}.from_hash(${itemExpr}) : ${itemExpr}`;
     }
 
-    if (schema?.items) {
+    if (Array.isArray(schema?.prefixItems)) {
+      return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| nested_item } : []`;
+    }
+
+    if (schema?.items && typeof schema.items === 'object') {
       const nestedExpr = this.deserializeArrayItemExpression(schema.items, 'nested_item');
       return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| ${nestedExpr} } : []`;
     }
@@ -123,7 +133,11 @@ ${exports}
       return `${valueExpr}&.to_hash`;
     }
 
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      return `${valueExpr}.is_a?(Array) ? ${valueExpr}.map { |item| item } : []`;
+    }
+
+    if (schema.items && typeof schema.items === 'object') {
       const itemExpr = this.serializeArrayItemExpression(schema.items, 'item');
       return `${valueExpr}.is_a?(Array) ? ${valueExpr}.map { |item| ${itemExpr} } : []`;
     }
@@ -141,7 +155,11 @@ ${exports}
       return `${itemExpr}.respond_to?(:to_hash) ? ${itemExpr}.to_hash : ${itemExpr}`;
     }
 
-    if (schema?.items) {
+    if (Array.isArray(schema?.prefixItems)) {
+      return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| nested_item } : []`;
+    }
+
+    if (schema?.items && typeof schema.items === 'object') {
       const nestedExpr = this.serializeArrayItemExpression(schema.items, 'nested_item');
       return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| ${nestedExpr} } : []`;
     }

@@ -27,6 +27,7 @@ import type { AuthTokenManager } from '${commonImportPath}';
 import { BaseHttpClient, withRetry } from '${commonImportPath}';
 
 type HttpRequestOptions = RequestOptions & {
+  method?: string;
   body?: unknown;
   headers?: Record<string, string>;
   contentType?: string;

@@ -45,8 +45,7 @@ export class BuildConfigGenerator {
     <description>${config.description || config.name + ' SDK'}</description>
 
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -76,8 +75,7 @@ ${testDependencies}
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>11</source>
-                    <target>11</target>
+                    <release>21</release>
                 </configuration>
             </plugin>
 ${surefirePlugin}

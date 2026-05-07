@@ -158,7 +158,7 @@ class HttpClient {
       response = await _sendMultipart(method, uri, body, mergedHeaders);
     } else {
       final payload = _encodeBody(body, contentType);
-      final request = http.Request(method.toUpperCase(), uri)
+      final request = http.Request(method, uri)
         ..headers.addAll(mergedHeaders);
       if (payload != null) {
         request.body = payload;
@@ -249,7 +249,7 @@ class HttpClient {
     dynamic body,
     Map<String, String> headers,
   ) async {
-    final request = http.MultipartRequest(method.toUpperCase(), uri);
+    final request = http.MultipartRequest(method, uri);
     request.headers.addAll(headers..remove('Content-Type'));
 
     if (body is Map) {

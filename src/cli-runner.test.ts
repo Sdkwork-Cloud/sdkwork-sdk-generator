@@ -224,6 +224,152 @@ describe('runGenerateCommand', () => {
     expect(existsSync(join(outputDir, SDKWORK_GENERATOR_REPORT_PATH))).toBe(false);
   });
 
+  it('accepts local yaml OpenAPI specs through the command runner', async () => {
+    const workDir = createTempDir('sdkwork-cli-runner-yaml-');
+    const outputDir = join(workDir, 'generated-sdk');
+    const specPath = join(workDir, 'openapi.yaml');
+    writeFileSync(specPath, `openapi: 3.1.2
+info:
+  title: Local YAML API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      summary: List users
+      operationId: listUsers
+      tags:
+        - User
+      responses:
+        '200':
+          description: Success
+components:
+  schemas: {}
+`, 'utf-8');
+
+    const execution = await runGenerateCommand({
+      input: specPath,
+      output: outputDir,
+      name: 'YamlSDK',
+      type: 'backend',
+      language: 'typescript',
+      license: 'MIT',
+      syncPublishedVersion: false,
+      dryRun: true,
+    });
+
+    expect(execution.result.errors).toEqual([]);
+    expect(execution.config.apiSpecPath).toBe(specPath);
+    expect(execution.result.files.some((file) => file.path === 'src/api/user.ts')).toBe(true);
+    expect(outputDir).toBeDefined();
+    expect(existsSync(outputDir)).toBe(false);
+  });
+
+  it('accepts remote json OpenAPI URLs through the command runner', async () => {
+    const workDir = createTempDir('sdkwork-cli-runner-url-');
+    const outputDir = join(workDir, 'generated-sdk');
+    const specUrl = 'https://example.com/openapi.json';
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          get: (name: string) => name.toLowerCase() === 'content-type' ? 'application/json' : null,
+        },
+        text: async () => JSON.stringify(productSpec),
+      };
+    }) as typeof fetch;
+
+    try {
+      const execution = await runGenerateCommand({
+        input: specUrl,
+        output: outputDir,
+        name: 'RemoteSDK',
+        type: 'backend',
+        language: 'typescript',
+        license: 'MIT',
+        syncPublishedVersion: false,
+        dryRun: true,
+      });
+
+      expect(requestedUrls).toEqual([specUrl]);
+      expect(execution.result.errors).toEqual([]);
+      expect(execution.config.apiSpecPath).toBe(specUrl);
+      expect(execution.result.files.some((file) => file.path === 'src/api/product.ts')).toBe(true);
+      expect(existsSync(outputDir)).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('accepts remote yaml OpenAPI URLs through the command runner', async () => {
+    const workDir = createTempDir('sdkwork-cli-runner-url-yaml-');
+    const outputDir = join(workDir, 'generated-sdk');
+    const specUrl = 'https://example.com/openapi.yaml';
+    const originalFetch = globalThis.fetch;
+    const requestedUrls: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          get: (name: string) => name.toLowerCase() === 'content-type' ? 'application/yaml' : null,
+        },
+        text: async () => `openapi: 3.2.0
+info:
+  title: Remote YAML API
+  version: 1.0.0
+paths:
+  /reports:
+    get:
+      operationId: listReports
+      tags:
+        - Report
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: No content
+components:
+  schemas: {}
+`,
+      };
+    }) as typeof fetch;
+
+    try {
+      const execution = await runGenerateCommand({
+        input: specUrl,
+        output: outputDir,
+        name: 'RemoteYamlSDK',
+        type: 'backend',
+        language: 'typescript',
+        license: 'MIT',
+        syncPublishedVersion: false,
+        dryRun: true,
+      });
+
+      expect(requestedUrls).toEqual([specUrl]);
+      expect(execution.result.errors).toEqual([]);
+      expect(execution.config.apiSpecPath).toBe(specUrl);
+      expect(execution.result.files.some((file) => file.path === 'src/api/report.ts')).toBe(true);
+      expect(execution.result.files.find((file) => file.path === 'src/api/report.ts')?.content).toContain(
+        'async listReports(page?: number): Promise<void>'
+      );
+      expect(existsSync(outputDir)).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it('allows apply mode to require the dry-run change fingerprint', async () => {
     const workDir = createTempDir('sdkwork-cli-runner-fingerprint-');
     const outputDir = join(workDir, 'generated-sdk');

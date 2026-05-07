@@ -266,6 +266,22 @@ public class HttpClient {
         }
     }
 
+    public Object request(
+        String method,
+        String path,
+        Object body,
+        Map<String, Object> params,
+        Map<String, String> requestHeaders,
+        String contentType
+    ) throws Exception {
+        RequestBody requestBody = body == null ? null : createRequestBody(body, contentType);
+        Request request = applyHeaders(new Request.Builder(), requestHeaders)
+            .url(buildUrl(path, params))
+            .method(method, requestBody)
+            .build();
+        return execute(request);
+    }
+
     public Object get(String path) throws Exception {
         return get(path, null, null);
     }

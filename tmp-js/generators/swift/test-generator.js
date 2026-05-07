@@ -79,6 +79,10 @@ ${assertions}
         XCTAssertEqual(expectedCanonical, actualCanonical)
     }
 
+    private func percentEncode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+
     private func encodeJSONBody(_ value: Any, encoder: JSONEncoder) throws -> Data {
         if JSONSerialization.isValidJSONObject(value) {
             return try JSONSerialization.data(withJSONObject: value)
@@ -159,7 +163,16 @@ ${assertions}
             lines.push(`XCTAssertEqual(${this.quote(expectation.expected)}, capturedQuery[${this.quote(expectation.name)}])`);
         }
         for (const expectation of plan.headerExpectations) {
-            lines.push(`XCTAssertEqual(${this.quote(expectation.expected)}, capturedHeaders[${this.quote(expectation.name)}])`);
+            if (expectation.cookie) {
+                const source = expectation.source || this.quote(expectation.expected);
+                lines.push(`XCTAssertEqual("${this.escapeSwiftInterpolation(`${expectation.expected}=`)}\\(percentEncode(${source}))", capturedHeaders["Cookie"])`);
+            }
+            else if (expectation.source) {
+                lines.push(`XCTAssertEqual(${expectation.source}, capturedHeaders[${this.quote(expectation.name)}])`);
+            }
+            else {
+                lines.push(`XCTAssertEqual(${this.quote(expectation.expected)}, capturedHeaders[${this.quote(expectation.name)}])`);
+            }
         }
         if (plan.bodyAssertion) {
             if (plan.bodyAssertion.contentTypeMatch === 'prefix') {
@@ -184,6 +197,9 @@ ${assertions}
     }
     quote(value) {
         return `"${String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    escapeSwiftInterpolation(value) {
+        return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     }
     format(content) {
         return content.trim() + '\n';

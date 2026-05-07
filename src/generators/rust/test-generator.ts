@@ -200,6 +200,17 @@ fn assert_json_eq(actual: &[u8], expected: &[u8]) {
     assert_eq!(actual_json, expected_json);
 }
 
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => encoded.push(byte as char),
+            _ => encoded.push_str(&format!("%{:02X}", byte)),
+        }
+    }
+    encoded
+}
+
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|window| window == needle)
 }
@@ -213,7 +224,14 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
       lines.push(`assert_eq!(captured.query.get(${this.quote(expectation.name)}).map(String::as_str), Some(${this.quote(expectation.expected)}));`);
     }
     for (const expectation of plan.headerExpectations) {
-      lines.push(`assert_eq!(captured.headers.get(${this.quote(expectation.name.toLowerCase())}).map(String::as_str), Some(${this.quote(expectation.expected)}));`);
+      if (expectation.cookie) {
+        const source = expectation.source || this.quote(expectation.expected);
+        lines.push(`assert_eq!(captured.headers.get("cookie").map(String::as_str), Some(&format!("${this.escapeRustFormat(expectation.expected)}={}", percent_encode(${source}))));`);
+      } else if (expectation.source) {
+        lines.push(`assert_eq!(captured.headers.get(${this.quote(expectation.name.toLowerCase())}).map(String::as_str), Some(${expectation.source}));`);
+      } else {
+        lines.push(`assert_eq!(captured.headers.get(${this.quote(expectation.name.toLowerCase())}).map(String::as_str), Some(${this.quote(expectation.expected)}));`);
+      }
     }
     if (plan.bodyAssertion) {
       if (plan.bodyAssertion.contentTypeMatch === 'prefix') {
@@ -233,6 +251,10 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
   private quote(value: string): string {
     return `"${String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+
+  private escapeRustFormat(value: string): string {
+    return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\{/g, '{{').replace(/\}/g, '}}');
   }
 
   private indent(content: string, spaces: number): string {

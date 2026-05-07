@@ -1,5 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const PYTHON_CONFIG: LanguageConfig = {
   language: 'python',
@@ -110,7 +111,12 @@ export function getPythonType(schema: any, config: LanguageConfig): string {
     return getPythonType(composed, config);
   }
 
-  const type = normalizeSchemaType(schema.type) || inferImplicitObjectType(schema);
+  const constInfo = getConstSchemaInfo(schema);
+  if (constInfo) {
+    return renderPythonConstType(constInfo.value);
+  }
+
+  const type = resolveSchemaType(schema).effectiveType;
   const format = schema.format;
   
   if (type === 'string') {
@@ -130,7 +136,20 @@ export function getPythonType(schema: any, config: LanguageConfig): string {
   }
   
   if (type === 'array') {
-    const itemType = schema.items ? getPythonType(schema.items, config) : 'Any';
+    const tupleInfo = getTupleSchemaInfo(schema);
+    if (tupleInfo) {
+      const prefixTypes = tupleInfo.prefixItems.map((itemSchema) => getPythonType(itemSchema, config));
+      if (tupleInfo.fixedLength) {
+        return `Tuple[${prefixTypes.join(', ')}]`;
+      }
+      const additionalType = tupleInfo.additionalItems === true
+        ? 'Any'
+        : tupleInfo.additionalItems
+          ? getPythonType(tupleInfo.additionalItems, config)
+          : 'Any';
+      return `Tuple[${[...prefixTypes, `...${additionalType}`].join(', ')}]`;
+    }
+    const itemType = schema.items && typeof schema.items === 'object' ? getPythonType(schema.items, config) : 'Any';
     return `List[${itemType}]`;
   }
   
@@ -148,41 +167,17 @@ export function getPythonType(schema: any, config: LanguageConfig): string {
   return 'Any';
 }
 
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
+function renderPythonConstType(value: string | number | boolean | null): string {
+  if (value === null) {
+    return 'Any';
   }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
+  if (typeof value === 'string') {
+    return `Literal['${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}']`;
   }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: any): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
+  if (typeof value === 'boolean') {
+    return `Literal[${value ? 'True' : 'False'}]`;
   }
-  if (schema.properties && typeof schema.properties === 'object') {
-    return 'object';
-  }
-  if (schema.additionalProperties) {
-    return 'object';
-  }
-  return undefined;
-}
-
-function pickComposedSchema(schema: any): any | undefined {
-  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
-  for (const key of orderedKeys) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    const candidate = values.find((entry) => entry && typeof entry === 'object' && normalizeSchemaType(entry.type) !== 'null');
-    return candidate || values[0];
-  }
-  return undefined;
+  return `Literal[${value}]`;
 }
 
 export function getPythonPackageRoot(config: GeneratorConfig): string {

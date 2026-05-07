@@ -1,6 +1,9 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { GO_CONFIG, getGoType } from './config.js';
+import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 const GO_RESERVED_WORDS = new Set([
     'break',
     'case',
@@ -53,6 +56,14 @@ export class ApiGenerator {
         const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const moduleName = this.getModuleName(config);
         const needsFmt = operations.some((op) => this.extractPathParams(op.path).length > 0);
+        const needsRequestHeaderHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        });
+        const needsQuerySerializationHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+        });
         const referencedModels = new Set();
         const methods = operations
             .map((op) => {
@@ -61,14 +72,17 @@ export class ApiGenerator {
             return generated.content;
         })
             .join('\n\n');
-        const fmtImport = needsFmt ? '    "fmt"\n' : '';
+        const encodingJsonImport = needsQuerySerializationHelpers ? '    "encoding/json"\n' : '';
+        const fmtImport = (needsFmt || needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "fmt"\n' : '';
+        const netUrlImport = (needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "net/url"\n' : '';
+        const stringsImport = (needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "strings"\n' : '';
         const typesImport = referencedModels.size > 0 ? `    sdktypes "${moduleName}/types"\n` : '';
         return {
             path: `api/${fileName}.go`,
             content: this.format(`package api
 
 import (
-${fmtImport}${typesImport}    sdkhttp "${moduleName}/http"
+${encodingJsonImport}${fmtImport}${netUrlImport}${stringsImport}${typesImport}    sdkhttp "${moduleName}/http"
 )
 
 type ${structName} struct {
@@ -80,6 +94,9 @@ func New${structName}(client *sdkhttp.Client) *${structName} {
 }
 
 ${methods}
+
+${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
+${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 `),
             language: 'go',
             description: `${tag} API module`,
@@ -88,14 +105,21 @@ ${methods}
     generateMethod(op, structName, config, methodName, knownModels) {
         const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
-        const hasQuery = allParameters.some((param) => param?.in === 'query');
-        const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        const queryParams = allParameters.filter((param) => param?.in === 'query');
+        const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
+        const headerParams = allParameters.filter((param) => param?.in === 'header');
+        const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const hasQuery = queryParams.length > 0;
+        const hasRawQueryString = queryStringParams.length > 0;
+        const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
         const method = String(op.method || '').toLowerCase();
-        const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+        const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const supportsRequestBody = supportsRequestBodyByDefault(method);
         const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
         const hasBody = Boolean(requestBodyInfo);
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestBodySchema = requestBodyInfo?.schema;
+        const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
             : '""';
@@ -118,153 +142,233 @@ ${methods}
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => toSafeCamelIdentifier(value, GO_RESERVED_WORDS), [
             hasBody ? 'body' : '',
             hasQuery ? 'query' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
             hasHeaders ? 'headers' : '',
+            hasHeaders ? 'requestHeaders' : '',
         ]);
         const pathParams = rawPathParams.map((rawName) => ({
             rawName,
             safeName: pathParamNames.get(rawName) || rawName,
         }));
+        const parameterReservedNames = [
+            ...pathParams.map((param) => param.safeName),
+            hasBody ? 'body' : '',
+            hasQuery ? 'query' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'headers' : '',
+            hasHeaders ? 'requestHeaders' : '',
+        ];
+        const queryBindings = hasExplicitQuerySerialization
+            ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
+            : [];
+        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+            ...parameterReservedNames,
+            ...queryBindings.map((binding) => binding.safeName),
+            ...headerBindings.map((binding) => binding.safeName),
+        ]);
+        const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+        const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+        const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+        const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = [];
         if (pathParams.length > 0) {
             params.push(...pathParams.map((param) => `${param.safeName} string`));
         }
-        if (hasBody) {
+        if (hasBody && requestBodyRequired) {
             const bodyType = requestBodyRequired ? requestType : this.toOptionalGoType(requestType);
             params.push(`body ${bodyType}`);
         }
-        if (hasQuery) {
+        if (hasRawQueryString) {
+            params.push('rawQueryString string');
+        }
+        params.push(...requiredQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+        params.push(...requiredHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
+        if (hasBody && !requestBodyRequired) {
+            params.push(`body ${this.toOptionalGoType(requestType)}`);
+        }
+        if (hasQuery && !hasExplicitQuerySerialization) {
             params.push('query map[string]interface{}');
         }
-        if (hasHeaders) {
-            params.push('headers map[string]string');
-        }
+        params.push(...optionalQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+        params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '%s');
         const formattedPath = pathParams.length > 0
             ? `fmt.Sprintf("${pathTemplate}", ${pathParams.map((param) => param.safeName).join(', ')})`
             : `"${pathTemplate}"`;
         const prefixedPath = `${GO_CONFIG.namingConventions.modelName(config.sdkType)}ApiPath(${formattedPath})`;
+        const requestPath = hasRawQueryString
+            ? `AppendQueryString(${prefixedPath}, rawQueryString)`
+            : hasExplicitQuerySerialization
+                ? `AppendQueryString(${prefixedPath}, query)`
+                : prefixedPath;
         let call = '';
         switch (method) {
             case 'get':
                 if (hasQuery && hasHeaders) {
-                    call = `a.client.Get(${prefixedPath}, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Get(${requestPath}, nil, headers)`
+                        : `a.client.Get(${requestPath}, query, headers)`;
                 }
                 else if (hasQuery) {
-                    call = `a.client.Get(${prefixedPath}, query, nil)`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Get(${requestPath}, nil, nil)`
+                        : `a.client.Get(${requestPath}, query, nil)`;
                 }
                 else if (hasHeaders) {
-                    call = `a.client.Get(${prefixedPath}, nil, headers)`;
+                    call = `a.client.Get(${requestPath}, nil, headers)`;
                 }
                 else {
-                    call = `a.client.Get(${prefixedPath}, nil, nil)`;
+                    call = `a.client.Get(${requestPath}, nil, nil)`;
                 }
                 break;
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `a.client.Post(${prefixedPath}, body, query, headers, ${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `a.client.Post(${requestPath}, body, nil, headers, ${contentTypeArg})`
+                            : `a.client.Post(${requestPath}, body, query, headers, ${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `a.client.Post(${prefixedPath}, body, query, nil, ${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `a.client.Post(${requestPath}, body, nil, nil, ${contentTypeArg})`
+                            : `a.client.Post(${requestPath}, body, query, nil, ${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `a.client.Post(${prefixedPath}, body, nil, headers, ${contentTypeArg})`;
+                        call = `a.client.Post(${requestPath}, body, nil, headers, ${contentTypeArg})`;
                     }
                     else {
-                        call = `a.client.Post(${prefixedPath}, body, nil, nil, ${contentTypeArg})`;
+                        call = `a.client.Post(${requestPath}, body, nil, nil, ${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `a.client.Post(${prefixedPath}, nil, query, headers, "")`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Post(${requestPath}, nil, nil, headers, "")`
+                        : `a.client.Post(${requestPath}, nil, query, headers, "")`;
                 }
                 else if (hasQuery) {
-                    call = `a.client.Post(${prefixedPath}, nil, query, nil, "")`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Post(${requestPath}, nil, nil, nil, "")`
+                        : `a.client.Post(${requestPath}, nil, query, nil, "")`;
                 }
                 else if (hasHeaders) {
-                    call = `a.client.Post(${prefixedPath}, nil, nil, headers, "")`;
+                    call = `a.client.Post(${requestPath}, nil, nil, headers, "")`;
                 }
                 else {
-                    call = `a.client.Post(${prefixedPath}, nil, nil, nil, "")`;
+                    call = `a.client.Post(${requestPath}, nil, nil, nil, "")`;
                 }
                 break;
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `a.client.Put(${prefixedPath}, body, query, headers, ${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `a.client.Put(${requestPath}, body, nil, headers, ${contentTypeArg})`
+                            : `a.client.Put(${requestPath}, body, query, headers, ${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `a.client.Put(${prefixedPath}, body, query, nil, ${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `a.client.Put(${requestPath}, body, nil, nil, ${contentTypeArg})`
+                            : `a.client.Put(${requestPath}, body, query, nil, ${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `a.client.Put(${prefixedPath}, body, nil, headers, ${contentTypeArg})`;
+                        call = `a.client.Put(${requestPath}, body, nil, headers, ${contentTypeArg})`;
                     }
                     else {
-                        call = `a.client.Put(${prefixedPath}, body, nil, nil, ${contentTypeArg})`;
+                        call = `a.client.Put(${requestPath}, body, nil, nil, ${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `a.client.Put(${prefixedPath}, nil, query, headers, "")`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Put(${requestPath}, nil, nil, headers, "")`
+                        : `a.client.Put(${requestPath}, nil, query, headers, "")`;
                 }
                 else if (hasQuery) {
-                    call = `a.client.Put(${prefixedPath}, nil, query, nil, "")`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Put(${requestPath}, nil, nil, nil, "")`
+                        : `a.client.Put(${requestPath}, nil, query, nil, "")`;
                 }
                 else if (hasHeaders) {
-                    call = `a.client.Put(${prefixedPath}, nil, nil, headers, "")`;
+                    call = `a.client.Put(${requestPath}, nil, nil, headers, "")`;
                 }
                 else {
-                    call = `a.client.Put(${prefixedPath}, nil, nil, nil, "")`;
+                    call = `a.client.Put(${requestPath}, nil, nil, nil, "")`;
                 }
                 break;
             case 'delete':
                 if (hasQuery && hasHeaders) {
-                    call = `a.client.Delete(${prefixedPath}, query, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Delete(${requestPath}, nil, headers)`
+                        : `a.client.Delete(${requestPath}, query, headers)`;
                 }
                 else if (hasQuery) {
-                    call = `a.client.Delete(${prefixedPath}, query, nil)`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Delete(${requestPath}, nil, nil)`
+                        : `a.client.Delete(${requestPath}, query, nil)`;
                 }
                 else if (hasHeaders) {
-                    call = `a.client.Delete(${prefixedPath}, nil, headers)`;
+                    call = `a.client.Delete(${requestPath}, nil, headers)`;
                 }
                 else {
-                    call = `a.client.Delete(${prefixedPath}, nil, nil)`;
+                    call = `a.client.Delete(${requestPath}, nil, nil)`;
                 }
                 break;
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `a.client.Patch(${prefixedPath}, body, query, headers, ${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `a.client.Patch(${requestPath}, body, nil, headers, ${contentTypeArg})`
+                            : `a.client.Patch(${requestPath}, body, query, headers, ${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `a.client.Patch(${prefixedPath}, body, query, nil, ${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `a.client.Patch(${requestPath}, body, nil, nil, ${contentTypeArg})`
+                            : `a.client.Patch(${requestPath}, body, query, nil, ${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `a.client.Patch(${prefixedPath}, body, nil, headers, ${contentTypeArg})`;
+                        call = `a.client.Patch(${requestPath}, body, nil, headers, ${contentTypeArg})`;
                     }
                     else {
-                        call = `a.client.Patch(${prefixedPath}, body, nil, nil, ${contentTypeArg})`;
+                        call = `a.client.Patch(${requestPath}, body, nil, nil, ${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `a.client.Patch(${prefixedPath}, nil, query, headers, "")`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Patch(${requestPath}, nil, nil, headers, "")`
+                        : `a.client.Patch(${requestPath}, nil, query, headers, "")`;
                 }
                 else if (hasQuery) {
-                    call = `a.client.Patch(${prefixedPath}, nil, query, nil, "")`;
+                    call = hasExplicitQuerySerialization
+                        ? `a.client.Patch(${requestPath}, nil, nil, nil, "")`
+                        : `a.client.Patch(${requestPath}, nil, query, nil, "")`;
                 }
                 else if (hasHeaders) {
-                    call = `a.client.Patch(${prefixedPath}, nil, nil, headers, "")`;
+                    call = `a.client.Patch(${requestPath}, nil, nil, headers, "")`;
                 }
                 else {
-                    call = `a.client.Patch(${prefixedPath}, nil, nil, nil, "")`;
+                    call = `a.client.Patch(${requestPath}, nil, nil, nil, "")`;
                 }
                 break;
             default:
-                call = `a.client.Get(${prefixedPath}, nil, nil)`;
+                call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'})`;
         }
         const docComment = op.summary ? `// ${op.summary}\n` : '';
+        const requestHeaderBlock = hasHeaders
+            ? `    headers := BuildRequestHeaders(
+${this.renderNamedParameterMap(headerBindings, 8)},
+${this.renderNamedParameterMap(cookieBindings, 8)},
+    )
+`
+            : '';
+        const queryBlock = hasExplicitQuerySerialization
+            ? `    query := BuildQueryString([]QueryParameterSpec{
+${this.renderQueryParameterSpecs(queryBindings, 8)}
+    })
+`
+            : '';
         return {
             content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) (${responseType}, error) {
-    raw, err := ${call}
+${queryBlock}${requestHeaderBlock}    raw, err := ${call}
     if err != nil {
         var zero ${responseType}
         return zero, err
@@ -273,6 +377,298 @@ ${methods}
 }`,
             referencedModels,
         };
+    }
+    createQueryParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    createNamedParameterBindings(parameters, knownModels, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => toSafeCamelIdentifier(rawNameByKey.get(key) || 'value', GO_RESERVED_WORDS), reservedNames);
+        return parameters.map((parameter, index) => {
+            const key = keys[index];
+            return {
+                parameter,
+                safeName: safeNameByKey.get(key) || `value${index + 1}`,
+                required: Boolean(parameter?.required),
+                type: this.getNamedParameterType(parameter, knownModels),
+            };
+        });
+    }
+    getNamedParameterType(parameter, knownModels) {
+        const contentSchema = extractOpenApiParameterContentSchema(parameter);
+        if (contentSchema) {
+            return this.qualifyGoType(getGoType(contentSchema, GO_CONFIG), knownModels);
+        }
+        if (!parameter?.schema) {
+            return 'interface{}';
+        }
+        return this.qualifyGoType(getGoType(parameter.schema, GO_CONFIG), knownModels);
+    }
+    renderMethodParameter(binding) {
+        return `${binding.safeName} ${binding.required ? binding.type : this.toOptionalGoType(binding.type)}`;
+    }
+    renderNamedParameterMap(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        if (bindings.length === 0) {
+            return `${indent}map[string]interface{}{}`;
+        }
+        const lines = bindings.map((binding) => {
+            const valueExpression = binding.required ? binding.safeName : this.optionalHeaderValueExpression(binding.safeName);
+            return `${indent}map[string]interface{}{${this.formatGoString(String(binding.parameter?.name || binding.safeName))}: ${valueExpression},}`;
+        });
+        return bindings.length === 1
+            ? lines[0]
+            : [`${indent}map[string]interface{}{`, ...bindings.map((binding) => {
+                    const valueExpression = binding.required ? binding.safeName : this.optionalHeaderValueExpression(binding.safeName);
+                    return `${indent}    ${this.formatGoString(String(binding.parameter?.name || binding.safeName))}: ${valueExpression},`;
+                }), `${indent}}`].join('\n');
+    }
+    optionalHeaderValueExpression(identifier) {
+        return `func() interface{} { if ${identifier} == nil { return nil }; return *${identifier} }()`;
+    }
+    formatGoString(value) {
+        return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    renderQueryParameterSpecs(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        return bindings.map((binding) => {
+            const parts = [
+                `Name: ${this.formatGoString(String(binding.parameter?.name || binding.safeName))}`,
+                `Value: ${this.renderQueryValueExpression(binding)}`,
+                `Style: ${this.formatGoString(binding.style)}`,
+                `Explode: ${binding.explode ? 'true' : 'false'}`,
+                `AllowReserved: ${binding.allowReserved ? 'true' : 'false'}`,
+            ];
+            if (binding.contentType) {
+                parts.push(`ContentType: ${this.formatGoString(binding.contentType)}`);
+            }
+            return `${indent}{${parts.join(', ')}},`;
+        }).join('\n');
+    }
+    renderQueryValueExpression(binding) {
+        if (binding.required) {
+            return binding.safeName;
+        }
+        return `func() interface{} { if ${binding.safeName} == nil { return nil }; return *${binding.safeName} }()`;
+    }
+    generateQuerySerializationHelpers() {
+        return `type QueryParameterSpec struct {
+    Name          string
+    Value         interface{}
+    Style         string
+    Explode       bool
+    AllowReserved bool
+    ContentType   string
+}
+
+func BuildQueryString(parameters []QueryParameterSpec) string {
+    pairs := make([]string, 0)
+    for _, parameter := range parameters {
+        AppendSerializedParameter(&pairs, parameter)
+    }
+    return strings.Join(pairs, "&")
+}
+
+func AppendSerializedParameter(pairs *[]string, parameter QueryParameterSpec) {
+    if parameter.Value == nil {
+        return
+    }
+
+    if parameter.ContentType != "" {
+        encoded, _ := json.Marshal(parameter.Value)
+        *pairs = append(*pairs, url.QueryEscape(parameter.Name)+"="+EncodeQueryValue(string(encoded), parameter.AllowReserved))
+        return
+    }
+
+    style := parameter.Style
+    if style == "" {
+        style = "form"
+    }
+
+    switch value := parameter.Value.(type) {
+    case []string:
+        AppendArrayParameter(pairs, parameter.Name, stringSliceToInterface(value), style, parameter.Explode, parameter.AllowReserved)
+    case []int:
+        AppendArrayParameter(pairs, parameter.Name, intSliceToInterface(value), style, parameter.Explode, parameter.AllowReserved)
+    case []interface{}:
+        AppendArrayParameter(pairs, parameter.Name, value, style, parameter.Explode, parameter.AllowReserved)
+    case map[string]int:
+        AppendObjectParameter(pairs, parameter.Name, intMapToInterface(value), style, parameter.Explode, parameter.AllowReserved)
+    case map[string]string:
+        AppendObjectParameter(pairs, parameter.Name, stringMapToInterface(value), style, parameter.Explode, parameter.AllowReserved)
+    case map[string]interface{}:
+        if style == "deepObject" {
+            AppendDeepObjectParameter(pairs, parameter.Name, value, parameter.AllowReserved)
+        } else {
+            AppendObjectParameter(pairs, parameter.Name, value, style, parameter.Explode, parameter.AllowReserved)
+        }
+    default:
+        *pairs = append(*pairs, url.QueryEscape(parameter.Name)+"="+EncodeQueryValue(fmt.Sprint(value), parameter.AllowReserved))
+    }
+}
+
+func AppendArrayParameter(pairs *[]string, name string, value []interface{}, style string, explode bool, allowReserved bool) {
+    values := make([]string, 0, len(value))
+    for _, item := range value {
+        if item != nil {
+            values = append(values, fmt.Sprint(item))
+        }
+    }
+    if len(values) == 0 {
+        return
+    }
+    if style == "form" && explode {
+        for _, item := range values {
+            *pairs = append(*pairs, url.QueryEscape(name)+"="+EncodeQueryValue(item, allowReserved))
+        }
+        return
+    }
+    *pairs = append(*pairs, url.QueryEscape(name)+"="+EncodeQueryValue(strings.Join(values, ","), allowReserved))
+}
+
+func AppendObjectParameter(pairs *[]string, name string, value map[string]interface{}, style string, explode bool, allowReserved bool) {
+    entries := make([]string, 0, len(value)*2)
+    for key, item := range value {
+        if item == nil {
+            continue
+        }
+        if style == "form" && explode {
+            *pairs = append(*pairs, url.QueryEscape(key)+"="+EncodeQueryValue(fmt.Sprint(item), allowReserved))
+            continue
+        }
+        entries = append(entries, key, fmt.Sprint(item))
+    }
+    if len(entries) == 0 {
+        return
+    }
+    if !(style == "form" && explode) {
+        *pairs = append(*pairs, url.QueryEscape(name)+"="+EncodeQueryValue(strings.Join(entries, ","), allowReserved))
+    }
+}
+
+func AppendDeepObjectParameter(pairs *[]string, name string, value map[string]interface{}, allowReserved bool) {
+    for key, item := range value {
+        if item == nil {
+            continue
+        }
+        *pairs = append(*pairs, url.QueryEscape(fmt.Sprintf("%s[%s]", name, key))+"="+EncodeQueryValue(fmt.Sprint(item), allowReserved))
+    }
+}
+
+func EncodeQueryValue(value string, allowReserved bool) string {
+    encoded := url.QueryEscape(value)
+    if !allowReserved {
+        return encoded
+    }
+    replacements := map[string]string{
+        "%3A": ":", "%2F": "/", "%3F": "?", "%23": "#",
+        "%5B": "[", "%5D": "]", "%40": "@", "%21": "!",
+        "%24": "$", "%26": "&", "%27": "'", "%28": "(",
+        "%29": ")", "%2A": "*", "%2B": "+", "%2C": ",",
+        "%3B": ";", "%3D": "=",
+    }
+    for escaped, reserved := range replacements {
+        encoded = strings.ReplaceAll(encoded, escaped, reserved)
+    }
+    return encoded
+}
+
+func stringSliceToInterface(values []string) []interface{} {
+    result := make([]interface{}, 0, len(values))
+    for _, value := range values {
+        result = append(result, value)
+    }
+    return result
+}
+
+func intSliceToInterface(values []int) []interface{} {
+    result := make([]interface{}, 0, len(values))
+    for _, value := range values {
+        result = append(result, value)
+    }
+    return result
+}
+
+func stringMapToInterface(values map[string]string) map[string]interface{} {
+    result := make(map[string]interface{}, len(values))
+    for key, value := range values {
+        result[key] = value
+    }
+    return result
+}
+
+func intMapToInterface(values map[string]int) map[string]interface{} {
+    result := make(map[string]interface{}, len(values))
+    for key, value := range values {
+        result[key] = value
+    }
+    return result
+}`;
+    }
+    generateRequestHeaderHelpers() {
+        return `func BuildRequestHeaders(headers map[string]interface{}, cookies map[string]interface{}) map[string]string {
+    requestHeaders := map[string]string{}
+    for name, value := range headers {
+        if serialized, ok := SerializeParameterValue(value); ok {
+            requestHeaders[name] = serialized
+        }
+    }
+
+    if cookieHeader := BuildCookieHeader(cookies); cookieHeader != "" {
+        if existing, ok := requestHeaders["Cookie"]; ok && existing != "" {
+            requestHeaders["Cookie"] = existing + "; " + cookieHeader
+        } else {
+            requestHeaders["Cookie"] = cookieHeader
+        }
+    }
+
+    if len(requestHeaders) == 0 {
+        return nil
+    }
+    return requestHeaders
+}
+
+func BuildCookieHeader(cookies map[string]interface{}) string {
+    pairs := make([]string, 0, len(cookies))
+    for name, value := range cookies {
+        if serialized, ok := SerializeParameterValue(value); ok {
+            pairs = append(pairs, url.QueryEscape(name)+"="+url.QueryEscape(serialized))
+        }
+    }
+    return strings.Join(pairs, "; ")
+}
+
+func SerializeParameterValue(value interface{}) (string, bool) {
+    if value == nil {
+        return "", false
+    }
+    switch typed := value.(type) {
+    case string:
+        return typed, true
+    case fmt.Stringer:
+        return typed.String(), true
+    case []string:
+        return strings.Join(typed, ","), true
+    case []int:
+        values := make([]string, 0, len(typed))
+        for _, item := range typed {
+            values = append(values, fmt.Sprint(item))
+        }
+        return strings.Join(values, ","), true
+    default:
+        return fmt.Sprint(value), true
+    }
+}`;
     }
     generateOperationId(method, path, op, tag) {
         if (op.operationId) {
@@ -287,6 +683,10 @@ ${methods}
             put: 'Update',
             patch: 'Patch',
             delete: 'Delete',
+            options: 'Options',
+            head: 'Head',
+            trace: 'Trace',
+            query: 'Query',
         };
         return `${actionMap[method] || GO_CONFIG.namingConventions.modelName(method)}${GO_CONFIG.namingConventions.modelName(resource)}`;
     }
@@ -303,7 +703,7 @@ ${methods}
         if (!mediaType) {
             return undefined;
         }
-        const schema = content[mediaType]?.schema;
+        const schema = resolveMediaTypeSchema(content[mediaType]);
         if (!schema) {
             return undefined;
         }
@@ -341,8 +741,11 @@ ${methods}
                 continue;
             }
             const mediaType = this.pickJsonMediaType(content);
-            if (mediaType && content[mediaType]?.schema) {
-                return content[mediaType].schema;
+            if (mediaType) {
+                const schema = resolveMediaTypeSchema(content[mediaType]);
+                if (schema) {
+                    return schema;
+                }
             }
         }
         return undefined;
@@ -373,37 +776,8 @@ ${methods}
         }
         return 'interface{}';
     }
-    collectReferencedModels(schema, knownModels, refs, visited = new Set()) {
-        if (!schema || typeof schema !== 'object') {
-            return;
-        }
-        if (visited.has(schema)) {
-            return;
-        }
-        visited.add(schema);
-        if (schema.$ref) {
-            const refName = schema.$ref.split('/').pop();
-            const modelName = GO_CONFIG.namingConventions.modelName(refName ?? '');
-            if (knownModels.has(modelName)) {
-                refs.add(modelName);
-            }
-            return;
-        }
-        for (const key of ['oneOf', 'anyOf', 'allOf']) {
-            const values = schema[key];
-            if (Array.isArray(values)) {
-                values.forEach((value) => this.collectReferencedModels(value, knownModels, refs, visited));
-            }
-        }
-        if (schema.items) {
-            this.collectReferencedModels(schema.items, knownModels, refs, visited);
-        }
-        if (schema.properties && typeof schema.properties === 'object') {
-            Object.values(schema.properties).forEach((value) => this.collectReferencedModels(value, knownModels, refs, visited));
-        }
-        if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-            this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
-        }
+    collectReferencedModels(schema, knownModels, refs) {
+        collectSchemaReferences(schema, GO_CONFIG.namingConventions.modelName, knownModels, refs);
     }
     qualifyGoType(typeName, knownModels) {
         let result = typeName;
@@ -416,7 +790,7 @@ ${methods}
         return result;
     }
     toOptionalGoType(typeName) {
-        if (typeName.startsWith('*') || typeName.startsWith('[]') || typeName.startsWith('map[') || typeName === 'interface{}') {
+        if (typeName.startsWith('*') || typeName.startsWith('[]') || typeName === 'interface{}') {
             return typeName;
         }
         return `*${typeName}`;
@@ -515,6 +889,17 @@ func (b *BaseApi) Patch(
 ) (interface{}, error) {
     return b.http.Patch(b.basePath+path, body, query, headers, contentType)
 }
+
+func (b *BaseApi) Request(
+    method string,
+    path string,
+    body interface{},
+    query map[string]interface{},
+    headers map[string]string,
+    contentType string,
+) (interface{}, error) {
+    return b.http.Request(method, b.basePath+path, body, query, headers, contentType)
+}
 `),
             language: 'go',
             description: 'Base API class',
@@ -556,6 +941,17 @@ func ${GO_CONFIG.namingConventions.modelName(config.sdkType)}ApiPath(path string
         return normalizedPath
     }
     return normalizedPrefix + normalizedPath
+}
+
+func AppendQueryString(path string, rawQueryString string) string {
+    query := strings.TrimLeft(rawQueryString, "?")
+    if query == "" {
+        return path
+    }
+    if strings.Contains(path, "?") {
+        return path + "&" + query
+    }
+    return path + "?" + query
 }
 `),
             language: 'go',

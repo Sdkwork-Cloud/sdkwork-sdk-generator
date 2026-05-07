@@ -307,6 +307,8 @@ describe('CSharp generator regressions', () => {
     expect(testProjectFile).toBeDefined();
     expect(smokeTestFile).toBeDefined();
 
+    expect(projectFile!.content).toContain('<Compile Remove="Tests/**/*.cs" />');
+    expect(projectFile!.content).toContain('<None Include="Tests/**/*.cs" />');
     expect(testProjectFile!.content).toContain('<ProjectReference Include="../App.csproj" />');
     expect(testProjectFile!.content).toContain('<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />');
     expect(testProjectFile!.content).toContain('<PackageReference Include="xunit" Version="2.9.0" />');

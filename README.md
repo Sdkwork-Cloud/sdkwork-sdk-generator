@@ -16,7 +16,10 @@ Professional SDK code generator for multiple programming languages. Generate typ
 - **Unified Publish Bin**: Every generated language SDK includes `bin/publish-core.mjs`, `bin/publish.sh`, and `bin/publish.ps1`
 - **Unified Imports**: All imports use the main package entry (no sub-path imports)
 - **Async/Await**: Modern async patterns for all languages
-- **Strict Spec Validation**: Generation fails fast if input is not OpenAPI 3.x, has no `paths`, or is an upstream error payload (`code/msg` wrapper)
+- **Strict Spec Validation**: Generation fails fast if input is not a valid OpenAPI 3.x semantic version document, has no `paths`, or is an upstream error payload (`code/msg` wrapper)
+- **OpenAPI 3.x Coverage**: Supports OpenAPI 3.0.x, 3.1.x, 3.2.x, and valid future 3.x version strings, including JSON/YAML specs from local files or HTTP(S) URLs
+- **Complete Path Item Methods**: Generates SDK operations for OpenAPI Path Item methods `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, `trace`, `query`, plus OpenAPI 3.2 `additionalOperations`
+- **Rust Integration Client**: The `rust/` crate provides a native Rust client for SDK Generator HTTP services, including OpenAPI URL generation, OpenAPI file upload generation, and generated package download
 ## Installation
 
 ```bash
@@ -29,6 +32,14 @@ npm install @sdkwork/sdk-generator
 
 ```bash
 sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript
+```
+
+The `--input` value can be a local OpenAPI JSON/YAML file or an HTTP(S) URL:
+
+```bash
+sdkgen generate -i ./openapi.yaml -o ./sdk -n MySDK -l typescript
+sdkgen generate -i https://api.example.com/openapi.json -o ./sdk -n MySDK -l python
+sdkgen generate -i https://api.example.com/openapi.yaml -o ./sdk -n MySDK -l go
 ```
 
 By default the generator resolves the SDK version from the highest available baseline:
@@ -107,6 +118,50 @@ To turn inspect into an explicit automation gate:
 sdkgen inspect -o ./sdk --fail-on degraded
 sdkgen inspect -o ./sdk --require-action verify
 ```
+
+## Rust Integration Client
+
+This repository also includes `rust/`, a native Rust crate for third-party Rust applications that call an SDKWork SDK Generator service over HTTP.
+
+It is designed as an integration client, not a second generator implementation. The generator service remains responsible for OpenAPI 3.x parsing, SDK generation, verification metadata, and archive packaging. Rust applications can use the crate to:
+
+- submit an OpenAPI JSON/YAML URL,
+- upload an OpenAPI JSON/YAML file or pass a local OpenAPI path,
+- query generation job status,
+- generate and download the generated SDK package as `zip` or `tar.gz`.
+
+Minimal usage:
+
+```rust
+use sdkwork_sdk_generator::{
+    GenerateFromUrlRequest, GeneratedPackageFormat, SdkGeneratorClient, SdkLanguage, SdkType,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = SdkGeneratorClient::builder("https://generator.example.com")
+        .api_key("your-api-key")
+        .build()?;
+
+    let archive = client
+        .generate_from_url_and_download(
+            GenerateFromUrlRequest::new(
+                "https://api.example.com/openapi.yaml",
+                SdkLanguage::Rust,
+                "Backend",
+            )
+            .sdk_type(SdkType::Backend)
+            .package_name("sdkwork-backend-sdk"),
+            GeneratedPackageFormat::Zip,
+        )
+        .await?;
+
+    std::fs::write(archive.file_name.unwrap_or_else(|| "sdk.zip".to_string()), archive.bytes)?;
+    Ok(())
+}
+```
+
+See `rust/README.md` for the full request model and HTTP contract.
 
 Supported inspect gate values:
 
@@ -200,7 +255,7 @@ import { buildExecutionHandoff } from '@sdkwork/sdk-generator';
 
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
-| `-i, --input` | Path to OpenAPI specification | Yes | - |
+| `-i, --input` | OpenAPI specification file path or HTTP(S) URL; JSON and YAML are supported | Yes | - |
 | `-o, --output` | Output directory | Yes | - |
 | `-n, --name` | SDK name | Yes | - |
 | `-l, --language` | Target language | No | `typescript` |
@@ -243,7 +298,7 @@ sdkgen languages --json
 | Dart | `dart` | Standalone Dart 3.0+ with `http` transport |
 | Python | `python` | Python 3.8+ with type hints |
 | Go | `go` | Go 1.21+ with strong typing |
-| Java | `java` | Java 11+ with OkHttp and Jackson |
+| Java | `java` | Java 21 with OkHttp and Jackson |
 | Swift | `swift` | Swift 5.7+ for iOS/macOS |
 | Kotlin | `kotlin` | Kotlin 1.9+ for Android/JVM |
 | Flutter | `flutter` | Flutter 3.0+ for cross-platform UI apps |

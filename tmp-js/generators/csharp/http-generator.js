@@ -338,6 +338,20 @@ namespace ${namespace}.Http
             return await ReadResponseAsync<T>(response);
         }
 
+        public async Task<T?> RequestAsync<T>(
+            string method,
+            string path,
+            object? body = null,
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null,
+            string? contentType = null)
+        {
+            using var content = CreateContent(body, contentType);
+            using var request = BuildRequest(new System.Net.Http.HttpMethod(method), path, parameters, requestHeaders, content);
+            var response = await _client.SendAsync(request);
+            return await ReadResponseAsync<T>(response);
+        }
+
         public async Task<T?> PostAsync<T>(
             string path,
             object? body = null,

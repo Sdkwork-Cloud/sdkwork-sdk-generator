@@ -2,20 +2,21 @@ import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSimplifiedTagNames } from '../../framework/naming.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
-import { RUST_CONFIG } from './config.js';
+import { resolveRustApiNames, type RustApiName } from './identifiers.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const apiNames = resolveRustApiNames(tags, resolvedTagNames);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
 
     return [
       this.generateHttpClient(apiKeyHeader, apiKeyUseBearer, config),
       this.generateHttpIndex(),
-      this.generateSdkClient(clientName, tags, resolvedTagNames, config),
+      this.generateSdkClient(clientName, tags, apiNames, config),
       this.generateLibFile(config),
     ];
   }
@@ -72,6 +73,8 @@ pub enum SdkworkError {
     InvalidHeaderName(#[from] reqwest::header::InvalidHeaderName),
     #[error("invalid header value: {0}")]
     InvalidHeaderValue(#[from] reqwest::header::InvalidHeaderValue),
+    #[error("invalid http method: {0}")]
+    InvalidHttpMethod(#[from] http::method::InvalidMethod),
     #[error("http status {status}: {body}")]
     HttpStatus { status: u16, body: String },
 }
@@ -200,6 +203,22 @@ impl SdkworkHttpClient {
         T: DeserializeOwned,
     {
         self.request(Method::DELETE, path, query, Option::<&Value>::None, headers, None).await
+    }
+
+    pub async fn request_method<T, B>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&B>,
+        query: Option<&QueryParams>,
+        headers: Option<&RequestHeaders>,
+        content_type: Option<&str>,
+    ) -> Result<T, SdkworkError>
+    where
+        T: DeserializeOwned,
+        B: Serialize + ?Sized,
+    {
+        self.request(method, path, query, body, headers, content_type).await
     }
 
     async fn request<T, B>(
@@ -378,26 +397,24 @@ pub use client::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, Sdkwo
   private generateSdkClient(
     clientName: string,
     tags: string[],
-    resolvedTagNames: Map<string, string>,
+    apiNames: Map<string, RustApiName>,
     _config: GeneratorConfig
   ): GeneratedFile {
     const getters = tags.map((tag) => {
-      const resolvedTagName = resolvedTagNames.get(tag) || tag;
-      const getterName = RUST_CONFIG.namingConventions.propertyName(resolvedTagName);
-      const structName = `${RUST_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-      return `pub fn ${getterName}(&self) -> ${structName} {
-        ${structName}::new(Arc::clone(&self.http))
+      const apiName = apiNames.get(tag);
+      if (!apiName) {
+        return '';
+      }
+      return `pub fn ${apiName.moduleName}(&self) -> ${apiName.structName} {
+        ${apiName.structName}::new(Arc::clone(&self.http))
     }`;
-    }).join('\n\n');
+    }).filter(Boolean).join('\n\n');
 
     return {
       path: 'src/client.rs',
       content: this.format(`use std::sync::Arc;
 
-use crate::api::{${tags.map((tag) => {
-  const resolvedTagName = resolvedTagNames.get(tag) || tag;
-  return `${RUST_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-}).join(', ')}};
+use crate::api::{${tags.map((tag) => apiNames.get(tag)?.structName).filter(Boolean).join(', ')}};
 use crate::http::{SdkworkConfig, SdkworkError, SdkworkHttpClient};
 
 #[derive(Clone)]

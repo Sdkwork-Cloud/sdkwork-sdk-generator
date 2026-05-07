@@ -1,5 +1,8 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { DART_CONFIG, DART_RESERVED_WORDS, getDartType } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
@@ -27,10 +30,22 @@ export class ApiGenerator {
         const responseHelperImport = operations.some((op) => this.methodNeedsResponseHelpers(op))
             ? "import 'response_helpers.dart';\n"
             : '';
+        const modelsImport = operations.some((op) => this.methodUsesModels(op, knownModels))
+            ? "import '../models.dart';\n"
+            : '';
+        const needsRequestHeaderHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        });
+        const needsQuerySerializationHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+        });
+        const dartConvertImport = needsRequestHeaderHelpers || needsQuerySerializationHelpers ? "import 'dart:convert';\n" : '';
         return {
             path: `lib/src/api/${fileName}.dart`,
-            content: this.format(`import '../http/client.dart';
-import '../models.dart';
+            content: this.format(`${dartConvertImport}import '../http/client.dart';
+${modelsImport}
 import 'paths.dart';
 ${responseHelperImport}
 
@@ -41,6 +56,9 @@ class ${className} {
 
 ${methods}
 }
+
+${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
+${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 `),
             language: 'dart',
             description: `${tag} API module`,
@@ -50,17 +68,21 @@ ${methods}
         const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const queryParams = allParameters.filter((param) => param?.in === 'query');
+        const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
         const hasQuery = queryParams.length > 0;
+        const hasRawQueryString = queryStringParams.length > 0;
         const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
         const method = String(op.method || '').toLowerCase();
-        const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+        const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const supportsRequestBody = supportsRequestBodyByDefault(method);
         const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
         const hasBody = requestBodyInfo !== undefined;
         const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
         const requestBodySchema = requestBodyInfo?.schema;
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
+        const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const requestType = requestBodySchema
             ? this.ensureKnownType(getDartType(requestBodySchema, DART_CONFIG), knownModels)
             : 'dynamic';
@@ -74,78 +96,378 @@ ${methods}
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => toSafeCamelIdentifier(value, DART_RESERVED_WORDS), [
             hasBody ? 'body' : '',
             hasQuery ? 'params' : '',
-            hasHeaders ? 'headers' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'requestHeaders' : '',
             hasBody ? 'payload' : '',
         ]);
         const pathParams = rawPathParams.map((rawName) => ({
             rawName,
             safeName: pathParamNames.get(rawName) || rawName,
         }));
-        const params = [];
+        const parameterReservedNames = [
+            ...pathParams.map((pathParam) => pathParam.safeName),
+            hasBody ? 'body' : '',
+            hasQuery ? 'params' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'requestHeaders' : '',
+            hasBody ? 'payload' : '',
+        ];
+        const queryBindings = hasExplicitQuerySerialization
+            ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
+            : [];
+        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+            ...parameterReservedNames,
+            ...queryBindings.map((binding) => binding.safeName),
+            ...headerBindings.map((binding) => binding.safeName),
+        ]);
+        const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+        const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+        const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+        const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
+        const requiredParams = [];
+        const optionalParams = [];
         if (pathParams.length) {
-            params.push(...pathParams.map((pathParam) => `String ${pathParam.safeName}`));
+            requiredParams.push(...pathParams.map((pathParam) => `String ${pathParam.safeName}`));
         }
-        if (hasBody) {
+        if (hasBody && requestBodyRequired) {
             if (requestBodyRequired) {
-                params.push(`${requestType} body`);
+                requiredParams.push(`${requestType} body`);
             }
             else if (requestType === 'dynamic') {
-                params.push('dynamic body');
+                optionalParams.push('dynamic body');
             }
             else {
-                params.push(`${requestType}? body`);
+                optionalParams.push(`${requestType}? body`);
             }
         }
-        if (hasQuery) {
-            params.push('Map<String, dynamic>? params');
+        if (hasRawQueryString) {
+            requiredParams.push('String rawQueryString');
         }
-        if (hasHeaders) {
-            params.push('Map<String, String>? headers');
+        requiredParams.push(...requiredQueryBindings.map((binding) => this.renderRequiredParameter(binding)));
+        requiredParams.push(...requiredHeaderBindings.map((binding) => this.renderRequiredParameter(binding)));
+        if (hasBody && !requestBodyRequired) {
+            optionalParams.push(requestType === 'dynamic' ? 'dynamic body' : `${requestType}? body`);
         }
+        if (hasQuery && !hasExplicitQuerySerialization) {
+            optionalParams.push('Map<String, dynamic>? params');
+        }
+        optionalParams.push(...optionalQueryBindings.map((binding) => this.renderOptionalParameter(binding)));
+        optionalParams.push(...optionalHeaderBindings.map((binding) => this.renderOptionalParameter(binding)));
+        const params = optionalParams.length > 0
+            ? [...requiredParams, `[${optionalParams.join(', ')}]`]
+            : requiredParams;
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
             const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, DART_RESERVED_WORDS);
             return `$${safeName}`;
         });
         const pathCall = `ApiPaths.${DART_CONFIG.namingConventions.methodName(config.sdkType)}Path('${pathTemplate}')`;
+        const requestPathCall = hasRawQueryString
+            ? `ApiPaths.appendQueryString(${pathCall}, rawQueryString)`
+            : hasExplicitQuerySerialization
+                ? `ApiPaths.appendQueryString(${pathCall}, query)`
+                : pathCall;
         const payloadLine = hasBody
             ? `    final payload = ${this.serializeRequestBodyExpression(requestBodySchema, 'body', requestBodyRequired)};\n`
             : '';
         let call = '';
         switch (method) {
             case 'get':
-                call = `_client.get(${pathCall}${hasQuery ? ', params: params' : ''}${hasHeaders ? ', headers: headers' : ''})`;
+                call = `_client.get(${requestPathCall}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''})`;
                 break;
             case 'post':
-                call = `_client.post(${pathCall}${hasBody ? ', body: payload' : ''}${hasQuery ? ', params: params' : ''}${hasHeaders ? ', headers: headers' : ''}${hasBody ? contentTypeArg : ''})`;
+                call = `_client.post(${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
                 break;
             case 'put':
-                call = `_client.put(${pathCall}${hasBody ? ', body: payload' : ''}${hasQuery ? ', params: params' : ''}${hasHeaders ? ', headers: headers' : ''}${hasBody ? contentTypeArg : ''})`;
+                call = `_client.put(${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
                 break;
             case 'delete':
-                call = `_client.delete(${pathCall}${hasQuery ? ', params: params' : ''}${hasHeaders ? ', headers: headers' : ''})`;
+                call = `_client.delete(${requestPathCall}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''})`;
                 break;
             case 'patch':
-                call = `_client.patch(${pathCall}${hasBody ? ', body: payload' : ''}${hasQuery ? ', params: params' : ''}${hasHeaders ? ', headers: headers' : ''}${hasBody ? contentTypeArg : ''})`;
+                call = `_client.patch(${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
                 break;
             default:
-                call = `_client.get(${pathCall})`;
+                call = `_client.request('${toHttpMethodLiteral(httpMethod)}', ${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
         }
         const docComment = op.summary ? `  /// ${op.summary}\n` : '';
+        const queryBlock = hasExplicitQuerySerialization
+            ? `    final query = buildQueryString([
+${this.renderQueryParameterSpecs(queryBindings, 6)}
+    ]);
+`
+            : '';
+        const requestHeaderBlock = hasHeaders
+            ? `    final requestHeaders = buildRequestHeaders(
+${this.renderNamedParameterMap(headerBindings, 6)},
+${this.renderNamedParameterMap(cookieBindings, 6)},
+    );
+`
+            : '';
         if (responseType === 'void') {
             return `${docComment}  Future<void> ${methodName}(${params.join(', ')}) async {
-${payloadLine}    await ${call};
+${queryBlock}${requestHeaderBlock}${payloadLine}    await ${call};
   }`;
         }
         if (responseType === 'dynamic') {
             return `${docComment}  Future<dynamic> ${methodName}(${params.join(', ')}) async {
-${payloadLine}    return ${call};
+${queryBlock}${requestHeaderBlock}${payloadLine}    return ${call};
   }`;
         }
         return `${docComment}  Future<${responseType}?> ${methodName}(${params.join(', ')}) async {
-${payloadLine}    final response = await ${call};
+${queryBlock}${requestHeaderBlock}${payloadLine}    final response = await ${call};
     return ${this.deserializeResponseExpression(responseSchema, 'response')};
   }`;
+    }
+    createNamedParameterBindings(parameters, knownModels, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => toSafeCamelIdentifier(rawNameByKey.get(key) || 'value', DART_RESERVED_WORDS), reservedNames);
+        return parameters.map((parameter, index) => {
+            const key = keys[index];
+            return {
+                parameter,
+                safeName: safeNameByKey.get(key) || `value${index + 1}`,
+                required: Boolean(parameter?.required),
+                type: this.getNamedParameterType(parameter, knownModels),
+            };
+        });
+    }
+    createQueryParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    getNamedParameterType(parameter, knownModels) {
+        const contentSchema = extractOpenApiParameterContentSchema(parameter);
+        if (contentSchema) {
+            return this.ensureKnownType(getDartType(contentSchema, DART_CONFIG), knownModels);
+        }
+        return parameter?.schema
+            ? this.ensureKnownType(getDartType(parameter.schema, DART_CONFIG), knownModels)
+            : 'dynamic';
+    }
+    renderRequiredParameter(binding) {
+        return `${binding.type} ${binding.safeName}`;
+    }
+    renderOptionalParameter(binding) {
+        return `${binding.type === 'dynamic' ? 'dynamic' : `${binding.type}?`} ${binding.safeName}`;
+    }
+    renderNamedParameterMap(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        if (bindings.length === 0) {
+            return `${indent}<String, dynamic>{}`;
+        }
+        const lines = bindings.map((binding) => {
+            return `${indent}  ${this.formatDartString(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
+        });
+        return [`${indent}<String, dynamic>{`, ...lines, `${indent}}`].join('\n');
+    }
+    formatDartString(value) {
+        return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+    }
+    renderQueryParameterSpecs(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        return bindings.map((binding) => {
+            return `${indent}QueryParameterSpec(${[
+                this.formatDartString(String(binding.parameter?.name || binding.safeName)),
+                binding.safeName,
+                this.formatDartString(binding.style),
+                binding.explode ? 'true' : 'false',
+                binding.allowReserved ? 'true' : 'false',
+                binding.contentType ? this.formatDartString(binding.contentType) : 'null',
+            ].join(', ')})`;
+        }).join(',\n');
+    }
+    generateQuerySerializationHelpers() {
+        return `class QueryParameterSpec {
+  final String name;
+  final dynamic value;
+  final String style;
+  final bool explode;
+  final bool allowReserved;
+  final String? contentType;
+
+  const QueryParameterSpec(
+    this.name,
+    this.value,
+    this.style,
+    this.explode,
+    this.allowReserved,
+    this.contentType,
+  );
+}
+
+String buildQueryString(List<QueryParameterSpec> parameters) {
+  final pairs = <String>[];
+  for (final parameter in parameters) {
+    appendSerializedParameter(pairs, parameter);
+  }
+  return pairs.join('&');
+}
+
+void appendSerializedParameter(List<String> pairs, QueryParameterSpec parameter) {
+  final value = parameter.value;
+  if (value == null) return;
+
+  final contentType = parameter.contentType;
+  if (contentType != null && contentType.trim().isNotEmpty) {
+    pairs.add('\${urlEncode(parameter.name)}=\${encodeQueryValue(jsonEncode(value), parameter.allowReserved)}');
+    return;
+  }
+
+  final style = parameter.style.trim().isEmpty ? 'form' : parameter.style;
+  if (style == 'deepObject' && value is Map) {
+    appendDeepObjectParameter(pairs, parameter.name, value, parameter.allowReserved);
+    return;
+  }
+  if (value is Iterable) {
+    appendArrayParameter(pairs, parameter.name, value, style, parameter.explode, parameter.allowReserved);
+    return;
+  }
+  if (value is Map) {
+    appendObjectParameter(pairs, parameter.name, value, style, parameter.explode, parameter.allowReserved);
+    return;
+  }
+  pairs.add('\${urlEncode(parameter.name)}=\${encodeQueryValue(value.toString(), parameter.allowReserved)}');
+}
+
+void appendArrayParameter(
+  List<String> pairs,
+  String name,
+  Iterable values,
+  String style,
+  bool explode,
+  bool allowReserved,
+) {
+  final serialized = values.where((item) => item != null).map((item) => item.toString()).toList();
+  if (serialized.isEmpty) return;
+  if (style == 'form' && explode) {
+    for (final item in serialized) {
+      pairs.add('\${urlEncode(name)}=\${encodeQueryValue(item, allowReserved)}');
+    }
+    return;
+  }
+  pairs.add('\${urlEncode(name)}=\${encodeQueryValue(serialized.join(','), allowReserved)}');
+}
+
+void appendObjectParameter(
+  List<String> pairs,
+  String name,
+  Map values,
+  String style,
+  bool explode,
+  bool allowReserved,
+) {
+  final serialized = <String>[];
+  values.forEach((key, value) {
+    if (value == null) return;
+    if (style == 'form' && explode) {
+      pairs.add('\${urlEncode(key.toString())}=\${encodeQueryValue(value.toString(), allowReserved)}');
+      return;
+    }
+    serialized.add(key.toString());
+    serialized.add(value.toString());
+  });
+  if (serialized.isNotEmpty) {
+    pairs.add('\${urlEncode(name)}=\${encodeQueryValue(serialized.join(','), allowReserved)}');
+  }
+}
+
+void appendDeepObjectParameter(List<String> pairs, String name, Map values, bool allowReserved) {
+  values.forEach((key, value) {
+    if (value != null) {
+      pairs.add('\${urlEncode('$name[$key]')}=\${encodeQueryValue(value.toString(), allowReserved)}');
+    }
+  });
+}
+
+String encodeQueryValue(String value, bool allowReserved) {
+  var encoded = urlEncode(value);
+  if (!allowReserved) return encoded;
+  const replacements = <String, String>{
+    '%3A': ':',
+    '%2F': '/',
+    '%3F': '?',
+    '%23': '#',
+    '%5B': '[',
+    '%5D': ']',
+    '%40': '@',
+    '%21': '!',
+    '%24': r'$',
+    '%26': '&',
+    '%27': "'",
+    '%28': '(',
+    '%29': ')',
+    '%2A': '*',
+    '%2B': '+',
+    '%2C': ',',
+    '%3B': ';',
+    '%3D': '=',
+  };
+  replacements.forEach((escaped, reserved) {
+    encoded = encoded.replaceAll(escaped, reserved);
+  });
+  return encoded;
+}
+
+String urlEncode(String value) => Uri.encodeQueryComponent(value);`;
+    }
+    generateRequestHeaderHelpers() {
+        return `Map<String, String>? buildRequestHeaders(
+  Map<String, dynamic> headers, [
+  Map<String, dynamic> cookies = const {},
+]) {
+  final requestHeaders = <String, String>{};
+
+  headers.forEach((name, value) {
+    final serialized = serializeParameterValue(value);
+    if (serialized != null) {
+      requestHeaders[name] = serialized;
+    }
+  });
+
+  final cookieHeader = buildCookieHeader(cookies);
+  if (cookieHeader != null && cookieHeader.isNotEmpty) {
+    requestHeaders['Cookie'] = requestHeaders.containsKey('Cookie')
+        ? '\${requestHeaders['Cookie']}; $cookieHeader'
+        : cookieHeader;
+  }
+
+  return requestHeaders.isEmpty ? null : requestHeaders;
+}
+
+String? buildCookieHeader(Map<String, dynamic> cookies) {
+  final pairs = <String>[];
+  cookies.forEach((name, value) {
+    final serialized = serializeParameterValue(value);
+    if (serialized != null) {
+      pairs.add('\${Uri.encodeComponent(name)}=\${Uri.encodeComponent(serialized)}');
+    }
+  });
+  return pairs.isEmpty ? null : pairs.join('; ');
+}
+
+String? serializeParameterValue(dynamic value) {
+  if (value == null) return null;
+  if (value is DateTime) return value.toIso8601String();
+  if (value is Iterable) {
+    return value
+        .map(serializeParameterValue)
+        .whereType<String>()
+        .join(',');
+  }
+  if (value is Map) return jsonEncode(value);
+  return value.toString();
+}`;
     }
     serializeRequestBodyExpression(schema, bodyExpr, required) {
         if (!schema || typeof schema !== 'object') {
@@ -154,7 +476,10 @@ ${payloadLine}    final response = await ${call};
         if (schema.$ref) {
             return required ? `${bodyExpr}.toJson()` : `${bodyExpr}?.toJson()`;
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            return bodyExpr;
+        }
+        if (schema.items && typeof schema.items === 'object') {
             const itemExpr = this.serializeArrayItemExpression(schema.items, 'item');
             return required
                 ? `${bodyExpr}.map((item) => ${itemExpr}).toList()`
@@ -172,7 +497,10 @@ ${payloadLine}    final response = await ${call};
         if (schema?.$ref) {
             return `${itemExpr}.toJson()`;
         }
-        if (schema?.items) {
+        if (Array.isArray(schema?.prefixItems)) {
+            return itemExpr;
+        }
+        if (schema?.items && typeof schema.items === 'object') {
             const nestedExpr = this.serializeArrayItemExpression(schema.items, 'nestedItem');
             return `${itemExpr}.map((nestedItem) => ${nestedExpr}).toList()`;
         }
@@ -193,7 +521,10 @@ ${payloadLine}    final response = await ${call};
       return map == null ? null : ${refName}.fromJson(map);
     })()`;
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            return `(${valueExpr} is List ? ${valueExpr} : null)`;
+        }
+        if (schema.items && typeof schema.items === 'object') {
             const itemType = getDartType(schema.items, DART_CONFIG);
             const itemExpr = this.deserializeArrayItemExpression(schema.items, 'item');
             return `(() {
@@ -229,7 +560,10 @@ ${payloadLine}    final response = await ${call};
         return map == null ? null : ${refName}.fromJson(map);
       })()`;
         }
-        if (schema?.items) {
+        if (Array.isArray(schema?.prefixItems)) {
+            return `(${itemExpr} is List ? ${itemExpr} : null)`;
+        }
+        if (schema?.items && typeof schema.items === 'object') {
             const nestedType = getDartType(schema.items, DART_CONFIG);
             const nestedExpr = this.deserializeArrayItemExpression(schema.items, 'nestedItem');
             return `(() {
@@ -279,11 +613,49 @@ ${payloadLine}    final response = await ${call};
         }
         return this.schemaNeedsResponseHelpers(responseSchema);
     }
+    methodUsesModels(op, knownModels) {
+        const supportsRequestBody = supportsRequestBodyByDefault(String(op.method || '').toLowerCase());
+        const requestBodySchema = supportsRequestBody ? this.extractRequestBodyInfo(op)?.schema : undefined;
+        const responseSchema = this.extractResponseSchema(op);
+        return this.schemaUsesModels(requestBodySchema, knownModels) || this.schemaUsesModels(responseSchema, knownModels);
+    }
+    schemaUsesModels(schema, knownModels, visited = new Set()) {
+        if (!schema || typeof schema !== 'object' || visited.has(schema)) {
+            return false;
+        }
+        visited.add(schema);
+        if (schema.$ref) {
+            const modelName = DART_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || '');
+            return knownModels.has(modelName);
+        }
+        if (Array.isArray(schema.prefixItems)
+            && schema.prefixItems.some((itemSchema) => this.schemaUsesModels(itemSchema, knownModels, visited))) {
+            return true;
+        }
+        if (schema.items && typeof schema.items === 'object' && this.schemaUsesModels(schema.items, knownModels, visited)) {
+            return true;
+        }
+        if (schema.additionalProperties && typeof schema.additionalProperties === 'object'
+            && this.schemaUsesModels(schema.additionalProperties, knownModels, visited)) {
+            return true;
+        }
+        if (schema.properties && typeof schema.properties === 'object'
+            && Object.values(schema.properties).some((value) => this.schemaUsesModels(value, knownModels, visited))) {
+            return true;
+        }
+        for (const key of ['oneOf', 'anyOf', 'allOf']) {
+            const values = schema[key];
+            if (Array.isArray(values) && values.some((value) => this.schemaUsesModels(value, knownModels, visited))) {
+                return true;
+            }
+        }
+        return false;
+    }
     schemaNeedsResponseHelpers(schema) {
         if (!schema || typeof schema !== 'object') {
             return false;
         }
-        if (schema.$ref || schema.items || (schema.additionalProperties && typeof schema.additionalProperties === 'object')) {
+        if (schema.$ref || schema.items || schema.prefixItems || (schema.additionalProperties && typeof schema.additionalProperties === 'object')) {
             return true;
         }
         for (const key of ['oneOf', 'anyOf', 'allOf']) {
@@ -303,7 +675,7 @@ ${payloadLine}    final response = await ${call};
         if (!mediaType) {
             return undefined;
         }
-        const schema = content[mediaType]?.schema;
+        const schema = resolveMediaTypeSchema(content[mediaType]);
         if (!schema) {
             return undefined;
         }
@@ -338,8 +710,11 @@ ${payloadLine}    final response = await ${call};
                 continue;
             }
             const mediaType = this.pickJsonMediaType(content);
-            if (mediaType && content[mediaType]?.schema) {
-                return content[mediaType].schema;
+            if (mediaType) {
+                const schema = resolveMediaTypeSchema(content[mediaType]);
+                if (schema) {
+                    return schema;
+                }
             }
         }
         return undefined;
@@ -386,6 +761,10 @@ ${payloadLine}    final response = await ${call};
             put: 'update',
             patch: 'patch',
             delete: 'delete',
+            options: 'options',
+            head: 'head',
+            trace: 'trace',
+            query: 'query',
         };
         return `${actionMap[method] || method}${DART_CONFIG.namingConventions.modelName(resource)}`;
     }
@@ -433,6 +812,12 @@ ${payloadLine}    final response = await ${call};
       return normalizedPath;
     }
     return normalizedPrefix + normalizedPath;
+  }
+
+  static String appendQueryString(String path, String rawQueryString) {
+    final query = rawQueryString.replaceFirst(RegExp(r'^\\?+'), '');
+    if (query.isEmpty) return path;
+    return path.contains('?') ? '$path&$query' : '$path?$query';
   }
 }
 `),

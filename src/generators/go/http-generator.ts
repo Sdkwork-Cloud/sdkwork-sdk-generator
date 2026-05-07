@@ -186,6 +186,17 @@ func (c *Client) Patch(
     return c.request("PATCH", path, query, body, requestHeaders, contentType)
 }
 
+func (c *Client) Request(
+    method string,
+    path string,
+    body interface{},
+    query map[string]interface{},
+    requestHeaders map[string]string,
+    contentType string,
+) (interface{}, error) {
+    return c.request(method, path, query, body, requestHeaders, contentType)
+}
+
 func (c *Client) mergeHeaders(requestHeaders map[string]string) common.HttpHeaders {
     merged := common.HttpHeaders{}
     for key, value := range c.headers {

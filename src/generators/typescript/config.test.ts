@@ -54,4 +54,32 @@ describe('TypeScript config', () => {
 
         expect(type).toBe('string | null');
     });
+
+    it('maps nullable oneOf and anyOf schemas without unknown null branches', () => {
+        expect(getTypeScriptType(
+            {
+                oneOf: [{ type: 'null' }, { type: 'string' }],
+            },
+            TYPESCRIPT_CONFIG,
+        )).toBe('string | null');
+
+        expect(getTypeScriptType(
+            {
+                anyOf: [{ type: ['null'] }, { type: 'integer' }],
+            },
+            TYPESCRIPT_CONFIG,
+        )).toBe('number | null');
+    });
+
+    it('maps nullable allOf schemas without unknown intersection branches', () => {
+        const type = getTypeScriptType(
+            {
+                allOf: [{ type: 'null' }, { $ref: '#/components/schemas/UserRef' }],
+            },
+            TYPESCRIPT_CONFIG,
+            new Set(['UserRef']),
+        );
+
+        expect(type).toBe('UserRef');
+    });
 });

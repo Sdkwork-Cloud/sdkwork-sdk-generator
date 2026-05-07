@@ -1,47 +1,8 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { collectSchemaReferences, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
 import { RUST_CONFIG, getRustType } from './config.js';
-
-const RUST_RESERVED_WORDS = new Set([
-  'as',
-  'break',
-  'const',
-  'continue',
-  'crate',
-  'else',
-  'enum',
-  'extern',
-  'false',
-  'fn',
-  'for',
-  'if',
-  'impl',
-  'in',
-  'let',
-  'loop',
-  'match',
-  'mod',
-  'move',
-  'mut',
-  'pub',
-  'ref',
-  'return',
-  'Self',
-  'self',
-  'static',
-  'struct',
-  'super',
-  'trait',
-  'true',
-  'type',
-  'unsafe',
-  'use',
-  'where',
-  'while',
-  'async',
-  'await',
-  'dyn',
-]);
+import { sanitizeRustRawIdentifier } from './identifiers.js';
 
 export class ModelGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -57,7 +18,7 @@ export class ModelGenerator {
     for (const [name, schema] of Object.entries(ctx.schemas)) {
       const fileName = RUST_CONFIG.namingConventions.fileName(name);
       const modelName = RUST_CONFIG.namingConventions.modelName(name);
-      files.push(this.generateModel(name, schema, knownModels));
+      files.push(this.generateModel(name, schema, ctx.schemas, knownModels));
       exports.push(`pub mod ${fileName};`);
       exports.push(`pub use ${fileName}::${modelName};`);
     }
@@ -127,12 +88,18 @@ pub struct Page<T> {
     };
   }
 
-  private generateModel(name: string, schema: any, knownModels: Set<string>): GeneratedFile {
+  private generateModel(
+    name: string,
+    schema: any,
+    schemas: SchemaContext['schemas'],
+    knownModels: Set<string>
+  ): GeneratedFile {
+    const modelSchema = resolveModelSchema(schema, schemas);
     const modelName = RUST_CONFIG.namingConventions.modelName(name);
     const fileName = RUST_CONFIG.namingConventions.fileName(name);
-    const required = new Set<string>(Array.isArray(schema?.required) ? schema.required : []);
-    const properties = schema?.properties && typeof schema.properties === 'object'
-      ? Object.entries(schema.properties)
+    const required = new Set<string>(Array.isArray(modelSchema?.required) ? modelSchema.required : []);
+    const properties = modelSchema?.properties && typeof modelSchema.properties === 'object'
+      ? Object.entries(modelSchema.properties)
       : [];
     const referencedModels = new Set<string>();
     for (const [, propSchema] of properties) {
@@ -147,7 +114,7 @@ pub struct Page<T> {
       ? properties.map(([propName, propSchema]) => this.generateField(propName, propSchema, required, modelName)).join('\n\n')
       : '    #[serde(flatten)]\n    pub additional_properties: std::collections::HashMap<String, serde_json::Value>,';
 
-    const docComment = schema?.description ? `/// ${String(schema.description).trim()}\n` : '';
+    const docComment = modelSchema?.description ? `/// ${String(modelSchema.description).trim()}\n` : '';
     return {
       path: `src/models/${fileName}.rs`,
       content: this.format(`use serde::{Deserialize, Serialize};
@@ -196,41 +163,9 @@ ${fields}
   private collectReferencedModels(
     schema: any,
     knownModels: Set<string>,
-    refs: Set<string>,
-    visited: Set<any> = new Set<any>()
+    refs: Set<string>
   ): void {
-    if (!schema || typeof schema !== 'object') {
-      return;
-    }
-    if (visited.has(schema)) {
-      return;
-    }
-    visited.add(schema);
-
-    if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop();
-      const modelName = RUST_CONFIG.namingConventions.modelName(refName ?? '');
-      if (knownModels.has(modelName)) {
-        refs.add(modelName);
-      }
-      return;
-    }
-
-    for (const key of ['oneOf', 'anyOf', 'allOf']) {
-      const values = schema[key];
-      if (Array.isArray(values)) {
-        values.forEach((value: any) => this.collectReferencedModels(value, knownModels, refs, visited));
-      }
-    }
-    if (schema.items) {
-      this.collectReferencedModels(schema.items, knownModels, refs, visited);
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-      Object.values(schema.properties).forEach((value) => this.collectReferencedModels(value, knownModels, refs, visited));
-    }
-    if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-      this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
-    }
+    collectSchemaReferences(schema, RUST_CONFIG.namingConventions.modelName, knownModels, refs);
   }
 
   private collectRenderedModelReferences(
@@ -272,18 +207,7 @@ ${fields}
 }
 
 function sanitizeRustIdentifier(value: string): string {
-  const normalized = String(value || '')
-    .replace(/[^a-zA-Z0-9_]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .toLowerCase();
-
-  const base = normalized || 'value';
-  const safe = /^[0-9]/.test(base) ? `field_${base}` : base;
-  if (RUST_RESERVED_WORDS.has(safe)) {
-    return `r#${safe}`;
-  }
-  return safe;
+  return sanitizeRustRawIdentifier(value);
 }
 
 function isDirectSelfReference(schema: any, modelName: string): boolean {
@@ -301,16 +225,4 @@ function isDirectSelfReference(schema: any, modelName: string): boolean {
   }
 
   return false;
-}
-
-function pickComposedSchema(schema: any): any | undefined {
-  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
-  for (const key of orderedKeys) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    return values[0];
-  }
-  return undefined;
 }

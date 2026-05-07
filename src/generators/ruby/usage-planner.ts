@@ -1,5 +1,6 @@
-import type { ApiParameter, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -14,6 +15,7 @@ const PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
 export type RubyUsageRenderMode = 'readme' | 'test';
 
 export interface RubyUsageVariable {
+  name?: string;
   kind: 'path' | 'body' | 'params' | 'headers';
   setupByMode: Record<RubyUsageRenderMode, string[]>;
 }
@@ -21,6 +23,8 @@ export interface RubyUsageVariable {
 export interface RubyUsageExpectation {
   name: string;
   expected: string;
+  source?: string;
+  cookie?: boolean;
 }
 
 export interface RubyBodyAssertionPlan {
@@ -152,19 +156,33 @@ export class RubyUsagePlanner {
     const headerParameters = getConcreteParameters(operation)
       .filter((parameter) => parameter.in === 'header' || parameter.in === 'cookie');
     if (headerParameters.length > 0) {
-      const entries = headerParameters.map((parameter, index) => {
-        const sample = sampleParameterValue(this.ctx, parameter, index);
-        headerExpectations.push({ name: parameter.name, expected: sample.string });
-        return `${quoteRuby(parameter.name)} => ${sample.expr}`;
+      const keys = headerParameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+      const rawNameByKey = new Map(keys.map((key, index) => [key, String(headerParameters[index]?.name || `value${index + 1}`)]));
+      const safeNameByKey = createUniqueIdentifierMap(
+        keys,
+        (key) => RUBY_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'),
+        [...variables.map((variable) => variable.name || '').filter(Boolean), 'body', 'params', 'headers'],
+      );
+      headerParameters.forEach((parameter, index) => {
+        const key = keys[index];
+        const variableName = safeNameByKey.get(key) || `header_param_${index + 1}`;
+        const sample = sampleHeaderValue(this.ctx, parameter, index);
+        variables.push({
+          name: variableName,
+          kind: 'headers',
+          setupByMode: {
+            readme: [`${variableName} = ${sample.expr}`],
+            test: [`${variableName} = ${sample.expr}`],
+          },
+        });
+        args.push(parameter.in === 'cookie' ? `${variableName}: ${variableName}` : variableName);
+        headerExpectations.push({
+          name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+          expected: sample.string,
+          source: variableName,
+          cookie: parameter.in === 'cookie',
+        });
       });
-      variables.push({
-        kind: 'headers',
-        setupByMode: {
-          readme: [`headers = { ${entries.join(', ')} }`],
-          test: [`headers = { ${entries.join(', ')} }`],
-        },
-      });
-      args.push('headers: headers');
     }
 
     const responseSchema = extractResponseSchema(operation);
@@ -223,7 +241,7 @@ export class RubyUsagePlanner {
       };
     }
 
-    const type = normalizeSchemaType(resolved.type) || inferObjectType(resolved);
+    const type = resolveSchemaType(resolved).effectiveType;
     if (type === 'object') {
       const json = buildJsonSample(this.ctx, resolved, fallbackName, depth + 1) as Record<string, unknown>;
       return {
@@ -233,7 +251,7 @@ export class RubyUsagePlanner {
       };
     }
     if (type === 'array') {
-      const item = this.sampleValue(resolved.items, fallbackName, depth + 1, mediaType);
+      const item = this.sampleValue(getArrayItemSchema(resolved), fallbackName, depth + 1, mediaType);
       return {
         expr: `[${item.expr}]`,
         json: [item.json],
@@ -261,6 +279,10 @@ export function resolveRubyMethodNames(
       put: 'update',
       patch: 'patch',
       delete: 'delete',
+      options: 'options',
+      head: 'head',
+      trace: 'trace',
+      query: 'query',
     };
     return RUBY_CONFIG.namingConventions.methodName(`${actionMap[operation.method] || operation.method}_${resource}`);
   });
@@ -316,7 +338,7 @@ function buildResponseAssertions(ctx: SchemaContext, schema: any): string[] {
     ...properties.map(([name, property], index) => {
       const access = `result&.${RUBY_CONFIG.namingConventions.propertyName(name)}`;
       const resolvedProperty = resolveSchema(ctx, property);
-      const type = normalizeSchemaType((resolvedProperty as any)?.type) || inferObjectType(resolvedProperty);
+      const type = resolveSchemaType(resolvedProperty).effectiveType;
       if (type === 'integer') return `assert_equal ${index + 2}, ${access}`;
       if (type === 'number') return `assert_equal ${index + 2}.0, ${access}`;
       if (type === 'boolean') return `assert_equal true, ${access}`;
@@ -329,11 +351,11 @@ function buildResponseAssertions(ctx: SchemaContext, schema: any): string[] {
 function buildJsonSample(ctx: SchemaContext, schema: any, fallbackName: string, depth: number): unknown {
   const resolved = resolveSchema(ctx, schema);
   if (!resolved || depth > 2) return sampleString(fallbackName, depth, resolved);
-  const type = normalizeSchemaType(resolved.type) || inferObjectType(resolved);
+  const type = resolveSchemaType(resolved).effectiveType;
   if (type === 'integer') return depth + 1;
   if (type === 'number') return depth + 1;
   if (type === 'boolean') return true;
-  if (type === 'array') return [buildJsonSample(ctx, resolved.items, fallbackName, depth + 1)];
+  if (type === 'array') return [buildJsonSample(ctx, getArrayItemSchema(resolved), fallbackName, depth + 1)];
   if (type === 'object') {
     const properties = Object.entries(resolved.properties || {});
     if (properties.length === 0) return {};
@@ -357,9 +379,29 @@ function sampleParameterValue(ctx: SchemaContext, parameter: ApiParameter, index
   return sampleScalarValue(ctx, parameter.name || `value${index + 1}`, resolvedSchema, index);
 }
 
+function sampleHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: number): SampleValue {
+  const resolvedSchema = resolveSchema(ctx, parameter?.schema);
+  const enumValue = Array.isArray(resolvedSchema?.enum) ? resolvedSchema.enum[0] : undefined;
+  if (enumValue !== undefined) {
+    const value = String(enumValue);
+    return { expr: quoteRuby(value), json: value, string: value };
+  }
+  const type = resolveSchemaType(resolvedSchema).effectiveType;
+  if (type === 'integer' || type === 'number') {
+    const value = String(index + 1);
+    return { expr: quoteRuby(value), json: value, string: value };
+  }
+  if (type === 'boolean') {
+    const value = index % 2 === 0 ? 'true' : 'false';
+    return { expr: quoteRuby(value), json: value, string: value };
+  }
+  const value = parameter.name || `header${index + 1}`;
+  return { expr: quoteRuby(value), json: value, string: value };
+}
+
 function sampleScalarValue(ctx: SchemaContext, name: string, schema: any, index: number, mediaType?: string): SampleValue {
   const resolved = resolveSchema(ctx, schema);
-  const type = normalizeSchemaType(resolved?.type) || inferObjectType(resolved);
+  const type = resolveSchemaType(resolved).effectiveType;
   if (type === 'integer') {
     const value = index + 1;
     return { expr: String(value), json: value, string: String(value) };
@@ -442,24 +484,14 @@ function getConcreteParameters(operation: GeneratedApiOperation): ApiParameter[]
   return raw.filter((parameter): parameter is ApiParameter => Boolean(parameter) && typeof parameter === 'object' && 'name' in parameter);
 }
 
-function resolveSchema(ctx: SchemaContext, schema: any): any {
+function resolveSchema(ctx: SchemaContext, schema: ApiSchema | undefined): ApiSchema | undefined {
   if (!schema || typeof schema !== 'object') return schema;
   if (schema.$ref) {
     const refName = String(schema.$ref).split('/').pop() || '';
     return ctx.schemas[refName] || schema;
   }
-  return resolveLooseSchema(schema);
-}
-
-function resolveLooseSchema(schema: any): any {
-  if (!schema || typeof schema !== 'object') return schema;
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const values = schema[key];
-    if (Array.isArray(values) && values.length > 0) {
-      return values.find((entry) => normalizeSchemaType(entry?.type) !== 'null') || values[0];
-    }
-  }
-  return schema;
+  const composed = pickComposedSchema(schema);
+  return composed ? (resolveSchema(ctx, composed) || composed) : schema;
 }
 
 function isVoidResponse(operation: GeneratedApiOperation): boolean {
@@ -470,18 +502,6 @@ function isVoidResponse(operation: GeneratedApiOperation): boolean {
     const content = responses[code]?.content;
     return !content || typeof content !== 'object' || Object.keys(content).length === 0;
   });
-}
-
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') return type;
-  if (Array.isArray(type)) {
-    return type.find((entry) => typeof entry === 'string' && entry !== 'null');
-  }
-  return undefined;
-}
-
-function inferObjectType(schema: any): string | undefined {
-  return schema?.properties || schema?.additionalProperties ? 'object' : undefined;
 }
 
 function sampleString(name: string, index: number, schema?: any, mediaType?: string): string {

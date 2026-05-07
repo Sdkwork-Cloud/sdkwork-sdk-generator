@@ -1,3 +1,4 @@
+import { resolveModelSchema } from '../../framework/schema.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 export class ModelGenerator {
@@ -5,13 +6,14 @@ export class ModelGenerator {
         const files = [];
         const identity = resolveJvmSdkIdentity(config);
         for (const [name, schema] of Object.entries(ctx.schemas)) {
-            files.push(this.generateClass(name, schema, identity));
+            files.push(this.generateClass(name, schema, ctx.schemas, identity));
         }
         return files;
     }
-    generateClass(name, schema, packageName) {
+    generateClass(name, schema, schemas, packageName) {
+        const modelSchema = resolveModelSchema(schema, schemas);
         const className = JAVA_CONFIG.namingConventions.modelName(name);
-        const props = schema.properties || {};
+        const props = modelSchema.properties || {};
         const imports = new Set();
         const fields = Object.entries(props).map(([propName, propSchema]) => {
             const fieldName = JAVA_CONFIG.namingConventions.propertyName(propName);

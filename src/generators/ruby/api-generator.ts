@@ -7,7 +7,26 @@ import {
   resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import {
+  requiresExplicitOpenApiQuerySerialization,
+  resolveOpenApiParameterSerialization,
+} from '../../framework/parameter-serialization.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
+
+interface NamedParameterBinding {
+  parameter: any;
+  safeName: string;
+  required: boolean;
+}
+
+interface QueryParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  allowReserved: boolean;
+  contentType?: string;
+}
 
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -41,7 +60,84 @@ export class ApiGenerator {
 
     path
   end
-end`, ['cgi'])),
+
+  def append_query_string(path, raw_query_string)
+    query = raw_query_string.to_s.sub(/^\?+/, '')
+    return path if query.empty?
+
+    path.include?('?') ? "#{path}&#{query}" : "#{path}?#{query}"
+  end
+
+  def build_query_string(parameters)
+    parameters.flat_map { |parameter| serialize_query_parameter(parameter) }.compact.join('&')
+  end
+
+  def serialize_query_parameter(parameter)
+    return [] if parameter.value.nil?
+
+    if parameter.content_type && !parameter.content_type.empty?
+      return ["#{CGI.escape(parameter.name)}=#{encode_query_value(JSON.generate(parameter.value), parameter.allow_reserved)}"]
+    end
+
+    style = parameter.style.to_s.empty? ? 'form' : parameter.style
+    value = parameter.value
+    return serialize_deep_object_parameter(parameter.name, value, parameter.allow_reserved) if style == 'deepObject' && value.is_a?(Hash)
+    return serialize_array_parameter(parameter.name, value, style, parameter.explode, parameter.allow_reserved) if value.is_a?(Array)
+    return serialize_object_parameter(parameter.name, value, style, parameter.explode, parameter.allow_reserved) if value.is_a?(Hash)
+
+    ["#{CGI.escape(parameter.name)}=#{encode_query_value(value.to_s, parameter.allow_reserved)}"]
+  end
+
+  def serialize_array_parameter(name, values, style, explode, allow_reserved)
+    serialized = values.compact.map(&:to_s)
+    return [] if serialized.empty?
+    return serialized.map { |item| "#{CGI.escape(name)}=#{encode_query_value(item, allow_reserved)}" } if style == 'form' && explode
+
+    ["#{CGI.escape(name)}=#{encode_query_value(serialized.join(','), allow_reserved)}"]
+  end
+
+  def serialize_object_parameter(name, values, style, explode, allow_reserved)
+    serialized = []
+    pairs = []
+    values.each do |key, value|
+      next if value.nil?
+      if style == 'form' && explode
+        pairs << "#{CGI.escape(key.to_s)}=#{encode_query_value(value.to_s, allow_reserved)}"
+      else
+        serialized << key.to_s
+        serialized << value.to_s
+      end
+    end
+    return pairs if style == 'form' && explode
+    return [] if serialized.empty?
+
+    ["#{CGI.escape(name)}=#{encode_query_value(serialized.join(','), allow_reserved)}"]
+  end
+
+  def serialize_deep_object_parameter(name, values, allow_reserved)
+    values.filter_map do |key, value|
+      next if value.nil?
+
+      "#{CGI.escape("#{name}[#{key}]")}=#{encode_query_value(value.to_s, allow_reserved)}"
+    end
+  end
+
+  def encode_query_value(value, allow_reserved)
+    encoded = CGI.escape(value)
+    return encoded unless allow_reserved
+
+    {
+      '%3A' => ':', '%2F' => '/', '%3F' => '?', '%23' => '#',
+      '%5B' => '[', '%5D' => ']', '%40' => '@', '%21' => '!',
+      '%24' => '$', '%26' => '&', '%27' => "'", '%28' => '(',
+      '%29' => ')', '%2A' => '*', '%2B' => '+', '%2C' => ',',
+      '%3B' => ';', '%3D' => '='
+    }.each { |escaped, reserved| encoded = encoded.gsub(escaped, reserved) }
+    encoded
+  end
+end
+
+QueryParameterSpec = Struct.new(:name, :value, :style, :explode, :allow_reserved, :content_type, keyword_init: false)`, ['cgi', 'json'])),
       language: 'ruby',
       description: 'Base API helpers',
     };
@@ -75,11 +171,16 @@ end`, ['cgi'])),
         .map((modelName) => `require_relative '../models/${RUBY_CONFIG.namingConventions.fileName(modelName)}'`),
     ];
     const methods = operations.map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation')).join('\n\n');
+    const needsRequestHeaderHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    });
 
     return {
       path: `lib/${getRubyModuleSegments(config).map((segment) => toSnakeCase(segment)).join('/')}/api/${fileName}.rb`,
       content: this.format(wrapRubyModules(moduleSegments, `class ${className} < BaseApi
 ${methods}
+${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 end`, requires)),
       language: 'ruby',
       description: `${tag} API module`,
@@ -89,20 +190,29 @@ end`, requires)),
   private generateMethod(op: any, config: GeneratorConfig, methodName: string): string {
     const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
-    const hasQuery = allParameters.some((param: any) => param?.in === 'query');
-    const hasHeaders = allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
-    const requestBodyInfo = this.extractRequestBodyInfo(op);
+    const queryParams = allParameters.filter((param: any) => param?.in === 'query');
+    const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
+    const headerParams = allParameters.filter((param: any) => param?.in === 'header');
+    const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const hasQuery = queryParams.length > 0;
+    const hasRawQueryString = queryStringParams.length > 0;
+    const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
+    const method = String(op.method || '').toLowerCase();
+    const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const requestBodyInfo = supportsRequestBodyByDefault(method) ? this.extractRequestBodyInfo(op) : undefined;
     const hasBody = Boolean(requestBodyInfo);
     const requestBodySchema = requestBodyInfo?.schema;
     const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
     const responseSchema = this.extractResponseSchema(op);
+    const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const pathParamNames = createUniqueIdentifierMap(
       rawPathParams,
       (value) => RUBY_CONFIG.namingConventions.propertyName(value),
       [
         hasBody ? 'body' : '',
         hasQuery ? 'params' : '',
-        hasHeaders ? 'headers' : '',
+        hasRawQueryString ? 'raw_query_string' : '',
+        hasHeaders ? 'request_headers' : '',
         'path',
         hasBody ? 'payload' : '',
       ]
@@ -111,31 +221,72 @@ end`, requires)),
       rawName,
       safeName: pathParamNames.get(rawName) || rawName,
     }));
+    const parameterReservedNames = [
+      ...pathParams.map((param) => param.safeName),
+      hasBody ? 'body' : '',
+      hasQuery ? 'params' : '',
+      hasRawQueryString ? 'raw_query_string' : '',
+      hasHeaders ? 'request_headers' : '',
+      'path',
+      hasBody ? 'payload' : '',
+    ];
+    const queryBindings = hasExplicitQuerySerialization
+      ? this.createQueryParameterBindings(queryParams, parameterReservedNames)
+      : [];
+    const headerBindings = this.createNamedParameterBindings(headerParams, parameterReservedNames);
+    const cookieBindings = this.createNamedParameterBindings(cookieParams, [
+      ...parameterReservedNames,
+      ...queryBindings.map((binding) => binding.safeName),
+      ...headerBindings.map((binding) => binding.safeName),
+    ]);
+    const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+    const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+    const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+    const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
     const params: string[] = pathParams.map((param) => param.safeName);
+    params.push(...requiredQueryBindings.map((binding) => binding.safeName));
+    params.push(...requiredHeaderBindings.map((binding) => binding.safeName));
     if (hasBody) {
       params.push('body: nil');
     }
-    if (hasQuery) {
+    if (hasRawQueryString) {
+      params.push('raw_query_string:');
+    }
+    if (hasQuery && !hasExplicitQuerySerialization) {
       params.push('params: {}');
     }
-    if (hasHeaders) {
-      params.push('headers: {}');
-    }
+    params.push(...optionalQueryBindings.map((binding) => `${binding.safeName}: nil`));
+    params.push(...optionalHeaderBindings.map((binding) => `${binding.safeName}: nil`));
 
     const normalizedPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const requestPath = this.withApiPrefix(config.apiPrefix, normalizedPath);
     const pathLine = pathParams.length > 0
       ? `      path = interpolate_path('${escapeRubyString(requestPath)}', ${pathParams.map((param) => `${formatRubyPathKey(param.rawName)}: ${param.safeName}`).join(', ')})`
       : `      path = '${escapeRubyString(requestPath)}'`;
+    const rawQueryStringLine = hasRawQueryString
+      ? '      path = append_query_string(path, raw_query_string)'
+      : '';
+    const queryLine = hasExplicitQuerySerialization
+      ? `      query = build_query_string([
+${this.renderQueryParameterSpecs(queryBindings, 8)}
+      ])
+      path = append_query_string(path, query)`
+      : '';
     const payloadLine = hasBody
       ? `      payload = ${this.serializeRequestBodyExpression(requestBodySchema, 'body')}`
       : '';
+    const requestHeaderLine = hasHeaders
+      ? `      request_headers = build_request_headers(
+${this.renderNamedParameterHash(headerBindings, 8)},
+${this.renderNamedParameterHash(cookieBindings, 8)}
+      )`
+      : '';
     const optionLines: string[] = [];
-    if (hasQuery) {
+    if (hasQuery && !hasExplicitQuerySerialization) {
       optionLines.push('      options[:query] = params unless params.nil? || params.empty?');
     }
     if (hasHeaders) {
-      optionLines.push('      options[:headers] = headers unless headers.nil? || headers.empty?');
+      optionLines.push('      options[:headers] = request_headers unless request_headers.empty?');
     }
     if (hasBody) {
       if (requestBodyMediaType === 'multipart/form-data') {
@@ -147,16 +298,73 @@ end`, requires)),
       }
     }
     const requestLine = this.isVoidResponse(op)
-      ? `      @client.request(:${String(op.method || 'get').toLowerCase()}, path, **options)\n      nil`
-      : `      result = @client.request(:${String(op.method || 'get').toLowerCase()}, path, **options)\n      ${this.deserializeResponseExpression(responseSchema, 'result')}`;
+      ? `      @client.request('${toHttpMethodLiteral(httpMethod)}', path, **options)\n      nil`
+      : `      result = @client.request('${toHttpMethodLiteral(httpMethod)}', path, **options)\n      ${this.deserializeResponseExpression(responseSchema, 'result')}`;
     const comment = op.summary ? `    # ${sanitizeComment(op.summary)}\n` : '';
 
     return `${comment}    def ${methodName}(${params.join(', ')})
 ${pathLine}
-${hasBody ? `${payloadLine}\n` : ''}      options = {}
+${rawQueryStringLine ? `${rawQueryStringLine}\n` : ''}${queryLine ? `${queryLine}\n` : ''}${hasBody ? `${payloadLine}\n` : ''}${requestHeaderLine ? `${requestHeaderLine}\n` : ''}      options = {}
 ${optionLines.join('\n')}
 ${requestLine}
     end`;
+  }
+
+  private createNamedParameterBindings(parameters: any[], reservedNames: Iterable<string>): NamedParameterBinding[] {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => RUBY_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'),
+      reservedNames,
+    );
+
+    return parameters.map((parameter, index) => {
+      const key = keys[index];
+      return {
+        parameter,
+        safeName: safeNameByKey.get(key) || `value_${index + 1}`,
+        required: Boolean(parameter?.required),
+      };
+    });
+  }
+
+  private createQueryParameterBindings(parameters: any[], reservedNames: Iterable<string>): QueryParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
+        allowReserved: serialization.allowReserved,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private renderNamedParameterHash(bindings: NamedParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}{}`;
+    }
+    const lines = bindings.map((binding) => {
+      return `${indent}  '${escapeRubyString(String(binding.parameter?.name || binding.safeName))}' => ${binding.safeName},`;
+    });
+    return [`${indent}{`, ...lines, `${indent}}`].join('\n');
+  }
+
+  private renderQueryParameterSpecs(bindings: QueryParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    return bindings.map((binding) => {
+      return `${indent}QueryParameterSpec.new(${[
+        `'${escapeRubyString(String(binding.parameter?.name || binding.safeName))}'`,
+        binding.safeName,
+        `'${escapeRubyString(binding.style)}'`,
+        binding.explode ? 'true' : 'false',
+        binding.allowReserved ? 'true' : 'false',
+        binding.contentType ? `'${escapeRubyString(binding.contentType)}'` : 'nil',
+      ].join(', ')}),`;
+    }).join('\n');
   }
 
   private serializeRequestBodyExpression(schema: any, bodyExpr: string): string {
@@ -167,7 +375,10 @@ ${requestLine}
     if (schema.$ref) {
       return `${bodyExpr}.respond_to?(:to_hash) ? ${bodyExpr}.to_hash : ${bodyExpr}`;
     }
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      return `${bodyExpr}.is_a?(Array) ? ${bodyExpr}.map { |item| item } : ${bodyExpr}`;
+    }
+    if (schema.items && typeof schema.items === 'object') {
       const itemExpr = this.serializeArrayItemExpression(schema.items, 'item');
       return `${bodyExpr}.is_a?(Array) ? ${bodyExpr}.map { |item| ${itemExpr} } : ${bodyExpr}`;
     }
@@ -183,7 +394,10 @@ ${requestLine}
     if (schema?.$ref) {
       return `${itemExpr}.respond_to?(:to_hash) ? ${itemExpr}.to_hash : ${itemExpr}`;
     }
-    if (schema?.items) {
+    if (Array.isArray(schema?.prefixItems)) {
+      return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| nested_item } : []`;
+    }
+    if (schema?.items && typeof schema.items === 'object') {
       const nestedExpr = this.serializeArrayItemExpression(schema.items, 'nested_item');
       return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| ${nestedExpr} } : []`;
     }
@@ -203,7 +417,10 @@ ${requestLine}
       const modelName = RUBY_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
       return `${resultExpr}.is_a?(Hash) ? Models::${modelName}.from_hash(${resultExpr}) : nil`;
     }
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      return `${resultExpr}.is_a?(Array) ? ${resultExpr}.map { |item| item } : []`;
+    }
+    if (schema.items && typeof schema.items === 'object') {
       const itemExpr = this.deserializeArrayItemExpression(schema.items, 'item');
       return `${resultExpr}.is_a?(Array) ? ${resultExpr}.map { |item| ${itemExpr} } : []`;
     }
@@ -226,7 +443,10 @@ ${requestLine}
       const modelName = RUBY_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
       return `${itemExpr}.is_a?(Hash) ? Models::${modelName}.from_hash(${itemExpr}) : ${itemExpr}`;
     }
-    if (schema?.items) {
+    if (Array.isArray(schema?.prefixItems)) {
+      return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| nested_item } : []`;
+    }
+    if (schema?.items && typeof schema.items === 'object') {
       const nestedExpr = this.deserializeArrayItemExpression(schema.items, 'nested_item');
       return `${itemExpr}.is_a?(Array) ? ${itemExpr}.map { |nested_item| ${nestedExpr} } : []`;
     }
@@ -264,7 +484,10 @@ ${requestLine}
         schema[key].forEach((entry: any) => this.collectSchemaModels(entry, models));
       }
     }
-    if (schema.items) {
+    if (Array.isArray(schema.prefixItems)) {
+      schema.prefixItems.forEach((entry: any) => this.collectSchemaModels(entry, models));
+    }
+    if (schema.items && typeof schema.items === 'object') {
       this.collectSchemaModels(schema.items, models);
     }
     if (schema.properties && typeof schema.properties === 'object') {
@@ -289,6 +512,10 @@ ${requestLine}
       put: 'update',
       patch: 'patch',
       delete: 'delete',
+      options: 'options',
+      head: 'head',
+      trace: 'trace',
+      query: 'query',
     };
 
     return `${actionMap[method] || method}_${resource}`;
@@ -309,7 +536,7 @@ ${requestLine}
       return undefined;
     }
 
-    const schema = (content as Record<string, any>)[mediaType]?.schema;
+    const schema = resolveMediaTypeSchema((content as Record<string, any>)[mediaType]);
     if (!schema) {
       return undefined;
     }
@@ -353,8 +580,11 @@ ${requestLine}
         continue;
       }
       const mediaType = this.pickJsonMediaType(content);
-      if (mediaType && content[mediaType]?.schema) {
-        return content[mediaType].schema;
+      if (mediaType) {
+        const schema = resolveMediaTypeSchema(content[mediaType]);
+        if (schema) {
+          return schema;
+        }
       }
     }
 
@@ -408,6 +638,43 @@ ${requestLine}
     }
 
     return normalizedPath;
+  }
+
+  private generateRequestHeaderHelpers(): string {
+    return `  private
+
+  def build_request_headers(headers = {}, cookies = {})
+    request_headers = {}
+    headers.each do |name, value|
+      serialized = serialize_parameter_value(value)
+      request_headers[name.to_s] = serialized unless serialized.nil?
+    end
+
+    cookie_header = build_cookie_header(cookies)
+    unless cookie_header.empty?
+      request_headers['Cookie'] =
+        request_headers.key?('Cookie') && !request_headers['Cookie'].empty? ? "#{request_headers['Cookie']}; #{cookie_header}" : cookie_header
+    end
+
+    request_headers
+  end
+
+  def build_cookie_header(cookies = {})
+    cookies.filter_map do |name, value|
+      serialized = serialize_parameter_value(value)
+      next if serialized.nil?
+
+      "#{CGI.escape(name.to_s)}=#{CGI.escape(serialized)}"
+    end.join('; ')
+  end
+
+  def serialize_parameter_value(value)
+    return nil if value.nil?
+    return value.filter_map { |item| serialize_parameter_value(item) }.join(',') if value.is_a?(Array)
+    return value.iso8601 if value.respond_to?(:iso8601)
+
+    value.to_s
+  end`;
   }
 
   private withApiPrefix(prefix: string, path: string): string {

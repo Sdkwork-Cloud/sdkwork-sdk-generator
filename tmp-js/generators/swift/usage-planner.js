@@ -1,4 +1,5 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { SWIFT_CONFIG, getSwiftType } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
@@ -67,10 +68,10 @@ export class SwiftUsagePlanner {
         }
         const headerParams = allParameters.filter((parameter) => parameter?.in === 'header' || parameter?.in === 'cookie');
         if (headerParams.length > 0) {
-            const headerVariable = this.buildHeaderVariable(headerParams);
-            variables.push(headerVariable.variable);
-            headerExpectations.push(...headerVariable.expectations);
-            callArguments.push('headers: headers');
+            const headerVariables = this.buildHeaderVariables(headerParams, variables.map((variable) => variable.name));
+            variables.push(...headerVariables.variables);
+            headerExpectations.push(...headerVariables.expectations);
+            callArguments.push(...headerVariables.arguments);
         }
         const responseSchema = extractResponseSchema(operation);
         const responseType = responseSchema ? getSwiftType(responseSchema, SWIFT_CONFIG) : inferFallbackResponseType(operation);
@@ -109,7 +110,7 @@ export class SwiftUsagePlanner {
                 assertion: buildBodyAssertionPlan(normalizedMediaType, canEncodeDirectly(declaredType)),
             };
         }
-        const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+        const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
         if (normalizedType === 'object' || declaredType.startsWith('[String:') || declaredType === 'Any') {
             const lines = renderDictionaryVariable(this.ctx, resolvedSchema, normalizedMediaType);
             return {
@@ -118,7 +119,7 @@ export class SwiftUsagePlanner {
             };
         }
         if (normalizedType === 'array' || declaredType.startsWith('[')) {
-            const itemValue = renderInlineSwiftValue(this.ctx, resolvedSchema?.items, 'item', 0, normalizedMediaType, 1);
+            const itemValue = renderInlineSwiftValue(this.ctx, getArrayItemSchema(resolvedSchema), 'item', 0, normalizedMediaType, 1);
             const lines = itemValue ? [`let body = [${itemValue.swiftExpression}]`] : ['let body = [Any]()'];
             return {
                 variable: { name: 'body', kind: 'body', setupByMode: { readme: lines, test: lines } },
@@ -148,18 +149,37 @@ export class SwiftUsagePlanner {
             expectations,
         };
     }
-    buildHeaderVariable(parameters) {
+    buildHeaderVariables(parameters, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => SWIFT_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'), [...reservedNames, 'body', 'params', 'headers']);
+        const variables = [];
+        const arguments_ = [];
         const expectations = [];
-        const lines = ['let headers: [String: String] = ['];
         for (let index = 0; index < parameters.length; index += 1) {
             const parameter = parameters[index];
+            const key = keys[index];
+            const variableName = safeNameByKey.get(key) || toUsageIdentifier(parameter.name, parameter.in === 'cookie' ? 'cookieParam' : 'headerParam', index + 1);
             const sample = buildHeaderValue(this.ctx, parameter, index);
-            expectations.push({ name: parameter.name, expected: sample.stringValue });
-            lines.push(`    ${quoteSwiftString(parameter.name)}: ${sample.swiftExpression}${index < parameters.length - 1 ? ',' : ''}`);
+            variables.push({
+                name: variableName,
+                kind: 'headers',
+                setupByMode: {
+                    readme: [`let ${variableName} = ${sample.swiftExpression}`],
+                    test: [`let ${variableName} = ${sample.swiftExpression}`],
+                },
+            });
+            arguments_.push(parameter.required ? `${variableName}: ${variableName}` : `${variableName}: ${variableName}`);
+            expectations.push({
+                name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+                expected: sample.stringValue,
+                source: variableName,
+                cookie: parameter.in === 'cookie',
+            });
         }
-        lines.push(']');
         return {
-            variable: { name: 'headers', kind: 'headers', setupByMode: { readme: lines, test: lines } },
+            variables,
+            arguments: arguments_,
             expectations,
         };
     }
@@ -263,7 +283,17 @@ function generateSwiftOperationName(method, path, operation, tag) {
     }
     const pathParts = path.split('/').filter(Boolean);
     const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-    const actionMap = { get: path.includes('{') ? 'get' : 'list', post: 'create', put: 'update', patch: 'patch', delete: 'delete' };
+    const actionMap = {
+        get: path.includes('{') ? 'get' : 'list',
+        post: 'create',
+        put: 'update',
+        patch: 'patch',
+        delete: 'delete',
+        options: 'options',
+        head: 'head',
+        trace: 'trace',
+        query: 'query',
+    };
     return `${actionMap[method] || method}${SWIFT_CONFIG.namingConventions.modelName(resource)}`;
 }
 function buildBodyAssertionPlan(mediaType, canUseEncoder) {
@@ -331,7 +361,7 @@ function renderInlineSwiftValue(ctx, schema, fallbackName, index, mediaType, dep
         const modelType = getSwiftType(schema, SWIFT_CONFIG);
         return { swiftExpression: `${modelType}()`, jsonValue: {}, stringValue: '[object]' };
     }
-    const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
     switch (normalizedType) {
         case 'integer': {
             const value = index + 1;
@@ -346,8 +376,8 @@ function renderInlineSwiftValue(ctx, schema, fallbackName, index, mediaType, dep
             return { swiftExpression: value ? 'true' : 'false', jsonValue: value, stringValue: value ? 'true' : 'false' };
         }
         case 'array': {
-            const itemValue = renderInlineSwiftValue(ctx, resolvedSchema.items, fallbackName, index, mediaType, depth + 1)
-                || buildScalarSwiftValue(fallbackName, resolvedSchema.items, index, mediaType);
+            const itemValue = renderInlineSwiftValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, index, mediaType, depth + 1)
+                || buildScalarSwiftValue(fallbackName, getArrayItemSchema(resolvedSchema), index, mediaType);
             return { swiftExpression: `[${itemValue.swiftExpression}]`, jsonValue: [itemValue.jsonValue], stringValue: String(itemValue.stringValue) };
         }
         case 'object': {
@@ -372,7 +402,7 @@ function buildParameterValue(ctx, parameter, index) {
     if (enumValues && enumValues.length > 0) {
         return buildLiteralValue(enumValues[0]);
     }
-    switch (normalizeSchemaType(resolvedSchema?.type)) {
+    switch (resolveSchemaType(resolvedSchema).effectiveType) {
         case 'integer': {
             const value = index + 1;
             return { swiftExpression: String(value), jsonValue: value, stringValue: String(value) };
@@ -396,7 +426,7 @@ function buildHeaderValue(ctx, parameter, index) {
         const value = String(enumValues[0]);
         return { swiftExpression: quoteSwiftString(value), jsonValue: value, stringValue: value };
     }
-    switch (normalizeSchemaType(resolvedSchema?.type)) {
+    switch (resolveSchemaType(resolvedSchema).effectiveType) {
         case 'integer':
         case 'number': {
             const value = String(index + 1);
@@ -407,7 +437,8 @@ function buildHeaderValue(ctx, parameter, index) {
             return { swiftExpression: quoteSwiftString(value), jsonValue: value, stringValue: value };
         }
     }
-    return buildScalarSwiftValue(parameter.name || `header${index + 1}`, resolvedSchema, index);
+    const value = parameter.name || `header${index + 1}`;
+    return { swiftExpression: quoteSwiftString(value), jsonValue: value, stringValue: value };
 }
 function buildLiteralValue(value) {
     if (typeof value === 'number') {
@@ -428,7 +459,7 @@ function buildJsonSampleValue(ctx, schema, fallbackName, depth) {
     if (enumValues && enumValues.length > 0) {
         return enumValues[0];
     }
-    const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
     switch (normalizedType) {
         case 'integer':
         case 'number':
@@ -436,7 +467,7 @@ function buildJsonSampleValue(ctx, schema, fallbackName, depth) {
         case 'boolean':
             return true;
         case 'array':
-            return [buildJsonSampleValue(ctx, resolvedSchema.items, fallbackName, depth + 1)];
+            return [buildJsonSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1)];
         case 'object': {
             const properties = resolvedSchema.properties ? Object.entries(resolvedSchema.properties) : [];
             if (properties.length > 0) {
@@ -468,8 +499,7 @@ function buildResponseAssertions(ctx, schema, responseType) {
         const [propertyName, propertySchema] = properties[index];
         const fieldName = SWIFT_CONFIG.namingConventions.propertyName(propertyName);
         const resolvedPropertySchema = resolveSchema(ctx, propertySchema);
-        const normalizedType = normalizeSchemaType(resolvedPropertySchema?.type)
-            || inferImplicitObjectType(resolvedPropertySchema);
+        const normalizedType = resolveSchemaType(resolvedPropertySchema).effectiveType;
         if (propertySchema?.$ref) {
             assertions.push(`XCTAssertNotNil(result?.${fieldName})`);
             continue;
@@ -618,33 +648,6 @@ function sampleStringValue(fallbackName, index, schema, mediaType) {
     if (normalizedName.includes('name'))
         return 'name';
     return normalizedName ? normalizedName.replace(/[^a-z0-9]+/g, '-') : `value${index + 1}`;
-}
-function normalizeSchemaType(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
-}
-function inferImplicitObjectType(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return undefined;
-    }
-    return schema.properties || schema.additionalProperties ? 'object' : undefined;
-}
-function pickComposedSchema(schema) {
-    for (const key of ['allOf', 'oneOf', 'anyOf']) {
-        const values = schema?.[key];
-        if (!Array.isArray(values) || values.length === 0) {
-            continue;
-        }
-        const candidate = values.find((entry) => entry && normalizeSchemaType(entry.type) !== 'null');
-        return candidate || values[0];
-    }
-    return undefined;
 }
 function canEncodeDirectly(typeName) {
     return !String(typeName || '').includes('Any');

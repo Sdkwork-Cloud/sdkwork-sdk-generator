@@ -177,7 +177,16 @@ ${assertions}
             lines.push(`Assert.Equal(${this.quote(expectation.expected)}, capturedQuery[${this.quote(expectation.name)}]);`);
         }
         for (const expectation of plan.headerExpectations) {
-            lines.push(`Assert.Equal(${this.quote(expectation.expected)}, capturedHeaders[${this.quote(expectation.name)}]);`);
+            if (expectation.cookie) {
+                const source = expectation.source || this.quote(expectation.expected);
+                lines.push(`Assert.Equal(${this.quote(`${expectation.expected}=`)} + Uri.EscapeDataString(${source}), capturedHeaders["Cookie"]);`);
+            }
+            else if (expectation.source) {
+                lines.push(`Assert.Equal(${expectation.source}, capturedHeaders[${this.quote(expectation.name)}]);`);
+            }
+            else {
+                lines.push(`Assert.Equal(${this.quote(expectation.expected)}, capturedHeaders[${this.quote(expectation.name)}]);`);
+            }
         }
         if (plan.bodyAssertion) {
             if (plan.bodyAssertion.contentTypeMatch === 'prefix') {

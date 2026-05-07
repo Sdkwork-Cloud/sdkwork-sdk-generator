@@ -4,6 +4,27 @@ import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framewor
 import { TYPESCRIPT_CONFIG, getTypeScriptType } from './config.js';
 import { buildTypeScriptTagMetadata, type TypeScriptApiTagMetadata } from './tag-metadata.js';
 import { resolveTypeScriptMethodNames } from './usage-planner.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
+import {
+  extractOpenApiParameterContentSchema,
+  requiresExplicitOpenApiQuerySerialization,
+  resolveOpenApiParameterSerialization,
+} from '../../framework/parameter-serialization.js';
+
+interface NamedParameterBinding {
+  parameter: any;
+  safeName: string;
+  required: boolean;
+  type: string;
+}
+
+interface QueryParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  allowReserved: boolean;
+  contentType?: string;
+}
 
 const TYPESCRIPT_RESERVED_WORDS = new Set([
   'abstract',
@@ -124,6 +145,20 @@ export class ApiGenerator {
         return generated.content;
       })
       .join('\n\n');
+    const needsRequestHeaderHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    });
+    const needsQuerySerializationHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+    });
+    const needsQueryParamsImport = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      const queryParameters = allParameters.filter((param: any) => param?.in === 'query');
+      return queryParameters.length > 0
+        && !queryParameters.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
+    });
     const typeImports = referencedModels.size > 0
       ? `import type { ${Array.from(referencedModels).sort((a, b) => a.localeCompare(b)).join(', ')} } from '../types';\n`
       : '';
@@ -132,7 +167,7 @@ export class ApiGenerator {
       path: `src/api/${fileName}.ts`,
       content: this.format(`import { ${config.sdkType}ApiPath } from './paths';
 import type { HttpClient } from '../http/client';
-import type { QueryParams } from '../types/common';
+${needsQueryParamsImport ? "import type { QueryParams } from '../types/common';" : ''}
 ${typeImports}
 
 export class ${className} {
@@ -148,6 +183,17 @@ ${methods}
 export function create${className}(client: HttpClient): ${className} {
   return new ${className}(client);
 }
+
+function appendQueryString(path: string, rawQueryString: string): string {
+  const query = rawQueryString.replace(/^\\?+/, '');
+  if (!query) {
+    return path;
+  }
+  return path.includes('?') ? \`\${path}&\${query}\` : \`\${path}?\${query}\`;
+}
+
+${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
+${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 `),
       language: 'typescript',
       description: `${metadata.tag} API module`,
@@ -163,11 +209,14 @@ export function create${className}(client: HttpClient): ${className} {
     const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
     const queryParams = allParameters.filter((param: any) => param?.in === 'query');
+    const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
     const headerParams = allParameters.filter((param: any) => param?.in === 'header');
     const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
     const method = String(op.method || '').toLowerCase();
-    const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+    const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const supportsRequestBody = supportsRequestBodyByDefault(method);
     const hasQuery = queryParams.length > 0;
+    const hasRawQueryString = queryStringParams.length > 0;
     const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
     const requestBodyInfo = this.extractRequestBodyInfo(op);
     const requestBodySchema = supportsRequestBody ? requestBodyInfo?.schema : undefined;
@@ -175,6 +224,7 @@ export function create${className}(client: HttpClient): ${className} {
     const isMultipartBody = requestBodyMediaType === 'multipart/form-data';
     const hasBody = supportsRequestBody && requestBodyInfo !== undefined;
     const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
+    const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const requestType = isMultipartBody
       ? 'FormData'
       : requestBodySchema
@@ -201,23 +251,51 @@ export function create${className}(client: HttpClient): ${className} {
       [
         hasBody ? 'body' : '',
         hasQuery ? 'params' : '',
-        hasHeaders ? 'headers' : '',
+        hasRawQueryString ? 'rawQueryString' : '',
+        hasHeaders ? 'requestHeaders' : '',
       ]
     );
     const pathParams = rawPathParams.map((rawName) => ({
       rawName,
       safeName: pathParamNames.get(rawName) || rawName,
     }));
+    const parameterReservedNames = [
+      ...pathParams.map((param) => param.safeName),
+      hasBody ? 'body' : '',
+      hasQuery ? 'params' : '',
+      hasRawQueryString ? 'rawQueryString' : '',
+      hasHeaders ? 'requestHeaders' : '',
+    ];
+    const queryBindings = hasExplicitQuerySerialization
+      ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
+      : [];
+    const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
+    const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+      ...parameterReservedNames,
+      ...queryBindings.map((binding) => binding.safeName),
+      ...headerBindings.map((binding) => binding.safeName),
+    ]);
+    const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+    const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+    const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+    const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
 
     const params: string[] = [];
     if (pathParams.length) {
       params.push(...pathParams.map((param) => `${param.safeName}: string | number`));
     }
-    if (hasBody && requestType) {
+    if (hasBody && requestType && requestBodyRequired) {
       params.push(requestBodyRequired ? `body: ${requestType}` : `body?: ${requestType}`);
     }
-    if (hasQuery) params.push('params?: QueryParams');
-    if (hasHeaders) params.push('headers?: Record<string, string>');
+    if (hasRawQueryString) params.push('rawQueryString: string');
+    params.push(...requiredQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+    params.push(...requiredHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
+    if (hasBody && requestType && !requestBodyRequired) {
+      params.push(`body?: ${requestType}`);
+    }
+    if (hasQuery && !hasExplicitQuerySerialization) params.push('params?: QueryParams');
+    params.push(...optionalQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+    params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
@@ -225,112 +303,462 @@ export function create${className}(client: HttpClient): ${className} {
       return `\${${safeName}}`;
     });
     const pathExpression = `${config.sdkType}ApiPath(\`${pathTemplate}\`)`;
+    const requestPathExpression = hasRawQueryString
+      ? `appendQueryString(${pathExpression}, rawQueryString)`
+      : hasExplicitQuerySerialization
+        ? `appendQueryString(${pathExpression}, query)`
+        : pathExpression;
     let call = '';
     
     switch (method) {
       case 'get':
         if (hasQuery && hasHeaders) {
-          call = `this.client.get<${responseType}>(${pathExpression}, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `this.client.get<${responseType}>(${requestPathExpression}, undefined, requestHeaders)`
+            : `this.client.get<${responseType}>(${requestPathExpression}, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `this.client.get<${responseType}>(${pathExpression}, params)`;
+          call = hasExplicitQuerySerialization
+            ? `this.client.get<${responseType}>(${requestPathExpression})`
+            : `this.client.get<${responseType}>(${requestPathExpression}, params)`;
         } else if (hasHeaders) {
-          call = `this.client.get<${responseType}>(${pathExpression}, undefined, headers)`;
+          call = `this.client.get<${responseType}>(${requestPathExpression}, undefined, requestHeaders)`;
         } else {
-          call = `this.client.get<${responseType}>(${pathExpression})`;
+          call = `this.client.get<${responseType}>(${requestPathExpression})`;
         }
         break;
       case 'post':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = `this.client.post<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.post<${responseType}>(${requestPathExpression}, body, undefined, requestHeaders${contentTypeArg})`
+              : `this.client.post<${responseType}>(${requestPathExpression}, body, params, requestHeaders${contentTypeArg})`;
           } else if (hasQuery) {
-            call = `this.client.post<${responseType}>(${pathExpression}, body, params, undefined${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.post<${responseType}>(${requestPathExpression}, body, undefined, undefined${contentTypeArg})`
+              : `this.client.post<${responseType}>(${requestPathExpression}, body, params, undefined${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg})`;
+            call = `this.client.post<${responseType}>(${requestPathExpression}, body, undefined, requestHeaders${contentTypeArg})`;
           } else {
-            call = `this.client.post<${responseType}>(${pathExpression}, body, undefined, undefined${contentTypeArg})`;
+            call = `this.client.post<${responseType}>(${requestPathExpression}, body, undefined, undefined${contentTypeArg})`;
           }
         } else {
           if (hasQuery && hasHeaders) {
-            call = `this.client.post<${responseType}>(${pathExpression}, undefined, params, headers)`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.post<${responseType}>(${requestPathExpression}, undefined, undefined, requestHeaders)`
+              : `this.client.post<${responseType}>(${requestPathExpression}, undefined, params, requestHeaders)`;
           } else if (hasQuery) {
-            call = `this.client.post<${responseType}>(${pathExpression}, undefined, params)`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.post<${responseType}>(${requestPathExpression})`
+              : `this.client.post<${responseType}>(${requestPathExpression}, undefined, params)`;
           } else if (hasHeaders) {
-            call = `this.client.post<${responseType}>(${pathExpression}, undefined, undefined, headers)`;
+            call = `this.client.post<${responseType}>(${requestPathExpression}, undefined, undefined, requestHeaders)`;
           } else {
-            call = `this.client.post<${responseType}>(${pathExpression})`;
+            call = `this.client.post<${responseType}>(${requestPathExpression})`;
           }
         }
         break;
       case 'put':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = `this.client.put<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.put<${responseType}>(${requestPathExpression}, body, undefined, requestHeaders${contentTypeArg})`
+              : `this.client.put<${responseType}>(${requestPathExpression}, body, params, requestHeaders${contentTypeArg})`;
           } else if (hasQuery) {
-            call = `this.client.put<${responseType}>(${pathExpression}, body, params, undefined${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.put<${responseType}>(${requestPathExpression}, body, undefined, undefined${contentTypeArg})`
+              : `this.client.put<${responseType}>(${requestPathExpression}, body, params, undefined${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg})`;
+            call = `this.client.put<${responseType}>(${requestPathExpression}, body, undefined, requestHeaders${contentTypeArg})`;
           } else {
-            call = `this.client.put<${responseType}>(${pathExpression}, body, undefined, undefined${contentTypeArg})`;
+            call = `this.client.put<${responseType}>(${requestPathExpression}, body, undefined, undefined${contentTypeArg})`;
           }
         } else {
           if (hasQuery && hasHeaders) {
-            call = `this.client.put<${responseType}>(${pathExpression}, undefined, params, headers)`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.put<${responseType}>(${requestPathExpression}, undefined, undefined, requestHeaders)`
+              : `this.client.put<${responseType}>(${requestPathExpression}, undefined, params, requestHeaders)`;
           } else if (hasQuery) {
-            call = `this.client.put<${responseType}>(${pathExpression}, undefined, params)`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.put<${responseType}>(${requestPathExpression})`
+              : `this.client.put<${responseType}>(${requestPathExpression}, undefined, params)`;
           } else if (hasHeaders) {
-            call = `this.client.put<${responseType}>(${pathExpression}, undefined, undefined, headers)`;
+            call = `this.client.put<${responseType}>(${requestPathExpression}, undefined, undefined, requestHeaders)`;
           } else {
-            call = `this.client.put<${responseType}>(${pathExpression})`;
+            call = `this.client.put<${responseType}>(${requestPathExpression})`;
           }
         }
         break;
       case 'delete':
         if (hasQuery && hasHeaders) {
-          call = `this.client.delete<${responseType}>(${pathExpression}, params, headers)`;
+          call = hasExplicitQuerySerialization
+            ? `this.client.delete<${responseType}>(${requestPathExpression}, undefined, requestHeaders)`
+            : `this.client.delete<${responseType}>(${requestPathExpression}, params, requestHeaders)`;
         } else if (hasQuery) {
-          call = `this.client.delete<${responseType}>(${pathExpression}, params)`;
+          call = hasExplicitQuerySerialization
+            ? `this.client.delete<${responseType}>(${requestPathExpression})`
+            : `this.client.delete<${responseType}>(${requestPathExpression}, params)`;
         } else if (hasHeaders) {
-          call = `this.client.delete<${responseType}>(${pathExpression}, undefined, headers)`;
+          call = `this.client.delete<${responseType}>(${requestPathExpression}, undefined, requestHeaders)`;
         } else {
-          call = `this.client.delete<${responseType}>(${pathExpression})`;
+          call = `this.client.delete<${responseType}>(${requestPathExpression})`;
         }
         break;
       case 'patch':
         if (hasBody) {
           if (hasQuery && hasHeaders) {
-            call = `this.client.patch<${responseType}>(${pathExpression}, body, params, headers${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.patch<${responseType}>(${requestPathExpression}, body, undefined, requestHeaders${contentTypeArg})`
+              : `this.client.patch<${responseType}>(${requestPathExpression}, body, params, requestHeaders${contentTypeArg})`;
           } else if (hasQuery) {
-            call = `this.client.patch<${responseType}>(${pathExpression}, body, params, undefined${contentTypeArg})`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.patch<${responseType}>(${requestPathExpression}, body, undefined, undefined${contentTypeArg})`
+              : `this.client.patch<${responseType}>(${requestPathExpression}, body, params, undefined${contentTypeArg})`;
           } else if (hasHeaders) {
-            call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, headers${contentTypeArg})`;
+            call = `this.client.patch<${responseType}>(${requestPathExpression}, body, undefined, requestHeaders${contentTypeArg})`;
           } else {
-            call = `this.client.patch<${responseType}>(${pathExpression}, body, undefined, undefined${contentTypeArg})`;
+            call = `this.client.patch<${responseType}>(${requestPathExpression}, body, undefined, undefined${contentTypeArg})`;
           }
         } else {
           if (hasQuery && hasHeaders) {
-            call = `this.client.patch<${responseType}>(${pathExpression}, undefined, params, headers)`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.patch<${responseType}>(${requestPathExpression}, undefined, undefined, requestHeaders)`
+              : `this.client.patch<${responseType}>(${requestPathExpression}, undefined, params, requestHeaders)`;
           } else if (hasQuery) {
-            call = `this.client.patch<${responseType}>(${pathExpression}, undefined, params)`;
+            call = hasExplicitQuerySerialization
+              ? `this.client.patch<${responseType}>(${requestPathExpression})`
+              : `this.client.patch<${responseType}>(${requestPathExpression}, undefined, params)`;
           } else if (hasHeaders) {
-            call = `this.client.patch<${responseType}>(${pathExpression}, undefined, undefined, headers)`;
+            call = `this.client.patch<${responseType}>(${requestPathExpression}, undefined, undefined, requestHeaders)`;
           } else {
-            call = `this.client.patch<${responseType}>(${pathExpression})`;
+            call = `this.client.patch<${responseType}>(${requestPathExpression})`;
           }
         }
         break;
       default:
-        call = `this.client.get<${responseType}>(${pathExpression})`;
+        call = `this.client.request<${responseType}>(${requestPathExpression}, { method: '${toHttpMethodLiteral(httpMethod)}' as any${hasBody ? ', body' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody && requestBodyInfo?.mediaType ? `, contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : ''} })`;
     }
 
     const docComment = op.summary ? `/** ${op.summary} */\n  ` : '';
+    const queryBlock = hasExplicitQuerySerialization
+      ? `    const query = buildQueryString([
+${this.renderQueryParameterSpecs(queryBindings)}
+    ]);
+`
+      : '';
+    const requestHeaderBlock = hasHeaders
+      ? `    const requestHeaders = buildRequestHeaders(
+${this.renderNamedParameterRecord(headerBindings)},
+${this.renderNamedParameterRecord(cookieBindings)}
+    );
+`
+      : '';
     
     return {
       content: `${docComment}async ${methodName}(${params.join(', ')}): Promise<${responseType}> {
-    return ${call};
+${queryBlock}${requestHeaderBlock}    return ${call};
   }`,
       referencedModels,
     };
+  }
+
+  private createQueryParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): QueryParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
+        allowReserved: serialization.allowReserved,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private createNamedParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): NamedParameterBinding[] {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => toSafeCamelIdentifier(rawNameByKey.get(key) || 'value', TYPESCRIPT_RESERVED_WORDS),
+      reservedNames,
+    );
+
+    return parameters.map((parameter, index) => {
+      const key = keys[index];
+      return {
+        parameter,
+        safeName: safeNameByKey.get(key) || `value${index + 1}`,
+        required: Boolean(parameter?.required),
+        type: this.getNamedParameterType(parameter, knownModels),
+      };
+    });
+  }
+
+  private getNamedParameterType(parameter: any, knownModels: Set<string>): string {
+    const contentSchema = extractOpenApiParameterContentSchema(parameter);
+    if (contentSchema) {
+      return getTypeScriptType(contentSchema, TYPESCRIPT_CONFIG, knownModels);
+    }
+    if (!parameter?.schema) {
+      return 'unknown';
+    }
+    return getTypeScriptType(parameter.schema, TYPESCRIPT_CONFIG, knownModels);
+  }
+
+  private renderMethodParameter(binding: NamedParameterBinding): string {
+    return binding.required
+      ? `${binding.safeName}: ${binding.type}`
+      : `${binding.safeName}?: ${binding.type}`;
+  }
+
+  private renderNamedParameterRecord(bindings: NamedParameterBinding[]): string {
+    if (bindings.length === 0) {
+      return '      {}';
+    }
+    const lines = bindings.map((binding) => {
+      return `        ${this.formatObjectKey(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
+    });
+    return ['      {', ...lines, '      }'].join('\n');
+  }
+
+  private formatObjectKey(rawName: string): string {
+    return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rawName)
+      ? rawName
+      : `'${rawName.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  }
+
+  private renderQueryParameterSpecs(bindings: QueryParameterBinding[]): string {
+    return bindings.map((binding) => {
+      const parts = [
+        `name: '${this.escapeSingleQuoted(String(binding.parameter?.name || binding.safeName))}'`,
+        `value: ${binding.safeName}`,
+        `style: '${this.escapeSingleQuoted(binding.style)}'`,
+        `explode: ${binding.explode ? 'true' : 'false'}`,
+        `allowReserved: ${binding.allowReserved ? 'true' : 'false'}`,
+      ];
+      if (binding.contentType) {
+        parts.push(`contentType: '${this.escapeSingleQuoted(binding.contentType)}'`);
+      }
+      return `      { ${parts.join(', ')} },`;
+    }).join('\n');
+  }
+
+  private generateQuerySerializationHelpers(): string {
+    return `interface QueryParameterSpec {
+  name: string;
+  value: unknown;
+  style: string;
+  explode: boolean;
+  allowReserved: boolean;
+  contentType?: string;
+}
+
+function buildQueryString(parameters: QueryParameterSpec[]): string {
+  const pairs: string[] = [];
+  for (const parameter of parameters) {
+    appendSerializedParameter(pairs, parameter);
+  }
+  return pairs.join('&');
+}
+
+function appendSerializedParameter(pairs: string[], parameter: QueryParameterSpec): void {
+  if (parameter.value === undefined || parameter.value === null) {
+    return;
+  }
+
+  if (parameter.contentType) {
+    pairs.push(\`\${encodeQueryComponent(parameter.name)}=\${encodeQueryValue(JSON.stringify(parameter.value), parameter.allowReserved)}\`);
+    return;
+  }
+
+  const style = parameter.style || 'form';
+  if (style === 'deepObject') {
+    appendDeepObjectParameter(pairs, parameter.name, parameter.value, parameter.allowReserved);
+    return;
+  }
+
+  if (Array.isArray(parameter.value)) {
+    appendArrayParameter(pairs, parameter.name, parameter.value, style, parameter.explode, parameter.allowReserved);
+    return;
+  }
+
+  if (typeof parameter.value === 'object') {
+    appendObjectParameter(pairs, parameter.name, parameter.value as Record<string, unknown>, style, parameter.explode, parameter.allowReserved);
+    return;
+  }
+
+  pairs.push(\`\${encodeQueryComponent(parameter.name)}=\${encodeQueryValue(serializePrimitive(parameter.value), parameter.allowReserved)}\`);
+}
+
+function appendArrayParameter(
+  pairs: string[],
+  name: string,
+  value: unknown[],
+  style: string,
+  explode: boolean,
+  allowReserved: boolean,
+): void {
+  const values = value
+    .filter((item) => item !== undefined && item !== null)
+    .map((item) => serializePrimitive(item));
+  if (values.length === 0) {
+    return;
+  }
+
+  if (style === 'form' && explode) {
+    for (const item of values) {
+      pairs.push(\`\${encodeQueryComponent(name)}=\${encodeQueryValue(item, allowReserved)}\`);
+    }
+    return;
+  }
+
+  pairs.push(\`\${encodeQueryComponent(name)}=\${encodeQueryValue(values.join(','), allowReserved)}\`);
+}
+
+function appendObjectParameter(
+  pairs: string[],
+  name: string,
+  value: Record<string, unknown>,
+  style: string,
+  explode: boolean,
+  allowReserved: boolean,
+): void {
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined && entryValue !== null);
+  if (entries.length === 0) {
+    return;
+  }
+
+  if (style === 'form' && explode) {
+    for (const [key, entryValue] of entries) {
+      pairs.push(\`\${encodeQueryComponent(key)}=\${encodeQueryValue(serializePrimitive(entryValue), allowReserved)}\`);
+    }
+    return;
+  }
+
+  const serialized = entries.flatMap(([key, entryValue]) => [key, serializePrimitive(entryValue)]).join(',');
+  pairs.push(\`\${encodeQueryComponent(name)}=\${encodeQueryValue(serialized, allowReserved)}\`);
+}
+
+function appendDeepObjectParameter(
+  pairs: string[],
+  name: string,
+  value: unknown,
+  allowReserved: boolean,
+): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    pairs.push(\`\${encodeQueryComponent(name)}=\${encodeQueryValue(serializePrimitive(value), allowReserved)}\`);
+    return;
+  }
+
+  for (const [key, entryValue] of Object.entries(value as Record<string, unknown>)) {
+    if (entryValue === undefined || entryValue === null) {
+      continue;
+    }
+    pairs.push(\`\${encodeQueryComponent(\`\${name}[\${key}]\`)}=\${encodeQueryValue(serializePrimitive(entryValue), allowReserved)}\`);
+  }
+}
+
+function serializePrimitive(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function encodeQueryComponent(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function encodeQueryValue(value: string, allowReserved: boolean): string {
+  const encoded = encodeURIComponent(value);
+  if (!allowReserved) {
+    return encoded;
+  }
+  return encoded.replace(/%3A/gi, ':')
+    .replace(/%2F/gi, '/')
+    .replace(/%3F/gi, '?')
+    .replace(/%23/gi, '#')
+    .replace(/%5B/gi, '[')
+    .replace(/%5D/gi, ']')
+    .replace(/%40/gi, '@')
+    .replace(/%21/gi, '!')
+    .replace(/%24/gi, '$')
+    .replace(/%26/gi, '&')
+    .replace(/%27/gi, "'")
+    .replace(/%28/gi, '(')
+    .replace(/%29/gi, ')')
+    .replace(/%2A/gi, '*')
+    .replace(/%2B/gi, '+')
+    .replace(/%2C/gi, ',')
+    .replace(/%3B/gi, ';')
+    .replace(/%3D/gi, '=');
+}`;
+  }
+
+  private generateRequestHeaderHelpers(): string {
+    return `function buildRequestHeaders(
+  headers: Record<string, unknown | undefined>,
+  cookies: Record<string, unknown | undefined> = {},
+): Record<string, string> | undefined {
+  const requestHeaders: Record<string, string> = {};
+
+  for (const [name, value] of Object.entries(headers)) {
+    const serialized = serializeParameterValue(value);
+    if (serialized !== undefined) {
+      requestHeaders[name] = serialized;
+    }
+  }
+
+  const cookieHeader = buildCookieHeader(cookies);
+  if (cookieHeader) {
+    requestHeaders.Cookie = requestHeaders.Cookie
+      ? \`\${requestHeaders.Cookie}; \${cookieHeader}\`
+      : cookieHeader;
+  }
+
+  return Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined;
+}
+
+function buildCookieHeader(cookies: Record<string, unknown | undefined>): string | undefined {
+  const pairs: string[] = [];
+  for (const [name, value] of Object.entries(cookies)) {
+    const serialized = serializeParameterValue(value);
+    if (serialized !== undefined) {
+      pairs.push(\`\${encodeURIComponent(name)}=\${encodeURIComponent(serialized)}\`);
+    }
+  }
+  return pairs.length > 0 ? pairs.join('; ') : undefined;
+}
+
+function serializeParameterValue(value: unknown): string | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => serializeParameterValue(item))
+      .filter((item): item is string => item !== undefined)
+      .join(',');
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}`;
   }
 
   private extractRequestBodyInfo(op: any): { schema: any; mediaType: string } | undefined {
@@ -343,7 +771,7 @@ export function create${className}(client: HttpClient): ${className} {
     if (!mediaType) {
       return undefined;
     }
-    const schema = content[mediaType]?.schema;
+    const schema = resolveMediaTypeSchema(content[mediaType]);
     if (!schema) {
       return undefined;
     }
@@ -381,8 +809,11 @@ export function create${className}(client: HttpClient): ${className} {
         continue;
       }
       const mediaType = this.pickJsonMediaType(content);
-      if (mediaType && content[mediaType]?.schema) {
-        return content[mediaType].schema;
+      if (mediaType) {
+        const schema = resolveMediaTypeSchema(content[mediaType]);
+        if (schema) {
+          return schema;
+        }
       }
     }
     return undefined;
@@ -422,41 +853,9 @@ export function create${className}(client: HttpClient): ${className} {
   private collectReferencedModels(
     schema: any,
     knownModels: Set<string>,
-    refs: Set<string>,
-    visited: Set<any> = new Set<any>()
+    refs: Set<string>
   ): void {
-    if (!schema || typeof schema !== 'object') {
-      return;
-    }
-    if (visited.has(schema)) {
-      return;
-    }
-    visited.add(schema);
-
-    if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop();
-      const modelName = TYPESCRIPT_CONFIG.namingConventions.modelName(refName ?? '');
-      if (knownModels.has(modelName)) {
-        refs.add(modelName);
-      }
-      return;
-    }
-
-    for (const key of ['oneOf', 'anyOf', 'allOf']) {
-      const values = schema[key];
-      if (Array.isArray(values)) {
-        values.forEach((value: any) => this.collectReferencedModels(value, knownModels, refs, visited));
-      }
-    }
-    if (schema.items) {
-      this.collectReferencedModels(schema.items, knownModels, refs, visited);
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-      Object.values(schema.properties).forEach((value) => this.collectReferencedModels(value, knownModels, refs, visited));
-    }
-    if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-      this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
-    }
+    collectSchemaReferences(schema, TYPESCRIPT_CONFIG.namingConventions.modelName, knownModels, refs);
   }
 
   private resolveMethodNames(operations: any[], tag: string): Map<any, string> {
@@ -540,6 +939,17 @@ export abstract class BaseApi {
   ): Promise<T> {
     return this.http.patch<T>(\`\${this.basePath}\${path}\`, body, params, headers, contentType);
   }
+
+  protected async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    params?: QueryParams,
+    headers?: Record<string, string>,
+    contentType?: string,
+  ): Promise<T> {
+    return this.http.request<T>(\`\${this.basePath}\${path}\`, { method: method as any, body, params, headers, contentType });
+  }
 }
 `),
       language: 'typescript',
@@ -599,5 +1009,9 @@ ${exports}
 
   private format(content: string): string {
     return content.trim() + '\n';
+  }
+
+  private escapeSingleQuoted(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   }
 }

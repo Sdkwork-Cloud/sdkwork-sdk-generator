@@ -1,5 +1,6 @@
 import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -7,15 +8,10 @@ import {
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
 import { RUST_CONFIG, getRustType } from './config.js';
+import { resolveRustApiNames, sanitizeRustRawIdentifier, type RustApiName } from './identifiers.js';
 
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
-
-const RUST_RESERVED_WORDS = new Set([
-  'as', 'break', 'const', 'continue', 'crate', 'else', 'enum', 'extern', 'false', 'fn', 'for', 'if', 'impl',
-  'in', 'let', 'loop', 'match', 'mod', 'move', 'mut', 'pub', 'ref', 'return', 'self', 'Self', 'static',
-  'struct', 'super', 'trait', 'true', 'type', 'unsafe', 'use', 'where', 'while', 'async', 'await', 'dyn',
-]);
 
 export type RustUsageRenderMode = 'readme' | 'test';
 
@@ -28,6 +24,8 @@ export interface RustUsageVariable {
 export interface RustUsageExpectation {
   name: string;
   expected: string;
+  source?: string;
+  cookie?: boolean;
 }
 
 export interface RustBodyAssertionPlan {
@@ -71,6 +69,7 @@ interface RustBodyVariablePlan {
 
 export class RustUsagePlanner {
   private readonly resolvedTagNames: Map<string, string>;
+  private readonly apiNames: Map<string, RustApiName>;
   private readonly preferredModules: string[];
   private readonly knownModels: Set<string>;
 
@@ -79,6 +78,7 @@ export class RustUsagePlanner {
     preferredModules: string[] = DEFAULT_PREFERRED_MODULES,
   ) {
     this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+    this.apiNames = resolveRustApiNames(Object.keys(ctx.apiGroups), this.resolvedTagNames);
     this.preferredModules = preferredModules;
     this.knownModels = new Set(
       Object.keys(ctx.schemas).map((schemaName) => RUST_CONFIG.namingConventions.modelName(schemaName)),
@@ -86,8 +86,7 @@ export class RustUsagePlanner {
   }
 
   getModuleName(tag: string): string {
-    const resolvedTagName = this.resolvedTagNames.get(tag) || tag;
-    return RUST_CONFIG.namingConventions.propertyName(resolvedTagName);
+    return this.apiNames.get(tag)?.moduleName || sanitizeRustIdentifier(this.resolvedTagNames.get(tag) || tag);
   }
 
   selectQuickStartPlan(): RustUsagePlan | undefined {
@@ -163,11 +162,10 @@ export class RustUsagePlanner {
       (parameter) => parameter?.in === 'header' || parameter?.in === 'cookie',
     );
     if (headerParams.length > 0) {
-      const headerVariable = this.buildHeaderVariable(headerParams);
-      variables.push(headerVariable.variable);
-      headerExpectations.push(...headerVariable.expectations);
-      callArguments.push('Some(&headers)');
-      needsHashMapImport = true;
+      const headerVariables = this.buildHeaderVariables(headerParams, variables.map((variable) => variable.name));
+      variables.push(...headerVariables.variables);
+      headerExpectations.push(...headerVariables.expectations);
+      callArguments.push(...headerVariables.arguments);
     }
 
     const responseSchema = extractResponseSchema(operation);
@@ -216,7 +214,7 @@ export class RustUsagePlanner {
       };
     }
 
-    const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
     if (declaredType.startsWith('std::collections::HashMap<')) {
       const lines = renderHashMapVariable(this.ctx, resolvedSchema, normalizedMediaType);
       return {
@@ -239,7 +237,7 @@ export class RustUsagePlanner {
     }
 
     if (normalizedType === 'array' || declaredType.startsWith('Vec<')) {
-      const itemValue = renderInlineRustValue(this.ctx, resolvedSchema?.items, 'item', 0, normalizedMediaType, 1);
+      const itemValue = renderInlineRustValue(this.ctx, getArrayItemSchema(resolvedSchema), 'item', 0, normalizedMediaType, 1);
       const lines = itemValue
         ? [`let body = vec![${itemValue.rustExpression}];`]
         : ['let body: Vec<serde_json::Value> = Vec::new();'];
@@ -280,20 +278,45 @@ export class RustUsagePlanner {
     };
   }
 
-  private buildHeaderVariable(parameters: ApiParameter[]): {
-    variable: RustUsageVariable;
+  private buildHeaderVariables(parameters: ApiParameter[], reservedNames: string[]): {
+    variables: RustUsageVariable[];
+    arguments: string[];
     expectations: RustUsageExpectation[];
   } {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => sanitizeRustIdentifier(rawNameByKey.get(key) || 'value'),
+      [...reservedNames, 'body', 'query', 'headers'],
+    );
+    const variables: RustUsageVariable[] = [];
+    const arguments_: string[] = [];
     const expectations: RustUsageExpectation[] = [];
-    const lines = ['let mut headers = HashMap::new();'];
     for (let index = 0; index < parameters.length; index += 1) {
       const parameter = parameters[index];
+      const key = keys[index];
+      const variableName = safeNameByKey.get(key) || sanitizeRustIdentifier(parameter.name || `header_${index + 1}`);
       const sample = buildHeaderValue(this.ctx, parameter, index);
-      expectations.push({ name: parameter.name, expected: sample.stringValue });
-      lines.push(`headers.insert(${quoteRustString(parameter.name)}.to_string(), ${sample.rustExpression});`);
+      variables.push({
+        name: variableName,
+        kind: 'headers',
+        setupByMode: {
+          readme: [`let ${variableName} = ${sample.rustExpression};`],
+          test: [`let ${variableName} = ${sample.rustExpression};`],
+        },
+      });
+      arguments_.push(parameter.required ? variableName : `Some(${variableName})`);
+      expectations.push({
+        name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+        expected: sample.stringValue,
+        source: variableName,
+        cookie: parameter.in === 'cookie',
+      });
     }
     return {
-      variable: { name: 'headers', kind: 'headers', setupByMode: { readme: lines, test: lines } },
+      variables,
+      arguments: arguments_,
       expectations,
     };
   }
@@ -473,6 +496,10 @@ function generateRustOperationName(
     put: 'update',
     patch: 'patch',
     delete: 'delete',
+    options: 'options',
+    head: 'head',
+    trace: 'trace',
+    query: 'query',
   };
   return toSnakeCase(`${actionMap[method] || method}_${resource}`);
 }
@@ -564,7 +591,7 @@ function renderInlineRustValue(
     };
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   switch (normalizedType) {
     case 'integer': {
       const value = index + 1;
@@ -579,8 +606,8 @@ function renderInlineRustValue(
       return { rustExpression: value ? 'true' : 'false', jsonValue: value, stringValue: value ? 'true' : 'false' };
     }
     case 'array': {
-      const itemValue = renderInlineRustValue(ctx, resolvedSchema.items, fallbackName, index, mediaType, depth + 1)
-        || buildScalarRustValue(fallbackName, resolvedSchema.items, index, mediaType);
+      const itemValue = renderInlineRustValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, index, mediaType, depth + 1)
+        || buildScalarRustValue(fallbackName, getArrayItemSchema(resolvedSchema), index, mediaType);
       return {
         rustExpression: `vec![${itemValue.rustExpression}]`,
         jsonValue: [itemValue.jsonValue],
@@ -607,7 +634,7 @@ function buildScalarRustValue(
   index: number,
   mediaType?: string,
 ): RustNamedValue {
-  const normalizedType = normalizeSchemaType(schema?.type) || inferImplicitObjectType(schema);
+  const normalizedType = resolveSchemaType(schema).effectiveType;
   if (normalizedType === 'integer') {
     const value = index + 1;
     return { rustExpression: `${value}_i64`, jsonValue: value, stringValue: String(value) };
@@ -635,7 +662,7 @@ function buildParameterValue(ctx: SchemaContext, parameter: ApiParameter, index:
     return buildLiteralValue(enumValues[0]);
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema?.type);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   if (normalizedType === 'integer') {
     const value = index + 1;
     return { rustExpression: `${value}_i64`, jsonValue: value, stringValue: String(value) };
@@ -663,7 +690,7 @@ function buildHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: nu
     };
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema?.type);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   if (normalizedType === 'integer' || normalizedType === 'number') {
     const value = String(index + 1);
     return {
@@ -680,7 +707,12 @@ function buildHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: nu
       stringValue: value,
     };
   }
-  return buildScalarRustValue(parameter.name || `header${index + 1}`, resolvedSchema, index);
+  const value = parameter.name || `header${index + 1}`;
+  return {
+    rustExpression: quoteRustString(value),
+    jsonValue: value,
+    stringValue: value,
+  };
 }
 
 function buildLiteralValue(value: unknown): RustNamedValue {
@@ -718,7 +750,7 @@ function buildJsonSampleValue(
     return enumValues[0];
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   switch (normalizedType) {
     case 'integer':
       return depth + 1;
@@ -727,7 +759,7 @@ function buildJsonSampleValue(
     case 'boolean':
       return true;
     case 'array':
-      return [buildJsonSampleValue(ctx, resolvedSchema.items, fallbackName, depth + 1)];
+      return [buildJsonSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1)];
     case 'object': {
       const properties = resolvedSchema.properties ? Object.entries(resolvedSchema.properties) : [];
       if (properties.length > 0) {
@@ -772,8 +804,7 @@ function buildResponseAssertions(
     const [propertyName, propertySchema] = properties[index];
     const fieldName = sanitizeRustIdentifier(RUST_CONFIG.namingConventions.propertyName(propertyName));
     const resolvedPropertySchema = resolveSchema(ctx, propertySchema);
-    const normalizedType = normalizeSchemaType(resolvedPropertySchema?.type)
-      || inferImplicitObjectType(resolvedPropertySchema);
+    const normalizedType = resolveSchemaType(resolvedPropertySchema).effectiveType;
     const isRequired = required.has(propertyName);
     if (propertySchema?.$ref) {
       assertions.push(isRequired
@@ -942,38 +973,9 @@ function sampleStringValue(fallbackName: string, index: number, schema?: ApiSche
   return normalizedName ? normalizedName.replace(/[^a-z0-9]+/g, '-') : `value${index + 1}`;
 }
 
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: ApiSchema | undefined): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  return schema.properties || schema.additionalProperties ? 'object' : undefined;
-}
-
 function getRequiredPropertyNames(schema: ApiSchema | undefined): string[] {
   const required = (schema as { required?: unknown } | undefined)?.required;
   return Array.isArray(required) ? required.filter((value): value is string => typeof value === 'string') : [];
-}
-
-function pickComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    return values.find((entry) => entry && normalizeSchemaType(entry.type) !== 'null') || values[0];
-  }
-  return undefined;
 }
 
 function toSnakeCase(value: string): string {
@@ -986,9 +988,7 @@ function toSnakeCase(value: string): string {
 }
 
 function sanitizeRustIdentifier(value: string): string {
-  const normalized = toSnakeCase(value) || 'value';
-  const safe = /^[0-9]/.test(normalized) ? `field_${normalized}` : normalized;
-  return RUST_RESERVED_WORDS.has(safe) ? `r#${safe}` : safe;
+  return sanitizeRustRawIdentifier(value);
 }
 
 function quoteRustString(value: string): string {

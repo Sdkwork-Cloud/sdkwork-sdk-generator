@@ -1,7 +1,10 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { resolveMediaTypeSchema } from '../../framework/schema.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
+import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
@@ -24,6 +27,14 @@ export class ApiGenerator {
         const methods = operations
             .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
             .join('\n\n');
+        const needsRequestHeaderHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        });
+        const needsQuerySerializationHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+        });
         return {
             path: `src/main/java/${identity.packagePath}/api/${className}.java`,
             content: this.format(`package ${identity.packageRoot}.api;
@@ -42,6 +53,8 @@ public class ${className} {
     }
 
 ${methods}
+${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
+${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 }
 `),
             language: 'java',
@@ -51,13 +64,20 @@ ${methods}
     generateMethod(op, config, methodName, knownModels) {
         const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
-        const hasQuery = allParameters.some((param) => param?.in === 'query');
-        const hasHeaders = allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        const queryParams = allParameters.filter((param) => param?.in === 'query');
+        const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
+        const headerParams = allParameters.filter((param) => param?.in === 'header');
+        const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const hasQuery = queryParams.length > 0;
+        const hasRawQueryString = queryStringParams.length > 0;
+        const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
         const method = String(op.method || '').toLowerCase();
-        const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+        const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const supportsRequestBody = supportsRequestBodyByDefault(method);
         const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
         const hasBody = Boolean(requestBodyInfo);
         const requestBodySchema = requestBodyInfo?.schema;
+        const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
             : '';
@@ -71,159 +91,442 @@ ${methods}
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => JAVA_CONFIG.namingConventions.propertyName(value), [
             hasBody ? 'body' : '',
             hasQuery ? 'params' : '',
-            hasHeaders ? 'headers' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'requestHeaders' : '',
         ]);
         const pathParams = rawPathParams.map((rawName) => ({
             rawName,
             safeName: pathParamNames.get(rawName) || rawName,
         }));
+        const parameterReservedNames = [
+            ...pathParams.map((param) => param.safeName),
+            hasBody ? 'body' : '',
+            hasQuery ? 'params' : '',
+            hasRawQueryString ? 'rawQueryString' : '',
+            hasHeaders ? 'requestHeaders' : '',
+        ];
+        const queryBindings = hasExplicitQuerySerialization
+            ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
+            : [];
+        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+            ...parameterReservedNames,
+            ...queryBindings.map((binding) => binding.safeName),
+            ...headerBindings.map((binding) => binding.safeName),
+        ]);
+        const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+        const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+        const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+        const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = [];
         if (pathParams.length) {
             params.push(...pathParams.map((param) => `String ${param.safeName}`));
         }
-        if (hasBody) {
+        if (hasBody && Boolean(op.requestBody?.required)) {
             params.push(`${requestType} body`);
         }
-        if (hasQuery) {
+        if (hasRawQueryString) {
+            params.push('String rawQueryString');
+        }
+        params.push(...requiredQueryBindings.map((binding) => `${binding.type} ${binding.safeName}`));
+        params.push(...requiredHeaderBindings.map((binding) => `${binding.type} ${binding.safeName}`));
+        if (hasBody && !Boolean(op.requestBody?.required)) {
+            params.push(`${requestType} body`);
+        }
+        if (hasQuery && !hasExplicitQuerySerialization) {
             params.push('Map<String, Object> params');
         }
-        if (hasHeaders) {
-            params.push('Map<String, String> headers');
-        }
+        params.push(...optionalQueryBindings.map((binding) => `${binding.type} ${binding.safeName}`));
+        params.push(...optionalHeaderBindings.map((binding) => `${binding.type} ${binding.safeName}`));
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
             const safeName = pathParamNames.get(paramName) || JAVA_CONFIG.namingConventions.propertyName(paramName);
             return `" + ${safeName} + "`;
         });
         const pathCall = `ApiPaths.${JAVA_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
+        const requestPathCall = hasRawQueryString
+            ? `ApiPaths.appendQueryString(${pathCall}, rawQueryString)`
+            : hasExplicitQuerySerialization
+                ? `ApiPaths.appendQueryString(${pathCall}, query)`
+                : pathCall;
         let call = '';
         switch (method) {
             case 'get':
                 if (hasQuery && hasHeaders) {
-                    call = `client.get(${pathCall}, params, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.get(${requestPathCall}, null, requestHeaders)`
+                        : `client.get(${requestPathCall}, params, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `client.get(${pathCall}, params)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.get(${requestPathCall})`
+                        : `client.get(${requestPathCall}, params)`;
                 }
                 else if (hasHeaders) {
-                    call = `client.get(${pathCall}, null, headers)`;
+                    call = `client.get(${requestPathCall}, null, requestHeaders)`;
                 }
                 else {
-                    call = `client.get(${pathCall})`;
+                    call = `client.get(${requestPathCall})`;
                 }
                 break;
             case 'post':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `client.post(${pathCall}, body, params, headers${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `client.post(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+                            : `client.post(${requestPathCall}, body, params, requestHeaders${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `client.post(${pathCall}, body, params, null${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `client.post(${requestPathCall}, body, null, null${contentTypeArg})`
+                            : `client.post(${requestPathCall}, body, params, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `client.post(${pathCall}, body, null, headers${contentTypeArg})`;
+                        call = `client.post(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
                     }
                     else {
-                        call = `client.post(${pathCall}, body, null, null${contentTypeArg})`;
+                        call = `client.post(${requestPathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `client.post(${pathCall}, null, params, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.post(${requestPathCall}, null, null, requestHeaders)`
+                        : `client.post(${requestPathCall}, null, params, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `client.post(${pathCall}, null, params)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.post(${requestPathCall}, null)`
+                        : `client.post(${requestPathCall}, null, params)`;
                 }
                 else if (hasHeaders) {
-                    call = `client.post(${pathCall}, null, null, headers)`;
+                    call = `client.post(${requestPathCall}, null, null, requestHeaders)`;
                 }
                 else {
-                    call = `client.post(${pathCall}, null)`;
+                    call = `client.post(${requestPathCall}, null)`;
                 }
                 break;
             case 'put':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `client.put(${pathCall}, body, params, headers${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `client.put(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+                            : `client.put(${requestPathCall}, body, params, requestHeaders${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `client.put(${pathCall}, body, params, null${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `client.put(${requestPathCall}, body, null, null${contentTypeArg})`
+                            : `client.put(${requestPathCall}, body, params, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `client.put(${pathCall}, body, null, headers${contentTypeArg})`;
+                        call = `client.put(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
                     }
                     else {
-                        call = `client.put(${pathCall}, body, null, null${contentTypeArg})`;
+                        call = `client.put(${requestPathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `client.put(${pathCall}, null, params, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.put(${requestPathCall}, null, null, requestHeaders)`
+                        : `client.put(${requestPathCall}, null, params, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `client.put(${pathCall}, null, params)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.put(${requestPathCall}, null)`
+                        : `client.put(${requestPathCall}, null, params)`;
                 }
                 else if (hasHeaders) {
-                    call = `client.put(${pathCall}, null, null, headers)`;
+                    call = `client.put(${requestPathCall}, null, null, requestHeaders)`;
                 }
                 else {
-                    call = `client.put(${pathCall}, null)`;
+                    call = `client.put(${requestPathCall}, null)`;
                 }
                 break;
             case 'delete':
                 if (hasQuery && hasHeaders) {
-                    call = `client.delete(${pathCall}, params, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.delete(${requestPathCall}, null, requestHeaders)`
+                        : `client.delete(${requestPathCall}, params, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `client.delete(${pathCall}, params)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.delete(${requestPathCall})`
+                        : `client.delete(${requestPathCall}, params)`;
                 }
                 else if (hasHeaders) {
-                    call = `client.delete(${pathCall}, null, headers)`;
+                    call = `client.delete(${requestPathCall}, null, requestHeaders)`;
                 }
                 else {
-                    call = `client.delete(${pathCall})`;
+                    call = `client.delete(${requestPathCall})`;
                 }
                 break;
             case 'patch':
                 if (hasBody) {
                     if (hasQuery && hasHeaders) {
-                        call = `client.patch(${pathCall}, body, params, headers${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `client.patch(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`
+                            : `client.patch(${requestPathCall}, body, params, requestHeaders${contentTypeArg})`;
                     }
                     else if (hasQuery) {
-                        call = `client.patch(${pathCall}, body, params, null${contentTypeArg})`;
+                        call = hasExplicitQuerySerialization
+                            ? `client.patch(${requestPathCall}, body, null, null${contentTypeArg})`
+                            : `client.patch(${requestPathCall}, body, params, null${contentTypeArg})`;
                     }
                     else if (hasHeaders) {
-                        call = `client.patch(${pathCall}, body, null, headers${contentTypeArg})`;
+                        call = `client.patch(${requestPathCall}, body, null, requestHeaders${contentTypeArg})`;
                     }
                     else {
-                        call = `client.patch(${pathCall}, body, null, null${contentTypeArg})`;
+                        call = `client.patch(${requestPathCall}, body, null, null${contentTypeArg})`;
                     }
                 }
                 else if (hasQuery && hasHeaders) {
-                    call = `client.patch(${pathCall}, null, params, headers)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.patch(${requestPathCall}, null, null, requestHeaders)`
+                        : `client.patch(${requestPathCall}, null, params, requestHeaders)`;
                 }
                 else if (hasQuery) {
-                    call = `client.patch(${pathCall}, null, params)`;
+                    call = hasExplicitQuerySerialization
+                        ? `client.patch(${requestPathCall}, null)`
+                        : `client.patch(${requestPathCall}, null, params)`;
                 }
                 else if (hasHeaders) {
-                    call = `client.patch(${pathCall}, null, null, headers)`;
+                    call = `client.patch(${requestPathCall}, null, null, requestHeaders)`;
                 }
                 else {
-                    call = `client.patch(${pathCall}, null)`;
+                    call = `client.patch(${requestPathCall}, null)`;
                 }
                 break;
             default:
-                call = `client.get(${pathCall})`;
+                call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
         }
         const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
+        const requestHeaderBlock = hasHeaders
+            ? `        Map<String, String> requestHeaders = buildRequestHeaders(
+${this.renderNamedParameterMap(headerBindings, 16)},
+${this.renderNamedParameterMap(cookieBindings, 16)}
+        );
+`
+            : '';
+        const queryBlock = hasExplicitQuerySerialization
+            ? `        String query = buildQueryString(List.of(
+${this.renderQueryParameterSpecs(queryBindings, 12)}
+        ));
+`
+            : '';
         if (responseType === 'Void') {
             return `${docComment}    public Void ${methodName}(${params.join(', ')}) throws Exception {
-        ${call};
+${queryBlock}${requestHeaderBlock}        ${call};
         return null;
     }`;
         }
         const castType = this.ensureKnownType(responseType, knownModels);
         return `${docComment}    public ${responseType} ${methodName}(${params.join(', ')}) throws Exception {
-        Object raw = ${call};
+${queryBlock}${requestHeaderBlock}        Object raw = ${call};
         return client.convertValue(raw, new TypeReference<${castType}>() {});
+    }`;
+    }
+    createQueryParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    createNamedParameterBindings(parameters, knownModels, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => JAVA_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'), reservedNames);
+        return parameters.map((parameter, index) => {
+            const key = keys[index];
+            return {
+                parameter,
+                safeName: safeNameByKey.get(key) || `value${index + 1}`,
+                required: Boolean(parameter?.required),
+                type: this.getNamedParameterType(parameter, knownModels),
+            };
+        });
+    }
+    getNamedParameterType(parameter, knownModels) {
+        const contentSchema = extractOpenApiParameterContentSchema(parameter);
+        if (contentSchema) {
+            return this.ensureKnownType(getJavaType(contentSchema, JAVA_CONFIG), knownModels);
+        }
+        return parameter?.schema ? this.ensureKnownType(getJavaType(parameter.schema, JAVA_CONFIG), knownModels) : 'Object';
+    }
+    renderNamedParameterMap(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        if (bindings.length === 0) {
+            return `${indent}Map.of()`;
+        }
+        const entries = bindings.map((binding) => {
+            return `${this.formatJavaString(String(binding.parameter?.name || binding.safeName))}, ${binding.safeName}`;
+        });
+        return `${indent}Map.of(${entries.join(', ')})`;
+    }
+    formatJavaString(value) {
+        return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    }
+    renderQueryParameterSpecs(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        return bindings.map((binding) => {
+            return `${indent}new QueryParameterSpec(${[
+                this.formatJavaString(String(binding.parameter?.name || binding.safeName)),
+                binding.safeName,
+                this.formatJavaString(binding.style),
+                binding.explode ? 'true' : 'false',
+                binding.allowReserved ? 'true' : 'false',
+                binding.contentType ? this.formatJavaString(binding.contentType) : 'null',
+            ].join(', ')})`;
+        }).join(',\n');
+    }
+    generateQuerySerializationHelpers() {
+        return `    private record QueryParameterSpec(String name, Object value, String style, boolean explode, boolean allowReserved, String contentType) {}
+
+    private static String buildQueryString(List<QueryParameterSpec> parameters) throws Exception {
+        List<String> pairs = new java.util.ArrayList<>();
+        for (QueryParameterSpec parameter : parameters) {
+            appendSerializedParameter(pairs, parameter);
+        }
+        return String.join("&", pairs);
+    }
+
+    private static void appendSerializedParameter(List<String> pairs, QueryParameterSpec parameter) throws Exception {
+        if (parameter.value() == null) {
+            return;
+        }
+        if (parameter.contentType() != null && !parameter.contentType().isBlank()) {
+            String json = clientObjectMapper().writeValueAsString(parameter.value());
+            pairs.add(urlEncode(parameter.name()) + "=" + encodeQueryValue(json, parameter.allowReserved()));
+            return;
+        }
+
+        String style = parameter.style() == null || parameter.style().isBlank() ? "form" : parameter.style();
+        Object value = parameter.value();
+        if ("deepObject".equals(style) && value instanceof Map<?, ?> map) {
+            appendDeepObjectParameter(pairs, parameter.name(), map, parameter.allowReserved());
+        } else if (value instanceof Iterable<?> iterable) {
+            appendArrayParameter(pairs, parameter.name(), iterable, style, parameter.explode(), parameter.allowReserved());
+        } else if (value instanceof Map<?, ?> map) {
+            appendObjectParameter(pairs, parameter.name(), map, style, parameter.explode(), parameter.allowReserved());
+        } else {
+            pairs.add(urlEncode(parameter.name()) + "=" + encodeQueryValue(String.valueOf(value), parameter.allowReserved()));
+        }
+    }
+
+    private static void appendArrayParameter(List<String> pairs, String name, Iterable<?> values, String style, boolean explode, boolean allowReserved) {
+        List<String> serialized = new java.util.ArrayList<>();
+        for (Object item : values) {
+            if (item != null) {
+                serialized.add(String.valueOf(item));
+            }
+        }
+        if (serialized.isEmpty()) {
+            return;
+        }
+        if ("form".equals(style) && explode) {
+            for (String item : serialized) {
+                pairs.add(urlEncode(name) + "=" + encodeQueryValue(item, allowReserved));
+            }
+            return;
+        }
+        pairs.add(urlEncode(name) + "=" + encodeQueryValue(String.join(",", serialized), allowReserved));
+    }
+
+    private static void appendObjectParameter(List<String> pairs, String name, Map<?, ?> values, String style, boolean explode, boolean allowReserved) {
+        List<String> serialized = new java.util.ArrayList<>();
+        values.forEach((key, value) -> {
+            if (value == null) {
+                return;
+            }
+            if ("form".equals(style) && explode) {
+                pairs.add(urlEncode(String.valueOf(key)) + "=" + encodeQueryValue(String.valueOf(value), allowReserved));
+            } else {
+                serialized.add(String.valueOf(key));
+                serialized.add(String.valueOf(value));
+            }
+        });
+        if (!serialized.isEmpty()) {
+            pairs.add(urlEncode(name) + "=" + encodeQueryValue(String.join(",", serialized), allowReserved));
+        }
+    }
+
+    private static void appendDeepObjectParameter(List<String> pairs, String name, Map<?, ?> values, boolean allowReserved) {
+        values.forEach((key, value) -> {
+            if (value != null) {
+                pairs.add(urlEncode(name + "[" + key + "]") + "=" + encodeQueryValue(String.valueOf(value), allowReserved));
+            }
+        });
+    }
+
+    private static String encodeQueryValue(String value, boolean allowReserved) {
+        String encoded = urlEncode(value);
+        if (!allowReserved) {
+            return encoded;
+        }
+        return encoded
+            .replace("%3A", ":").replace("%2F", "/").replace("%3F", "?").replace("%23", "#")
+            .replace("%5B", "[").replace("%5D", "]").replace("%40", "@").replace("%21", "!")
+            .replace("%24", "$").replace("%26", "&").replace("%27", "'").replace("%28", "(")
+            .replace("%29", ")").replace("%2A", "*").replace("%2B", "+").replace("%2C", ",")
+            .replace("%3B", ";").replace("%3D", "=");
+    }
+
+    private static com.fasterxml.jackson.databind.ObjectMapper clientObjectMapper() {
+        return new com.fasterxml.jackson.databind.ObjectMapper();
+    }`;
+    }
+    generateRequestHeaderHelpers() {
+        return `    private static Map<String, String> buildRequestHeaders(Map<String, ?> headers, Map<String, ?> cookies) {
+        Map<String, String> requestHeaders = new java.util.LinkedHashMap<>();
+        headers.forEach((name, value) -> {
+            String serialized = serializeParameterValue(value);
+            if (serialized != null) {
+                requestHeaders.put(name, serialized);
+            }
+        });
+
+        String cookieHeader = buildCookieHeader(cookies);
+        if (cookieHeader != null && !cookieHeader.isEmpty()) {
+            requestHeaders.merge("Cookie", cookieHeader, (left, right) -> left + "; " + right);
+        }
+
+        return requestHeaders.isEmpty() ? null : requestHeaders;
+    }
+
+    private static String buildCookieHeader(Map<String, ?> cookies) {
+        java.util.List<String> pairs = new java.util.ArrayList<>();
+        cookies.forEach((name, value) -> {
+            String serialized = serializeParameterValue(value);
+            if (serialized != null) {
+                pairs.add(urlEncode(name) + "=" + urlEncode(serialized));
+            }
+        });
+        return String.join("; ", pairs);
+    }
+
+    private static String serializeParameterValue(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Iterable<?> iterable) {
+            java.util.List<String> values = new java.util.ArrayList<>();
+            for (Object item : iterable) {
+                String serialized = serializeParameterValue(item);
+                if (serialized != null) {
+                    values.add(serialized);
+                }
+            }
+            return String.join(",", values);
+        }
+        return String.valueOf(value);
+    }
+
+    private static String urlEncode(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
     }`;
     }
     generateOperationId(method, path, op, tag) {
@@ -239,6 +542,10 @@ ${methods}
             put: 'update',
             patch: 'patch',
             delete: 'delete',
+            options: 'options',
+            head: 'head',
+            trace: 'trace',
+            query: 'query',
         };
         return `${actionMap[method] || method}${JAVA_CONFIG.namingConventions.modelName(resource)}`;
     }
@@ -255,7 +562,7 @@ ${methods}
         if (!mediaType) {
             return undefined;
         }
-        const schema = content[mediaType]?.schema;
+        const schema = resolveMediaTypeSchema(content[mediaType]);
         if (!schema) {
             return undefined;
         }
@@ -293,8 +600,11 @@ ${methods}
                 continue;
             }
             const mediaType = this.pickJsonMediaType(content);
-            if (mediaType && content[mediaType]?.schema) {
-                return content[mediaType].schema;
+            if (mediaType) {
+                const schema = resolveMediaTypeSchema(content[mediaType]);
+                if (schema) {
+                    return schema;
+                }
             }
         }
         return undefined;
@@ -382,6 +692,14 @@ public class ApiPaths {
             return normalizedPath;
         }
         return normalizedPrefix + normalizedPath;
+    }
+
+    public static String appendQueryString(String path, String rawQueryString) {
+        String query = rawQueryString == null ? "" : rawQueryString.replaceFirst("^\\\\?+", "");
+        if (query.isEmpty()) {
+            return path;
+        }
+        return path.contains("?") ? path + "&" + query : path + "?" + query;
     }
 }
 `),

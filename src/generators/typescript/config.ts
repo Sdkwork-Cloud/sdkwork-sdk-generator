@@ -1,4 +1,5 @@
 import type { LanguageConfig } from '../../framework/base.js';
+import { getConstSchemaInfo, getTupleSchemaInfo, isNullSchema, normalizeSchemaTypeValue } from '../../framework/schema.js';
 
 export const TYPESCRIPT_CONFIG: LanguageConfig = {
   language: 'typescript',
@@ -68,19 +69,23 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
 
   if (schema.oneOf || schema.anyOf) {
     const unionSchemas = schema.oneOf || schema.anyOf || [];
+    const nullable = Boolean(schema.nullable) || unionSchemas.some((s: any) => isNullSchema(s));
     const unionType = unionSchemas
+      .filter((s: any) => !isNullSchema(s))
       .map((s: any) => getTypeScriptType(s, config, knownModels))
       .filter(Boolean)
       .join(' | ') || 'unknown';
-    return schema.nullable ? `${unionType} | null` : unionType;
+    return nullable ? `${unionType} | null` : unionType;
   }
 
   if (schema.allOf) {
-    const intersectionType = schema.allOf
+    const nullable = Boolean(schema.nullable) || normalizeSchemaTypeValue(schema.type).nullable;
+    const intersectionTypes = schema.allOf
+      .filter((s: any) => !isNullSchema(s))
       .map((s: any) => getTypeScriptType(s, config, knownModels))
-      .filter(Boolean)
-      .join(' & ') || 'unknown';
-    return schema.nullable ? `${intersectionType} | null` : intersectionType;
+      .filter(Boolean);
+    const intersectionType = intersectionTypes.join(' & ') || 'unknown';
+    return nullable ? `${intersectionType} | null` : intersectionType;
   }
 
   if (schema.$ref) {
@@ -104,6 +109,12 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
   const type = normalized.type;
   const nullable = schema.nullable || normalized.nullable;
   const format = schema.format;
+
+  const constInfo = getConstSchemaInfo(schema);
+  if (constInfo) {
+    const constType = renderTypeScriptConstType(constInfo.value);
+    return nullable && constInfo.value !== null ? `${constType} | null` : constType;
+  }
 
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     const enumType = schema.enum
@@ -135,7 +146,25 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
   }
   
   if (type === 'array') {
-    const itemType = schema.items ? getTypeScriptType(schema.items, config, knownModels) : 'unknown';
+    const tupleInfo = getTupleSchemaInfo(schema);
+    if (tupleInfo) {
+      const prefixTypes = tupleInfo.prefixItems.map((itemSchema) =>
+        getTypeScriptType(itemSchema, config, knownModels)
+      );
+      let tupleType = `[${prefixTypes.join(', ')}]`;
+      if (!tupleInfo.fixedLength) {
+        const additionalType = tupleInfo.additionalItems === true
+          ? 'unknown'
+          : tupleInfo.additionalItems
+            ? getTypeScriptType(tupleInfo.additionalItems, config, knownModels)
+            : 'never';
+        tupleType = `[${[...prefixTypes, `...${wrapComplexType(additionalType)}[]`].join(', ')}]`;
+      }
+      return nullable ? `${tupleType} | null` : tupleType;
+    }
+    const itemType = schema.items && typeof schema.items === 'object'
+      ? getTypeScriptType(schema.items, config, knownModels)
+      : 'unknown';
     const arrayType = `${wrapComplexType(itemType)}[]`;
     return nullable ? `${arrayType} | null` : arrayType;
   }
@@ -149,15 +178,16 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
 }
 
 function normalizeSchemaType(type: unknown): { type: string | undefined; nullable: boolean } {
-  if (typeof type === 'string') {
-    return { type, nullable: false };
+  const normalized = normalizeSchemaTypeValue(type);
+  return { type: normalized.type, nullable: normalized.nullable };
+}
+
+function renderTypeScriptConstType(value: string | number | boolean | null): string {
+  if (value === null) {
+    return 'null';
   }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return {
-      type: typeof candidate === 'string' ? candidate : undefined,
-      nullable: type.includes('null'),
-    };
+  if (typeof value === 'string') {
+    return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
   }
-  return { type: undefined, nullable: false };
+  return String(value);
 }

@@ -1,7 +1,36 @@
+import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { GO_CONFIG, getGoType } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
+const GO_RESERVED_WORDS = new Set([
+    'break',
+    'case',
+    'chan',
+    'const',
+    'continue',
+    'default',
+    'defer',
+    'else',
+    'fallthrough',
+    'for',
+    'func',
+    'go',
+    'goto',
+    'if',
+    'import',
+    'interface',
+    'map',
+    'package',
+    'range',
+    'return',
+    'select',
+    'struct',
+    'switch',
+    'type',
+    'var',
+]);
 export class GoUsagePlanner {
     constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES) {
         this.ctx = ctx;
@@ -35,8 +64,9 @@ export class GoUsagePlanner {
         const queryExpectations = [];
         const headerExpectations = [];
         const pathParams = extractPathParams(operation.path);
+        const pathParamNames = createUniqueIdentifierMap(pathParams, (value) => toSafeCamelIdentifier(value, GO_RESERVED_WORDS), ['body', 'params', 'headers']);
         for (let index = 0; index < pathParams.length; index += 1) {
-            const variableName = toUsageIdentifier(pathParams[index], 'pathParam', index + 1);
+            const variableName = pathParamNames.get(pathParams[index]) || toUsageIdentifier(pathParams[index], 'pathParam', index + 1);
             const sampleValue = /id$/i.test(variableName)
                 ? formatGoStringLiteral('1')
                 : formatGoStringLiteral(variableName);
@@ -68,10 +98,10 @@ export class GoUsagePlanner {
         }
         const headerParams = allParameters.filter((parameter) => parameter?.in === 'header' || parameter?.in === 'cookie');
         if (headerParams.length > 0) {
-            const headerVariable = this.buildHeaderVariable(headerParams);
-            variables.push(headerVariable.variable);
-            headerExpectations.push(...headerVariable.expectations);
-            callArguments.push('headers');
+            const headerVariables = this.buildHeaderVariables(headerParams, variables.map((variable) => variable.name));
+            variables.push(...headerVariables.variables);
+            headerExpectations.push(...headerVariables.expectations);
+            callArguments.push(...headerVariables.arguments);
         }
         const requiresTypesImport = variables.some((variable) => variable.requiresTypesImport === true);
         return {
@@ -140,34 +170,43 @@ export class GoUsagePlanner {
             expectations,
         };
     }
-    buildHeaderVariable(parameters) {
+    buildHeaderVariables(parameters, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => toSafeCamelIdentifier(rawNameByKey.get(key) || 'value', GO_RESERVED_WORDS), [...reservedNames, 'body', 'params', 'headers']);
+        const variables = [];
+        const arguments_ = [];
         const expectations = [];
-        const entries = parameters.map((parameter, index) => {
+        parameters.forEach((parameter, index) => {
+            const key = keys[index];
+            const variableName = safeNameByKey.get(key) || toUsageIdentifier(parameter.name, parameter.in === 'cookie' ? 'cookieParam' : 'headerParam', index + 1);
             const sample = renderHeaderSample(this.resolveSchema(parameter.schema), parameter.name || `header${index + 1}`, index);
-            expectations.push({
-                name: parameter.name,
-                expected: sample.stringValue,
-            });
-            return `    ${formatGoStringLiteral(parameter.name)}: ${sample.goExpression},`;
-        });
-        const literal = entries.length > 0
-            ? `map[string]string{\n${entries.join('\n')}\n}`
-            : 'map[string]string{}';
-        return {
-            variable: {
-                name: 'headers',
+            const setupLine = `${variableName} := ${sample.goExpression}`;
+            variables.push({
+                name: variableName,
                 kind: 'headers',
                 setupByMode: {
-                    readme: [`headers := ${literal}`],
-                    test: [`headers := ${literal}`],
+                    readme: [setupLine],
+                    test: [setupLine],
                 },
-            },
+            });
+            arguments_.push(parameter.required ? variableName : `&${variableName}`);
+            expectations.push({
+                name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+                expected: sample.stringValue,
+                source: variableName,
+                cookie: parameter.in === 'cookie',
+            });
+        });
+        return {
+            variables,
+            arguments: arguments_,
             expectations,
         };
     }
     renderBodyValue(schema, mediaType, rawType) {
         const resolvedSchema = this.resolveSchema(schema);
-        const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+        const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
         const qualifiedType = this.qualifyGoType(rawType);
         const lowerMediaType = mediaType.toLowerCase();
         if (schema.$ref && normalizedType === 'object') {
@@ -257,7 +296,7 @@ export class GoUsagePlanner {
         };
     }
     renderSliceValue(schema, sliceType, mediaType) {
-        const itemSchema = schema?.items;
+        const itemSchema = getArrayItemSchema(schema);
         if (!itemSchema) {
             return {
                 expression: `${sliceType}{}`,
@@ -273,10 +312,10 @@ export class GoUsagePlanner {
     }
     renderSampleValue(schema, fallbackName, index, mediaType) {
         const resolvedSchema = this.resolveSchema(schema);
-        const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+        const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
         const enumValues = Array.isArray(resolvedSchema?.enum) ? resolvedSchema.enum : undefined;
         if (enumValues && enumValues.length > 0) {
-            return formatEnumLiteral(enumValues[0]);
+            return formatEnumLiteral(enumValues.find((value) => value !== null) ?? enumValues[0]);
         }
         if (schema?.$ref && normalizedType === 'object') {
             const qualifiedType = this.qualifyGoType(getGoType(schema, GO_CONFIG));
@@ -439,6 +478,10 @@ function generateGoOperationName(method, path, operation, tag) {
         put: 'Update',
         patch: 'Patch',
         delete: 'Delete',
+        options: 'Options',
+        head: 'Head',
+        trace: 'Trace',
+        query: 'Query',
     };
     return `${actionMap[method] || GO_CONFIG.namingConventions.modelName(method)}${GO_CONFIG.namingConventions.modelName(resource)}`;
 }
@@ -475,7 +518,7 @@ function renderScalarSample(schema, fallbackName, index) {
             stringValue: literal,
         };
     }
-    switch (normalizeSchemaType(schema?.type)) {
+    switch (resolveSchemaType(schema).effectiveType) {
         case 'integer':
         case 'number': {
             const value = String(index + 1);
@@ -500,7 +543,7 @@ function renderHeaderSample(schema, fallbackName, index) {
             stringValue: value,
         };
     }
-    switch (normalizeSchemaType(schema?.type)) {
+    switch (resolveSchemaType(schema).effectiveType) {
         case 'integer':
         case 'number': {
             const value = String(index + 1);
@@ -524,7 +567,13 @@ function renderHeaderSample(schema, fallbackName, index) {
     };
 }
 function formatEnumLiteral(value) {
-    if (typeof value === 'number') {
+    if (value === null) {
+        return {
+            expression: 'nil',
+            requiresTypesImport: false,
+        };
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
         return {
             expression: String(value),
             requiresTypesImport: false,
@@ -545,7 +594,7 @@ function extractRequestBodyInfo(operation) {
         return undefined;
     }
     const mediaType = pickRequestBodyMediaType(content);
-    const schema = mediaType ? content[mediaType]?.schema : undefined;
+    const schema = mediaType ? resolveMediaTypeSchema(content[mediaType]) : undefined;
     if (!mediaType || !schema) {
         return undefined;
     }
@@ -612,38 +661,4 @@ function indentMultilineGoExpression(expression, level) {
         .split('\n')
         .map((line) => (line ? `${prefix}${line}` : line))
         .join('\n');
-}
-function normalizeSchemaType(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
-}
-function inferImplicitObjectType(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return undefined;
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-        return 'object';
-    }
-    if (schema.additionalProperties) {
-        return 'object';
-    }
-    return undefined;
-}
-function pickComposedSchema(schema) {
-    const orderedKeys = ['allOf', 'oneOf', 'anyOf'];
-    for (const key of orderedKeys) {
-        const values = schema?.[key];
-        if (!Array.isArray(values) || values.length === 0) {
-            continue;
-        }
-        const candidate = values.find((entry) => entry && normalizeSchemaType(entry.type) !== 'null');
-        return candidate || values[0];
-    }
-    return undefined;
 }

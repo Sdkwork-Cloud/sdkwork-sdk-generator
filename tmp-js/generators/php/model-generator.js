@@ -1,14 +1,16 @@
+import { resolveModelSchema } from '../../framework/schema.js';
 import { PHP_CONFIG, getPhpNamespace, getPhpType } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
-        return Object.entries(ctx.schemas).map(([name, schema]) => this.generateModel(name, schema, config));
+        return Object.entries(ctx.schemas).map(([name, schema]) => this.generateModel(name, schema, ctx.schemas, config));
     }
-    generateModel(name, schema, config) {
+    generateModel(name, schema, schemas, config) {
+        const modelSchema = resolveModelSchema(schema, schemas);
         const baseNamespace = getPhpNamespace(config);
         const namespace = `${baseNamespace}\\Models`;
         const modelName = PHP_CONFIG.namingConventions.modelName(name);
-        const properties = Object.entries(schema?.properties || {});
-        const referencedModels = Array.from(this.collectReferencedModels(schema, new Set()))
+        const properties = Object.entries(modelSchema?.properties || {});
+        const referencedModels = Array.from(this.collectReferencedModels(modelSchema, new Set()))
             .filter((refName) => refName !== modelName)
             .sort((left, right) => left.localeCompare(right));
         const useStatements = referencedModels.map((refName) => `use ${namespace}\\${refName};`).join('\n');
@@ -21,8 +23,8 @@ export class ModelGenerator {
         const exports = properties.length > 0
             ? properties.map(([propName, propSchema]) => this.generateExport(propName, propSchema, modelName)).join('\n')
             : '            // No properties to serialize.';
-        const description = schema?.description
-            ? `/**\n * ${sanitizeDocComment(schema.description)}\n */\n`
+        const description = modelSchema?.description
+            ? `/**\n * ${sanitizeDocComment(modelSchema.description)}\n */\n`
             : '';
         const useBlock = useStatements ? `${useStatements}\n\n` : '';
         return {
@@ -106,7 +108,10 @@ ${exports}
             const refTarget = refName === currentModelName ? 'self' : refName;
             return `is_array(${valueExpr}) ? ${refTarget}::fromArray(${valueExpr}) : null`;
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            return `is_array(${valueExpr}) ? array_values(${valueExpr}) : []`;
+        }
+        if (schema.items && typeof schema.items === 'object') {
             const itemExpr = this.deserializeArrayItemExpression(schema.items, '$item', currentModelName);
             return `is_array(${valueExpr})
                 ? array_values(array_map(static fn($item) => ${itemExpr}, ${valueExpr}))
@@ -130,7 +135,10 @@ ${exports}
             const refTarget = refName === currentModelName ? 'self' : refName;
             return `is_array(${itemExpr}) ? ${refTarget}::fromArray(${itemExpr}) : ${itemExpr}`;
         }
-        if (schema?.items) {
+        if (Array.isArray(schema?.prefixItems)) {
+            return `is_array(${itemExpr}) ? array_values(${itemExpr}) : []`;
+        }
+        if (schema?.items && typeof schema.items === 'object') {
             const nestedExpr = this.deserializeArrayItemExpression(schema.items, '$nestedItem', currentModelName);
             return `is_array(${itemExpr})
                         ? array_values(array_map(static fn($nestedItem) => ${nestedExpr}, ${itemExpr}))
@@ -156,7 +164,10 @@ ${exports}
             const refTarget = refName === currentModelName ? 'self' : refName;
             return `${valueExpr} instanceof ${refTarget} ? ${valueExpr}->toArray() : ${valueExpr}`;
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            return `array_values(${valueExpr})`;
+        }
+        if (schema.items && typeof schema.items === 'object') {
             const itemExpr = this.serializeArrayItemExpression(schema.items, '$item', currentModelName);
             return `array_values(array_map(static fn($item) => ${itemExpr}, ${valueExpr}))`;
         }
@@ -172,7 +183,10 @@ ${exports}
             const refTarget = refName === currentModelName ? 'self' : refName;
             return `${itemExpr} instanceof ${refTarget} ? ${itemExpr}->toArray() : ${itemExpr}`;
         }
-        if (schema?.items) {
+        if (Array.isArray(schema?.prefixItems)) {
+            return `is_array(${itemExpr}) ? array_values(${itemExpr}) : []`;
+        }
+        if (schema?.items && typeof schema.items === 'object') {
             const nestedExpr = this.serializeArrayItemExpression(schema.items, '$nestedItem', currentModelName);
             return `is_array(${itemExpr})
                         ? array_values(array_map(static fn($nestedItem) => ${nestedExpr}, ${itemExpr}))
@@ -199,7 +213,12 @@ ${exports}
                 schema[key].forEach((entry) => this.collectReferencedModels(entry, refs));
             }
         }
-        if (schema.items) {
+        if (Array.isArray(schema.prefixItems)) {
+            for (const itemSchema of schema.prefixItems) {
+                this.collectReferencedModels(itemSchema, refs);
+            }
+        }
+        if (schema.items && typeof schema.items === 'object') {
             this.collectReferencedModels(schema.items, refs);
         }
         if (schema.properties && typeof schema.properties === 'object') {

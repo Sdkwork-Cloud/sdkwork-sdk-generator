@@ -7,7 +7,28 @@ import {
   resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
+import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
+import {
+  extractOpenApiParameterContentSchema,
+  requiresExplicitOpenApiQuerySerialization,
+  resolveOpenApiParameterSerialization,
+} from '../../framework/parameter-serialization.js';
+
+interface NamedParameterBinding {
+  parameter: any;
+  safeName: string;
+  required: boolean;
+  type: string;
+}
+
+interface QueryParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  allowReserved: boolean;
+  contentType?: string;
+}
 
 type GeneratedMethod = {
   content: string;
@@ -61,6 +82,14 @@ export class ApiGenerator {
         return generated.content;
       })
       .join('\n\n');
+    const needsRequestHeaderHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    });
+    const needsQuerySerializationHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+    });
 
     const modelImports = referencedModels.size > 0
       ? `from ..models import ${Array.from(referencedModels).sort((a, b) => a.localeCompare(b)).join(', ')}\n`
@@ -71,6 +100,16 @@ export class ApiGenerator {
       content: this.format(`from typing import Any, Dict, List, Optional
 from ..http_client import HttpClient
 ${modelImports}
+def _append_query_string(path: str, raw_query_string: str) -> str:
+    query = raw_query_string.lstrip('?')
+    if not query:
+        return path
+    separator = '&' if '?' in path else '?'
+    return f"{path}{separator}{query}"
+
+${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
+${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
+
 class ${className}:
     """${tag} API client."""
     
@@ -92,10 +131,16 @@ ${methods}
   ): GeneratedMethod {
     const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
-    const hasQuery = allParameters.some((param: any) => param?.in === 'query');
-    const hasHeaders = allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    const queryParams = allParameters.filter((param: any) => param?.in === 'query');
+    const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
+    const headerParams = allParameters.filter((param: any) => param?.in === 'header');
+    const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const hasQuery = queryParams.length > 0;
+    const hasRawQueryString = queryStringParams.length > 0;
+    const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
     const method = String(op.method || '').toLowerCase();
-    const supportsRequestBody = method === 'post' || method === 'put' || method === 'patch';
+    const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const supportsRequestBody = supportsRequestBodyByDefault(method);
     const requestBodyInfo = supportsRequestBody ? this.extractRequestBodyInfo(op) : undefined;
     const hasBody = Boolean(requestBodyInfo);
     const requestBodyRequired = hasBody && Boolean(op.requestBody?.required);
@@ -107,6 +152,7 @@ ${methods}
     const requestType = requestBodySchema
       ? getPythonType(requestBodySchema, PYTHON_CONFIG)
       : 'Any';
+    const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const responseSchema = this.extractResponseSchema(op);
     const responseType = responseSchema
       ? getPythonType(responseSchema, PYTHON_CONFIG)
@@ -126,19 +172,40 @@ ${methods}
       [
         hasBody ? 'body' : '',
         hasQuery ? 'params' : '',
-        hasHeaders ? 'headers' : '',
+        hasRawQueryString ? 'raw_query_string' : '',
+        hasHeaders ? 'request_headers' : '',
       ]
     );
     const pathParams = rawPathParams.map((rawName) => ({
       rawName,
       safeName: pathParamNames.get(rawName) || rawName,
     }));
+    const parameterReservedNames = [
+      ...pathParams.map((param) => param.safeName),
+      hasBody ? 'body' : '',
+      hasQuery ? 'params' : '',
+      hasRawQueryString ? 'raw_query_string' : '',
+      hasHeaders ? 'request_headers' : '',
+    ];
+    const queryBindings = hasExplicitQuerySerialization
+      ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
+      : [];
+    const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
+    const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+      ...parameterReservedNames,
+      ...queryBindings.map((binding) => binding.safeName),
+      ...headerBindings.map((binding) => binding.safeName),
+    ]);
+    const requiredQueryBindings = queryBindings.filter((binding) => binding.required);
+    const optionalQueryBindings = queryBindings.filter((binding) => !binding.required);
+    const requiredHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => binding.required);
+    const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
 
     const params: string[] = ['self'];
     if (pathParams.length) {
       params.push(...pathParams.map((param) => `${param.safeName}: str`));
     }
-    if (hasBody) {
+    if (hasBody && requestBodyRequired) {
       if (requestBodyRequired) {
         params.push(`body: ${requestType}`);
       } else if (requestType === 'Any') {
@@ -147,12 +214,23 @@ ${methods}
         params.push(`body: Optional[${requestType}] = None`);
       }
     }
-    if (hasQuery) {
+    if (hasRawQueryString) {
+      params.push('raw_query_string: str');
+    }
+    params.push(...requiredQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+    params.push(...requiredHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
+    if (hasBody && !requestBodyRequired) {
+      if (requestType === 'Any') {
+        params.push('body: Any = None');
+      } else {
+        params.push(`body: Optional[${requestType}] = None`);
+      }
+    }
+    if (hasQuery && !hasExplicitQuerySerialization) {
       params.push('params: Optional[Dict[str, Any]] = None');
     }
-    if (hasHeaders) {
-      params.push('headers: Optional[Dict[str, str]] = None');
-    }
+    params.push(...optionalQueryBindings.map((binding) => this.renderMethodParameter(binding)));
+    params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const rawPath = this.withApiPrefix(config.apiPrefix, normalizedOperationPath);
@@ -160,45 +238,312 @@ ${methods}
       const safeName = pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);
       return `{${safeName}}`;
     });
+    const pathExpression = hasRawQueryString
+      ? `_append_query_string(f"${pathTemplate}", raw_query_string)`
+      : hasExplicitQuerySerialization
+        ? `_append_query_string(f"${pathTemplate}", query)`
+      : `f"${pathTemplate}"`;
     const formHeaderLine = isFormUrlencodedBody
-      ? `        form_headers = {**(${hasHeaders ? 'headers' : '{}'} or {}), 'Content-Type': 'application/x-www-form-urlencoded'}\n`
+      ? `        form_headers = {**(${hasHeaders ? 'request_headers' : '{}'} or {}), 'Content-Type': 'application/x-www-form-urlencoded'}\n`
       : '';
     const headersArg = isFormUrlencodedBody
       ? ', headers=form_headers'
       : hasHeaders
-        ? ', headers=headers'
+        ? ', headers=request_headers'
         : '';
     let call = '';
     
     switch (method) {
       case 'get':
-        call = `self._client.get(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+        call = `self._client.get(${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasHeaders ? ', headers=request_headers' : ''})`;
         break;
       case 'post':
-        call = `self._client.post(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${headersArg})`;
+        call = `self._client.post(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg})`;
         break;
       case 'put':
-        call = `self._client.put(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${headersArg})`;
+        call = `self._client.put(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg})`;
         break;
       case 'delete':
-        call = `self._client.delete(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+        call = `self._client.delete(${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasHeaders ? ', headers=request_headers' : ''})`;
         break;
       case 'patch':
-        call = `self._client.patch(f"${pathTemplate}"${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery ? ', params=params' : ''}${headersArg})`;
+        call = `self._client.patch(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg})`;
         break;
       default:
-        call = `self._client.get(f"${pathTemplate}"${hasQuery ? ', params=params' : ''}${hasHeaders ? ', headers=headers' : ''})`;
+        call = `self._client.request('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg})`;
     }
 
     const docComment = op.summary 
       ? `        """${op.summary}"""\n` 
       : '';
+    const queryBlock = hasExplicitQuerySerialization
+      ? `        query = build_query_string([
+${this.renderQueryParameterSpecs(queryBindings, 12)}
+        ])\n`
+      : '';
+    const requestHeaderBlock = hasHeaders
+      ? `        request_headers = build_request_headers(
+${this.renderNamedParameterDict(headerBindings, 12)},
+${this.renderNamedParameterDict(cookieBindings, 12)}
+        )\n`
+      : '';
 
     return {
       content: `    def ${methodName}(${params.join(', ')}) -> ${responseType}:
-${docComment}${formHeaderLine}        return ${call}`,
+${docComment}${queryBlock}${requestHeaderBlock}${formHeaderLine}        return ${call}`,
       referencedModels,
     };
+  }
+
+  private createQueryParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): QueryParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
+        allowReserved: serialization.allowReserved,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private createNamedParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): NamedParameterBinding[] {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => PYTHON_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'),
+      reservedNames,
+    );
+
+    return parameters.map((parameter, index) => {
+      const key = keys[index];
+      return {
+        parameter,
+        safeName: safeNameByKey.get(key) || `value_${index + 1}`,
+        required: Boolean(parameter?.required),
+        type: this.getNamedParameterType(parameter, knownModels),
+      };
+    });
+  }
+
+  private getNamedParameterType(parameter: any, knownModels: Set<string>): string {
+    const contentSchema = extractOpenApiParameterContentSchema(parameter);
+    if (contentSchema) {
+      return getPythonType(contentSchema, PYTHON_CONFIG);
+    }
+    if (!parameter?.schema) {
+      return 'Any';
+    }
+    return getPythonType(parameter.schema, PYTHON_CONFIG);
+  }
+
+  private renderMethodParameter(binding: NamedParameterBinding): string {
+    return binding.required
+      ? `${binding.safeName}: ${binding.type}`
+      : `${binding.safeName}: Optional[${binding.type}] = None`;
+  }
+
+  private renderNamedParameterDict(bindings: NamedParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}{}`;
+    }
+    const lines = bindings.map((binding) => {
+      return `${indent}    ${this.formatPythonString(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
+    });
+    return [`${indent}{`, ...lines, `${indent}}`].join('\n');
+  }
+
+  private formatPythonString(value: string): string {
+    return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+  }
+
+  private renderQueryParameterSpecs(bindings: QueryParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    return bindings.map((binding) => {
+      const parts = [
+        `'name': ${this.formatPythonString(String(binding.parameter?.name || binding.safeName))}`,
+        `'value': ${binding.safeName}`,
+        `'style': ${this.formatPythonString(binding.style)}`,
+        `'explode': ${binding.explode ? 'True' : 'False'}`,
+        `'allow_reserved': ${binding.allowReserved ? 'True' : 'False'}`,
+      ];
+      if (binding.contentType) {
+        parts.push(`'content_type': ${this.formatPythonString(binding.contentType)}`);
+      }
+      return `${indent}{${parts.join(', ')}},`;
+    }).join('\n');
+  }
+
+  private generateQuerySerializationHelpers(): string {
+    return `def build_query_string(parameters: List[Dict[str, Any]]) -> str:
+    pairs: List[str] = []
+    for parameter in parameters:
+        append_serialized_parameter(pairs, parameter)
+    return '&'.join(pairs)
+
+
+def append_serialized_parameter(pairs: List[str], parameter: Dict[str, Any]) -> None:
+    value = parameter.get('value')
+    if value is None:
+        return
+
+    name = str(parameter.get('name') or '')
+    allow_reserved = bool(parameter.get('allow_reserved'))
+    content_type = parameter.get('content_type')
+    if content_type:
+        import json
+
+        pairs.append(f"{encode_query_component(name)}={encode_query_value(json.dumps(value, separators=(',', ':')), allow_reserved)}")
+        return
+
+    style = str(parameter.get('style') or 'form')
+    explode = bool(parameter.get('explode'))
+    if style == 'deepObject':
+        append_deep_object_parameter(pairs, name, value, allow_reserved)
+        return
+    if isinstance(value, (list, tuple)):
+        append_array_parameter(pairs, name, value, style, explode, allow_reserved)
+        return
+    if isinstance(value, dict):
+        append_object_parameter(pairs, name, value, style, explode, allow_reserved)
+        return
+
+    pairs.append(f"{encode_query_component(name)}={encode_query_value(serialize_primitive(value), allow_reserved)}")
+
+
+def append_array_parameter(
+    pairs: List[str],
+    name: str,
+    value: Any,
+    style: str,
+    explode: bool,
+    allow_reserved: bool,
+) -> None:
+    values = [serialize_primitive(item) for item in value if item is not None]
+    if not values:
+        return
+
+    if style == 'form' and explode:
+        for item in values:
+            pairs.append(f"{encode_query_component(name)}={encode_query_value(item, allow_reserved)}")
+        return
+
+    pairs.append(f"{encode_query_component(name)}={encode_query_value(','.join(values), allow_reserved)}")
+
+
+def append_object_parameter(
+    pairs: List[str],
+    name: str,
+    value: Dict[str, Any],
+    style: str,
+    explode: bool,
+    allow_reserved: bool,
+) -> None:
+    entries = [(key, entry_value) for key, entry_value in value.items() if entry_value is not None]
+    if not entries:
+        return
+
+    if style == 'form' and explode:
+        for key, entry_value in entries:
+            pairs.append(f"{encode_query_component(str(key))}={encode_query_value(serialize_primitive(entry_value), allow_reserved)}")
+        return
+
+    serialized = ','.join(
+        item
+        for key, entry_value in entries
+        for item in (str(key), serialize_primitive(entry_value))
+    )
+    pairs.append(f"{encode_query_component(name)}={encode_query_value(serialized, allow_reserved)}")
+
+
+def append_deep_object_parameter(pairs: List[str], name: str, value: Any, allow_reserved: bool) -> None:
+    if not isinstance(value, dict):
+        pairs.append(f"{encode_query_component(name)}={encode_query_value(serialize_primitive(value), allow_reserved)}")
+        return
+
+    for key, entry_value in value.items():
+        if entry_value is None:
+            continue
+        pairs.append(f"{encode_query_component(f'{name}[{key}]')}={encode_query_value(serialize_primitive(entry_value), allow_reserved)}")
+
+
+def serialize_primitive(value: Any) -> str:
+    if isinstance(value, dict):
+        import json
+
+        return json.dumps(value, separators=(',', ':'))
+    return str(value)
+
+
+def encode_query_component(value: str) -> str:
+    from urllib.parse import quote
+
+    return quote(value, safe='')
+
+
+def encode_query_value(value: str, allow_reserved: bool) -> str:
+    from urllib.parse import quote
+
+    return quote(value, safe=':/?#[]@!$&\\'()*+,;=' if allow_reserved else '')
+`;
+  }
+
+  private generateRequestHeaderHelpers(): string {
+    return `def build_request_headers(headers: Dict[str, Any], cookies: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, str]]:
+    request_headers: Dict[str, str] = {}
+    for name, value in headers.items():
+        serialized = serialize_parameter_value(value)
+        if serialized is not None:
+            request_headers[name] = serialized
+
+    cookie_header = build_cookie_header(cookies or {})
+    if cookie_header:
+        request_headers['Cookie'] = (
+            f"{request_headers['Cookie']}; {cookie_header}"
+            if 'Cookie' in request_headers
+            else cookie_header
+        )
+
+    return request_headers or None
+
+
+def build_cookie_header(cookies: Dict[str, Any]) -> Optional[str]:
+    from urllib.parse import quote
+
+    pairs: List[str] = []
+    for name, value in cookies.items():
+        serialized = serialize_parameter_value(value)
+        if serialized is not None:
+            pairs.append(f"{quote(str(name), safe='')}={quote(serialized, safe='')}")
+    return '; '.join(pairs) if pairs else None
+
+
+def serialize_parameter_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return ','.join(
+            item
+            for item in (serialize_parameter_value(item) for item in value)
+            if item is not None
+        )
+    if isinstance(value, dict):
+        import json
+
+        return json.dumps(value, separators=(',', ':'))
+    return str(value)
+`;
   }
 
   private generateOperationId(method: string, path: string, op: any, tag: string): string {
@@ -213,10 +558,14 @@ ${docComment}${formHeaderLine}        return ${call}`,
     const actionMap: Record<string, string> = {
       get: path.includes('{') ? 'get' : 'list',
       post: 'create',
-      put: 'update',
-      patch: 'patch',
-      delete: 'delete',
-    };
+    put: 'update',
+    patch: 'patch',
+    delete: 'delete',
+    options: 'options',
+    head: 'head',
+    trace: 'trace',
+    query: 'query',
+  };
     
     return `${actionMap[method] || method}_${PYTHON_CONFIG.namingConventions.propertyName(resource)}`;
   }
@@ -236,7 +585,7 @@ ${docComment}${formHeaderLine}        return ${call}`,
     if (!mediaType) {
       return undefined;
     }
-    const schema = (content as Record<string, any>)[mediaType]?.schema;
+    const schema = resolveMediaTypeSchema((content as Record<string, any>)[mediaType]);
     if (!schema) {
       return undefined;
     }
@@ -278,8 +627,11 @@ ${docComment}${formHeaderLine}        return ${call}`,
         continue;
       }
       const mediaType = this.pickJsonMediaType(content);
-      if (mediaType && content[mediaType]?.schema) {
-        return content[mediaType].schema;
+      if (mediaType) {
+        const schema = resolveMediaTypeSchema(content[mediaType]);
+        if (schema) {
+          return schema;
+        }
       }
     }
     return undefined;
@@ -319,41 +671,9 @@ ${docComment}${formHeaderLine}        return ${call}`,
   private collectReferencedModels(
     schema: any,
     knownModels: Set<string>,
-    refs: Set<string>,
-    visited: Set<any> = new Set<any>()
+    refs: Set<string>
   ): void {
-    if (!schema || typeof schema !== 'object') {
-      return;
-    }
-    if (visited.has(schema)) {
-      return;
-    }
-    visited.add(schema);
-
-    if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop();
-      const modelName = PYTHON_CONFIG.namingConventions.modelName(refName ?? '');
-      if (knownModels.has(modelName)) {
-        refs.add(modelName);
-      }
-      return;
-    }
-
-    for (const key of ['oneOf', 'anyOf', 'allOf']) {
-      const values = schema[key];
-      if (Array.isArray(values)) {
-        values.forEach((value: any) => this.collectReferencedModels(value, knownModels, refs, visited));
-      }
-    }
-    if (schema.items) {
-      this.collectReferencedModels(schema.items, knownModels, refs, visited);
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-      Object.values(schema.properties).forEach((value) => this.collectReferencedModels(value, knownModels, refs, visited));
-    }
-    if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-      this.collectReferencedModels(schema.additionalProperties, knownModels, refs, visited);
-    }
+    collectSchemaReferences(schema, PYTHON_CONFIG.namingConventions.modelName, knownModels, refs);
   }
 
   private generateApiIndex(tags: string[], resolvedTagNames: Map<string, string>, packageRoot: string): GeneratedFile {

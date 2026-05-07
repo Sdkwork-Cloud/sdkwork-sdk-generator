@@ -276,7 +276,7 @@ describe('Dart generator', () => {
     expect(smokeTestFile).toBeDefined();
     expect(readme).toBeDefined();
 
-    expect(smokeTestFile!.content).toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
     expect(smokeTestFile!.content).toContain("import 'dart:io';");
     expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
     expect(smokeTestFile!.content).toContain("import 'package:sdkwork_app_sdk_dart/sdkwork_app_sdk_dart.dart';");
@@ -293,10 +293,48 @@ describe('Dart generator', () => {
 
     const result = await generator!.generate(dartConfig, dartVoidOnlySpec);
     const apiFile = result.files.find((file) => file.path === 'lib/src/api/form.dart');
+    const modelsFile = result.files.find((file) => file.path === 'lib/src/models.dart');
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
+    expect(modelsFile).toBeDefined();
     expect(apiFile!.content).not.toContain("import 'response_helpers.dart';");
     expect(apiFile!.content).toContain("contentType: 'application/x-www-form-urlencoded'");
+    expect(modelsFile!.content).not.toContain('_sdkworkAsMap');
+    expect(modelsFile!.content).not.toContain('_sdkworkAsList');
+  });
+
+  it('does not emit analyzer warnings for unused dart model imports or smoke-test captures', async () => {
+    const generator = getGenerator('dart' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate({ ...dartConfig, generateTests: true }, {
+      openapi: '3.1.0',
+      info: { title: 'Dart Empty Response API', version: '1.0.0' },
+      paths: {
+        '/app/v3/api/ping': {
+          get: {
+            summary: 'Ping',
+            operationId: 'ping',
+            tags: ['Ping'],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    });
+    const apiFile = result.files.find((file) => file.path === 'lib/src/api/ping.dart');
+    const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(apiFile!.content).not.toContain("import '../models.dart';");
+    expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
+    expect(smokeTestFile!.content).not.toContain('capturedQuery');
+    expect(smokeTestFile!.content).not.toContain('capturedHeaders');
+    expect(smokeTestFile!.content).not.toContain('capturedBody');
+    expect(smokeTestFile!.content).not.toContain('capturedContentType');
+    expect(smokeTestFile!.content).not.toContain('Future<List<int>> readRequestBody');
   });
 });

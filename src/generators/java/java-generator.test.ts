@@ -254,6 +254,23 @@ describe('Java generator regressions', () => {
     expect(smokeTestFile!.content).toContain('assertEquals("1", result.getId());');
   });
 
+  it('targets Java 21 because generated runtime helpers use modern Java language features', async () => {
+    const generator = getGenerator('java' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(javaConfig, typedResponseSpec);
+    const pomFile = result.files.find((file) => file.path === 'pom.xml');
+
+    expect(result.errors).toEqual([]);
+    expect(pomFile).toBeDefined();
+    expect(pomFile!.content).toContain('<maven.compiler.release>21</maven.compiler.release>');
+    expect(pomFile!.content).toContain('<release>21</release>');
+    expect(pomFile!.content).not.toContain('<maven.compiler.source>11</maven.compiler.source>');
+    expect(pomFile!.content).not.toContain('<maven.compiler.target>11</maven.compiler.target>');
+    expect(pomFile!.content).not.toContain('<source>11</source>');
+    expect(pomFile!.content).not.toContain('<target>11</target>');
+  });
+
   it('uses not-null smoke-test assertions for wrapped Java ref properties', async () => {
     const generator = getGenerator('java' as any);
     expect(generator).toBeDefined();

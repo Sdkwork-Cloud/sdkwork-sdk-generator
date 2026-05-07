@@ -1,4 +1,5 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { DART_CONFIG, DART_RESERVED_WORDS, getDartType } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
@@ -70,10 +71,10 @@ export class DartUsagePlanner {
         }
         const headerParams = allParameters.filter((parameter) => parameter?.in === 'header' || parameter?.in === 'cookie');
         if (headerParams.length > 0) {
-            const headerVariable = this.buildHeaderVariable(headerParams);
-            variables.push(headerVariable.variable);
-            headerExpectations.push(...headerVariable.expectations);
-            callArguments.push('headers');
+            const headerVariables = this.buildHeaderVariables(headerParams, variables.map((variable) => variable.name));
+            variables.push(...headerVariables.variables);
+            headerExpectations.push(...headerVariables.expectations);
+            callArguments.push(...headerVariables.arguments);
         }
         const responseSchema = extractResponseSchema(operation);
         const responseType = responseSchema
@@ -124,7 +125,7 @@ export class DartUsagePlanner {
                 assertion: buildBodyAssertionPlan(normalizedMediaType, 'body.toJson()'),
             };
         }
-        const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+        const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
         if (normalizedType === 'object' || declaredType.startsWith('Map<') || declaredType === 'dynamic') {
             const lines = renderMapVariable('body', this.ctx, resolvedSchema, normalizedMediaType);
             return {
@@ -137,7 +138,7 @@ export class DartUsagePlanner {
             };
         }
         if (normalizedType === 'array' || declaredType.startsWith('List<')) {
-            const itemValue = renderInlineDartValue(this.ctx, resolvedSchema?.items, 'item', 0, normalizedMediaType, 1);
+            const itemValue = renderInlineDartValue(this.ctx, getArrayItemSchema(resolvedSchema), 'item', 0, normalizedMediaType, 1);
             const lines = itemValue
                 ? [`final body = [${itemValue.dartExpression}];`]
                 : ['final body = <dynamic>[];'];
@@ -183,22 +184,37 @@ export class DartUsagePlanner {
             expectations,
         };
     }
-    buildHeaderVariable(parameters) {
+    buildHeaderVariables(parameters, reservedNames) {
+        const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+        const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+        const safeNameByKey = createUniqueIdentifierMap(keys, (key) => toSafeCamelIdentifier(rawNameByKey.get(key) || 'value', DART_RESERVED_WORDS), [...reservedNames, 'body', 'params', 'headers']);
+        const variables = [];
+        const arguments_ = [];
         const expectations = [];
-        const lines = ['final headers = <String, String>{'];
         for (let index = 0; index < parameters.length; index += 1) {
             const parameter = parameters[index];
+            const key = keys[index];
+            const variableName = safeNameByKey.get(key) || toUsageIdentifier(parameter.name, parameter.in === 'cookie' ? 'cookieParam' : 'headerParam', index + 1);
             const sample = buildHeaderValue(this.ctx, parameter, index);
-            expectations.push({ name: parameter.name, expected: sample.stringValue });
-            lines.push(`  ${quoteDartString(parameter.name)}: ${sample.dartExpression},`);
-        }
-        lines.push('};');
-        return {
-            variable: {
-                name: 'headers',
+            variables.push({
+                name: variableName,
                 kind: 'headers',
-                setupByMode: { readme: lines, test: lines },
-            },
+                setupByMode: {
+                    readme: [`final ${variableName} = ${sample.dartExpression};`],
+                    test: [`final ${variableName} = ${sample.dartExpression};`],
+                },
+            });
+            arguments_.push(variableName);
+            expectations.push({
+                name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+                expected: sample.stringValue,
+                source: variableName,
+                cookie: parameter.in === 'cookie',
+            });
+        }
+        return {
+            variables,
+            arguments: arguments_,
             expectations,
         };
     }
@@ -338,6 +354,10 @@ function generateDartOperationName(method, path, operation, tag) {
         put: 'update',
         patch: 'patch',
         delete: 'delete',
+        options: 'options',
+        head: 'head',
+        trace: 'trace',
+        query: 'query',
     };
     return `${actionMap[method] || method}${DART_CONFIG.namingConventions.modelName(resource)}`;
 }
@@ -420,7 +440,7 @@ function renderInlineDartValue(ctx, schema, fallbackName, index, mediaType, dept
             stringValue: '[object]',
         };
     }
-    const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
     switch (normalizedType) {
         case 'integer': {
             const value = index + 1;
@@ -435,8 +455,8 @@ function renderInlineDartValue(ctx, schema, fallbackName, index, mediaType, dept
             return { dartExpression: value ? 'true' : 'false', jsonValue: value, stringValue: value ? 'true' : 'false' };
         }
         case 'array': {
-            const itemValue = renderInlineDartValue(ctx, resolvedSchema.items, fallbackName, index, mediaType, depth + 1)
-                || buildScalarDartValue(fallbackName, resolvedSchema.items, index, mediaType);
+            const itemValue = renderInlineDartValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, index, mediaType, depth + 1)
+                || buildScalarDartValue(fallbackName, getArrayItemSchema(resolvedSchema), index, mediaType);
             return {
                 dartExpression: `[${itemValue.dartExpression}]`,
                 jsonValue: [itemValue.jsonValue],
@@ -474,7 +494,7 @@ function buildParameterValue(ctx, parameter, index) {
     if (enumValues && enumValues.length > 0) {
         return buildLiteralValue(enumValues[0]);
     }
-    switch (normalizeSchemaType(resolvedSchema?.type)) {
+    switch (resolveSchemaType(resolvedSchema).effectiveType) {
         case 'integer': {
             const value = index + 1;
             return { dartExpression: String(value), jsonValue: value, stringValue: String(value) };
@@ -502,7 +522,7 @@ function buildHeaderValue(ctx, parameter, index) {
             stringValue: value,
         };
     }
-    switch (normalizeSchemaType(resolvedSchema?.type)) {
+    switch (resolveSchemaType(resolvedSchema).effectiveType) {
         case 'integer':
         case 'number': {
             const value = String(index + 1);
@@ -513,7 +533,8 @@ function buildHeaderValue(ctx, parameter, index) {
             return { dartExpression: quoteDartString(value), jsonValue: value, stringValue: value };
         }
     }
-    return buildScalarDartValue(parameter.name || `header${index + 1}`, resolvedSchema, index);
+    const value = parameter.name || `header${index + 1}`;
+    return { dartExpression: quoteDartString(value), jsonValue: value, stringValue: value };
 }
 function buildLiteralValue(value) {
     if (typeof value === 'number') {
@@ -542,7 +563,7 @@ function buildJsonSampleValue(ctx, schema, fallbackName, depth) {
     if (enumValues && enumValues.length > 0) {
         return enumValues[0];
     }
-    const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
     switch (normalizedType) {
         case 'integer':
             return depth + 1;
@@ -551,7 +572,7 @@ function buildJsonSampleValue(ctx, schema, fallbackName, depth) {
         case 'boolean':
             return true;
         case 'array':
-            return [buildJsonSampleValue(ctx, resolvedSchema.items, fallbackName, depth + 1)];
+            return [buildJsonSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1)];
         case 'object': {
             const properties = resolvedSchema.properties ? Object.entries(resolvedSchema.properties) : [];
             if (properties.length > 0) {
@@ -586,8 +607,7 @@ function buildResponseAssertions(ctx, schema, responseType) {
         const [propertyName, propertySchema] = properties[index];
         const propertyAccess = `result?.${DART_CONFIG.namingConventions.propertyName(propertyName)}`;
         const resolvedPropertySchema = resolveSchema(ctx, propertySchema);
-        const normalizedType = normalizeSchemaType(resolvedPropertySchema?.type)
-            || inferImplicitObjectType(resolvedPropertySchema);
+        const normalizedType = resolveSchemaType(resolvedPropertySchema).effectiveType;
         if (propertySchema?.$ref) {
             assertions.push(`expect(${propertyAccess}, isNotNull);`);
             continue;
@@ -759,40 +779,6 @@ function sampleStringValue(fallbackName, index, schema, mediaType) {
     if (!normalizedName)
         return `value${index + 1}`;
     return normalizedName.replace(/[^a-z0-9]+/g, '-');
-}
-function normalizeSchemaType(type) {
-    if (typeof type === 'string') {
-        return type;
-    }
-    if (Array.isArray(type)) {
-        const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-        return typeof candidate === 'string' ? candidate : undefined;
-    }
-    return undefined;
-}
-function inferImplicitObjectType(schema) {
-    if (!schema || typeof schema !== 'object') {
-        return undefined;
-    }
-    if (schema.properties && typeof schema.properties === 'object') {
-        return 'object';
-    }
-    if (schema.additionalProperties) {
-        return 'object';
-    }
-    return undefined;
-}
-function pickComposedSchema(schema) {
-    const orderedKeys = ['allOf', 'oneOf', 'anyOf'];
-    for (const key of orderedKeys) {
-        const values = schema?.[key];
-        if (!Array.isArray(values) || values.length === 0) {
-            continue;
-        }
-        const candidate = values.find((entry) => entry && normalizeSchemaType(entry.type) !== 'null');
-        return candidate || values[0];
-    }
-    return undefined;
 }
 function toUsageIdentifier(rawName, fallbackPrefix, index) {
     const cleaned = toSafeCamelIdentifier(rawName || '', DART_RESERVED_WORDS, `${fallbackPrefix}${index}`);

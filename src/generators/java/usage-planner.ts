@@ -1,4 +1,6 @@
 import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -22,6 +24,8 @@ export interface JavaUsageVariable {
 export interface JavaUsageExpectation {
   name: string;
   expected: string;
+  source?: string;
+  cookie?: boolean;
 }
 
 export interface JavaBodyAssertionPlan {
@@ -174,12 +178,10 @@ export class JavaUsagePlanner {
       (parameter) => parameter?.in === 'header' || parameter?.in === 'cookie',
     );
     if (headerParams.length > 0) {
-      const headerVariable = this.buildHeaderVariable(headerParams);
-      variables.push(headerVariable.variable);
-      headerExpectations.push(...headerVariable.expectations);
-      callArguments.push('headers');
-      usesMap = true;
-      usesLinkedHashMap = true;
+      const headerVariables = this.buildHeaderVariables(headerParams, variables.map((variable) => variable.name));
+      variables.push(...headerVariables.variables);
+      headerExpectations.push(...headerVariables.expectations);
+      callArguments.push(...headerVariables.arguments);
     }
 
     const responseSchema = extractResponseSchema(operation);
@@ -248,7 +250,7 @@ export class JavaUsagePlanner {
       };
     }
 
-    const normalizedType = normalizeSchemaType(resolvedSchema?.type) || inferImplicitObjectType(resolvedSchema);
+    const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
     if (normalizedType === 'object' || declaredType.startsWith('Map<') || declaredType === 'Object') {
       const entries = renderMapEntries(this.ctx, resolvedSchema, normalizedMediaType);
       const lines = [
@@ -276,7 +278,7 @@ export class JavaUsagePlanner {
     if (normalizedType === 'array' || declaredType.startsWith('List<')) {
       const itemValue = renderInlineJavaValue(
         this.ctx,
-        resolvedSchema?.items,
+        getArrayItemSchema(resolvedSchema),
         'item',
         0,
         normalizedMediaType,
@@ -349,25 +351,50 @@ export class JavaUsagePlanner {
     };
   }
 
-  private buildHeaderVariable(parameters: ApiParameter[]): {
-    variable: JavaUsageVariable;
+  private buildHeaderVariables(parameters: ApiParameter[], reservedNames: string[]): {
+    variables: JavaUsageVariable[];
+    arguments: string[];
     expectations: JavaUsageExpectation[];
   } {
+    const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawNameByKey = new Map(keys.map((key, index) => [key, String(parameters[index]?.name || `value${index + 1}`)]));
+    const safeNameByKey = createUniqueIdentifierMap(
+      keys,
+      (key) => JAVA_CONFIG.namingConventions.propertyName(rawNameByKey.get(key) || 'value'),
+      [...reservedNames, 'body', 'params', 'headers'],
+    );
+    const variables: JavaUsageVariable[] = [];
+    const arguments_: string[] = [];
     const expectations: JavaUsageExpectation[] = [];
-    const lines = ['Map<String, String> headers = new LinkedHashMap<>();'];
     for (let index = 0; index < parameters.length; index += 1) {
       const parameter = parameters[index];
+      const key = keys[index];
+      const variableName = safeNameByKey.get(key) || toUsageIdentifier(
+        parameter.name,
+        parameter.in === 'cookie' ? 'cookieParam' : 'headerParam',
+        index + 1,
+      );
       const sample = buildHeaderValue(this.ctx, parameter, index);
-      expectations.push({ name: parameter.name, expected: sample.stringValue });
-      lines.push(`headers.put(${quoteJavaString(parameter.name)}, ${sample.javaExpression});`);
+      variables.push({
+        name: variableName,
+        kind: 'headers',
+        setupByMode: {
+          readme: [`String ${variableName} = ${sample.javaExpression};`],
+          test: [`String ${variableName} = ${sample.javaExpression};`],
+        },
+      });
+      arguments_.push(variableName);
+      expectations.push({
+        name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+        expected: sample.stringValue,
+        source: variableName,
+        cookie: parameter.in === 'cookie',
+      });
     }
 
     return {
-      variable: {
-        name: 'headers',
-        kind: 'headers',
-        setupByMode: { readme: lines, test: lines },
-      },
+      variables,
+      arguments: arguments_,
       expectations,
     };
   }
@@ -549,6 +576,10 @@ function generateJavaOperationName(
     put: 'update',
     patch: 'patch',
     delete: 'delete',
+    options: 'options',
+    head: 'head',
+    trace: 'trace',
+    query: 'query',
   };
 
   return `${actionMap[method] || method}${JAVA_CONFIG.namingConventions.modelName(resource)}`;
@@ -644,7 +675,7 @@ function renderInlineJavaValue(
     };
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   switch (normalizedType) {
     case 'integer':
     case 'number': {
@@ -674,8 +705,8 @@ function renderInlineJavaValue(
       };
     }
     case 'array': {
-      const itemValue = renderInlineJavaValue(ctx, resolvedSchema.items, fallbackName, index, mediaType, depth + 1)
-        || buildScalarJavaValue(fallbackName, resolvedSchema.items, index, mediaType);
+      const itemValue = renderInlineJavaValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, index, mediaType, depth + 1)
+        || buildScalarJavaValue(fallbackName, getArrayItemSchema(resolvedSchema), index, mediaType);
       return {
         javaExpression: `new ArrayList<>(java.util.List.of(${itemValue.javaExpression}))`,
         jsonValue: [itemValue.jsonValue],
@@ -733,7 +764,7 @@ function buildParameterValue(ctx: SchemaContext, parameter: ApiParameter, index:
     return buildLiteralValue(enumValues[0]);
   }
 
-  switch (normalizeSchemaType(resolvedSchema?.type)) {
+  switch (resolveSchemaType(resolvedSchema).effectiveType) {
     case 'integer':
     case 'number': {
       const value = index + 1;
@@ -783,7 +814,7 @@ function buildHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: nu
     };
   }
 
-  switch (normalizeSchemaType(resolvedSchema?.type)) {
+  switch (resolveSchemaType(resolvedSchema).effectiveType) {
     case 'integer':
     case 'number': {
       const value = String(index + 1);
@@ -812,7 +843,17 @@ function buildHeaderValue(ctx: SchemaContext, parameter: ApiParameter, index: nu
       };
     }
   }
-  return buildScalarJavaValue(parameter.name || `header${index + 1}`, resolvedSchema, index);
+  const value = parameter.name || `header${index + 1}`;
+  return {
+    javaExpression: quoteJavaString(value),
+    jsonValue: value,
+    stringValue: value,
+    usesModelPackage: false,
+    usesMap: false,
+    usesLinkedHashMap: false,
+    usesList: false,
+    usesArrayList: false,
+  };
 }
 
 function buildLiteralValue(value: unknown): JavaNamedValue {
@@ -869,7 +910,7 @@ function buildJsonSampleValue(
     return enumValues[0];
   }
 
-  const normalizedType = normalizeSchemaType(resolvedSchema.type) || inferImplicitObjectType(resolvedSchema);
+  const normalizedType = resolveSchemaType(resolvedSchema).effectiveType;
   switch (normalizedType) {
     case 'integer':
     case 'number':
@@ -877,7 +918,7 @@ function buildJsonSampleValue(
     case 'boolean':
       return true;
     case 'array':
-      return [buildJsonSampleValue(ctx, resolvedSchema.items, fallbackName, depth + 1)];
+      return [buildJsonSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1)];
     case 'object': {
       const properties = resolvedSchema.properties ? Object.entries(resolvedSchema.properties) : [];
       if (properties.length > 0) {
@@ -920,8 +961,7 @@ function buildResponseAssertions(
   for (let index = 0; index < properties.length; index += 1) {
     const [propertyName, propertySchema] = properties[index];
     const resolvedPropertySchema = resolveSchema(ctx, propertySchema);
-    const normalizedType = normalizeSchemaType(resolvedPropertySchema?.type)
-      || inferImplicitObjectType(resolvedPropertySchema);
+    const normalizedType = resolveSchemaType(resolvedPropertySchema).effectiveType;
     const getterName = createAccessorName('get', JAVA_CONFIG.namingConventions.propertyName(propertyName));
     if (propertySchema?.$ref) {
       assertions.push(`assertNotNull(result.${getterName}());`);
@@ -1113,43 +1153,6 @@ function sampleStringValue(
   if (normalizedName.includes('name')) return 'name';
   if (!normalizedName) return `value${index + 1}`;
   return normalizedName.replace(/[^a-z0-9]+/g, '-');
-}
-
-function normalizeSchemaType(type: unknown): string | undefined {
-  if (typeof type === 'string') {
-    return type;
-  }
-  if (Array.isArray(type)) {
-    const candidate = type.find((entry) => typeof entry === 'string' && entry !== 'null');
-    return typeof candidate === 'string' ? candidate : undefined;
-  }
-  return undefined;
-}
-
-function inferImplicitObjectType(schema: ApiSchema | undefined): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.properties && typeof schema.properties === 'object') {
-    return 'object';
-  }
-  if (schema.additionalProperties) {
-    return 'object';
-  }
-  return undefined;
-}
-
-function pickComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
-  const orderedKeys: Array<'allOf' | 'oneOf' | 'anyOf'> = ['allOf', 'oneOf', 'anyOf'];
-  for (const key of orderedKeys) {
-    const values = schema?.[key];
-    if (!Array.isArray(values) || values.length === 0) {
-      continue;
-    }
-    const candidate = values.find((entry) => entry && normalizeSchemaType(entry.type) !== 'null');
-    return candidate || values[0];
-  }
-  return undefined;
 }
 
 function toUsageIdentifier(rawName: string, fallbackPrefix: string, index: number): string {

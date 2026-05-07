@@ -38,6 +38,7 @@ export class TestGenerator {
     return this.format(`# frozen_string_literal: true
 
 require 'json'
+${plan.headerExpectations.some((expectation) => expectation.cookie) ? "require 'cgi'\n" : ''}require 'minitest/autorun'
 require 'minitest/autorun'
 require 'uri'
 require 'faraday/adapter/test'
@@ -88,7 +89,14 @@ end
       lines.push(`assert_equal ${quoteRuby(expectation.expected)}, captured[:query][${quoteRuby(expectation.name)}]`);
     }
     for (const expectation of plan.headerExpectations) {
-      lines.push(`assert_equal ${quoteRuby(expectation.expected)}, captured[:headers][${quoteRuby(expectation.name)}]`);
+      if (expectation.cookie) {
+        const source = expectation.source || quoteRuby(expectation.expected);
+        lines.push(`assert_equal "${escapeRubyString(expectation.expected)}=#{CGI.escape(${source})}", captured[:headers]['Cookie']`);
+      } else if (expectation.source) {
+        lines.push(`assert_equal ${expectation.source}, captured[:headers][${quoteRuby(expectation.name)}]`);
+      } else {
+        lines.push(`assert_equal ${quoteRuby(expectation.expected)}, captured[:headers][${quoteRuby(expectation.name)}]`);
+      }
     }
     if (plan.bodyAssertion) {
       if (plan.bodyAssertion.contentTypeMatch === 'prefix') {
@@ -119,4 +127,8 @@ end
 
 function quoteRuby(value: string): string {
   return `'${String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
+function escapeRubyString(value: string): string {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }

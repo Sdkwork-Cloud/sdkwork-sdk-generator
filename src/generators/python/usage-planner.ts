@@ -1,4 +1,6 @@
 import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import { createUniqueIdentifierMap, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
+import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -9,13 +11,59 @@ import { PYTHON_CONFIG } from './config.js';
 
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
+const PYTHON_RESERVED_WORDS = new Set([
+  'false',
+  'none',
+  'true',
+  'and',
+  'as',
+  'assert',
+  'async',
+  'await',
+  'break',
+  'case',
+  'class',
+  'continue',
+  'def',
+  'del',
+  'elif',
+  'else',
+  'except',
+  'finally',
+  'for',
+  'from',
+  'global',
+  'if',
+  'import',
+  'in',
+  'is',
+  'lambda',
+  'match',
+  'nonlocal',
+  'not',
+  'or',
+  'pass',
+  'raise',
+  'return',
+  'try',
+  'while',
+  'with',
+  'yield',
+]);
 
 export type PythonUsageRenderMode = 'readme' | 'test';
 
 export interface PythonUsageVariable {
   name: string;
-  kind: 'path' | 'body' | 'params' | 'headers';
+  kind: 'path' | 'body' | 'params' | 'headers' | 'parameter';
   initializerByMode: Record<PythonUsageRenderMode, string>;
+}
+
+export interface PythonUsageExpectation {
+  name: string;
+  expected: string;
+  source?: string;
+  cookie?: boolean;
 }
 
 export interface PythonUsagePlan {
@@ -27,6 +75,7 @@ export interface PythonUsagePlan {
   requestBodyMediaType?: string;
   variables: PythonUsageVariable[];
   callExpression: string;
+  headerExpectations: PythonUsageExpectation[];
 }
 
 export class PythonUsagePlanner {
@@ -67,10 +116,16 @@ export class PythonUsagePlanner {
     const transportMethod = String(operation.method || '').toLowerCase();
     const variables: PythonUsageVariable[] = [];
     const callArguments: string[] = [];
+    const headerExpectations: PythonUsageExpectation[] = [];
 
     const pathParams = extractPathParams(operation.path);
+    const pathParamNames = createUniqueIdentifierMap(
+      pathParams,
+      (value) => toSafeSnakeIdentifier(value, PYTHON_RESERVED_WORDS),
+      ['body', 'params', 'headers'],
+    );
     for (let index = 0; index < pathParams.length; index += 1) {
-      const variableName = toUsageIdentifier(pathParams[index], 'path_param', index + 1);
+      const variableName = pathParamNames.get(pathParams[index]) || toUsageIdentifier(pathParams[index], 'path_param', index + 1);
       const sampleValue = /id$/i.test(variableName) ? "'1'" : `'${escapeSingleQuoted(variableName)}'`;
       variables.push({
         name: variableName,
@@ -111,16 +166,39 @@ export class PythonUsagePlanner {
     }
 
     const headerParams = allParameters.filter((parameter) => parameter?.in === 'header' || parameter?.in === 'cookie');
-    if (headerParams.length > 0) {
+    const headerParameterKeys = headerParams.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
+    const rawHeaderNameByKey = new Map(
+      headerParameterKeys.map((key, index) => [key, String(headerParams[index]?.name || `value${index + 1}`)]),
+    );
+    const headerParameterNames = createUniqueIdentifierMap(
+      headerParameterKeys,
+      (key) => toSafeSnakeIdentifier(rawHeaderNameByKey.get(key) || 'value', PYTHON_RESERVED_WORDS),
+      [...variables.map((variable) => variable.name), 'body', 'params', 'headers'],
+    );
+    for (let index = 0; index < headerParams.length; index += 1) {
+      const parameter = headerParams[index];
+      const key = headerParameterKeys[index];
+      const variableName = headerParameterNames.get(key) || toUsageIdentifier(
+        parameter.name,
+        parameter.in === 'cookie' ? 'cookie_param' : 'header_param',
+        variables.length + 1,
+      );
+      const sampleValue = sampleValueForParameter(this.ctx, parameter, variables.length);
       variables.push({
-        name: 'headers',
-        kind: 'headers',
+        name: variableName,
+        kind: 'parameter',
         initializerByMode: {
-          readme: renderObjectLiteral(this.ctx, headerParams),
-          test: renderObjectLiteral(this.ctx, headerParams),
+          readme: sampleValue,
+          test: sampleValue,
         },
       });
-      callArguments.push('headers');
+      callArguments.push(variableName);
+      headerExpectations.push({
+        name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
+        expected: extractLiteralString(sampleValue) || parameter.name || `value${variables.length}`,
+        source: variableName,
+        cookie: parameter.in === 'cookie',
+      });
     }
 
     return {
@@ -132,6 +210,7 @@ export class PythonUsagePlanner {
       requestBodyMediaType: requestBodyInfo?.mediaType,
       variables,
       callExpression: `client.${moduleName}.${methodName}(${callArguments.join(', ')})`,
+      headerExpectations,
     };
   }
 
@@ -282,6 +361,10 @@ function generatePythonOperationName(
     put: 'update',
     patch: 'patch',
     delete: 'delete',
+    options: 'options',
+    head: 'head',
+    trace: 'trace',
+    query: 'query',
   };
 
   return `${actionMap[method] || method}_${PYTHON_CONFIG.namingConventions.propertyName(resource)}`;
@@ -305,7 +388,7 @@ function extractRequestBodyInfo(
     return undefined;
   }
 
-  const schema = content[mediaType]?.schema as ApiSchema | undefined;
+  const schema = resolveMediaTypeSchema(content[mediaType]);
   return { mediaType, schema };
 }
 
@@ -396,7 +479,7 @@ function renderSampleValue(
     case 'boolean':
       return 'True';
     case 'array': {
-      const itemValue = renderSampleValue(ctx, resolvedSchema?.items as ApiSchema | undefined, fallbackName, depth + 1);
+      const itemValue = renderSampleValue(ctx, getArrayItemSchema(resolvedSchema), fallbackName, depth + 1);
       const indent = ' '.repeat(depth * 4);
       const childIndent = ' '.repeat((depth + 1) * 4);
       return `[\n${childIndent}${itemValue},\n${indent}]`;
@@ -444,6 +527,14 @@ function sampleValueForParameter(ctx: SchemaContext, parameter: ApiParameter, in
   }
 }
 
+function extractLiteralString(expression: string): string | undefined {
+  const match = String(expression || '').match(/^'((?:\\'|\\\\|[^'])*)'$/);
+  if (!match) {
+    return undefined;
+  }
+  return match[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+}
+
 function formatLiteral(value: unknown): string {
   if (typeof value === 'string') {
     return `'${escapeSingleQuoted(value)}'`;
@@ -471,27 +562,5 @@ function resolveSchema(ctx: SchemaContext, schema: ApiSchema | undefined): ApiSc
 }
 
 function normalizeSampleSchemaType(schema: ApiSchema | undefined): string | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  if (schema.type === 'array') {
-    return 'array';
-  }
-  if (schema.type === 'object' || schema.properties || schema.additionalProperties) {
-    return 'object';
-  }
-  return schema.type;
-}
-
-function pickComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
-  if (!schema || typeof schema !== 'object') {
-    return undefined;
-  }
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
-    const values = schema[key];
-    if (Array.isArray(values) && values.length > 0) {
-      return values.find((entry) => typeof entry === 'object' && entry && entry.type !== 'null') || values[0];
-    }
-  }
-  return undefined;
+  return resolveSchemaType(schema).effectiveType;
 }
