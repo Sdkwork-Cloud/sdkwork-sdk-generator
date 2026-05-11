@@ -619,6 +619,123 @@ const securitySpec: ApiSpec = {
   },
 };
 
+const sdkworkV3IamSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: { title: 'SDKWork v3 IAM API', version: '1.0.0' },
+  paths: {
+    '/app/v3/api/auth/sessions': {
+      post: {
+        summary: 'Create auth session',
+        operationId: 'sessions.create',
+        tags: ['auth'],
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateSessionRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AuthSession' },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/app/v3/api/auth/sessions/current': {
+      get: {
+        summary: 'Get current auth session',
+        operationId: 'sessions.current.retrieve',
+        tags: ['auth'],
+        security: [{ AuthToken: [], SdkworkAccessToken: [] }],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AuthSession' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+      delete: {
+        summary: 'Delete current auth session',
+        operationId: 'sessions.current.delete',
+        tags: ['auth'],
+        security: [{ AuthToken: [], SdkworkAccessToken: [] }],
+        responses: {
+          '204': { description: 'No content' },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    securitySchemes: {
+      AuthToken: { type: 'http', scheme: 'bearer' },
+      SdkworkAccessToken: { type: 'apiKey', in: 'header', name: 'Sdkwork-Access-Token' },
+    },
+    schemas: {
+      CreateSessionRequest: {
+        type: 'object',
+        properties: {
+          username: { type: 'string' },
+          password: { type: 'string' },
+        },
+      },
+      AuthSession: {
+        type: 'object',
+        properties: {
+          authToken: { type: 'string' },
+          accessToken: { type: 'string' },
+          refreshToken: { type: 'string' },
+        },
+      },
+      ProblemDetail: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          title: { type: 'string' },
+          status: { type: 'integer' },
+          detail: { type: 'string' },
+          instance: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 const modelRefSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Model Ref API', version: '1.0.0' },
@@ -5373,6 +5490,72 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tenantApi!.content).toContain('async create(');
     expect(tenantApi!.content).not.toContain('tenantUpdate');
     expect(tenantApi!.content).not.toContain('tenantCreate');
+  });
+
+  it('should expose sdkwork v3 resource operationIds as nested typescript client resources', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      sdkworkV3IamSpec
+    );
+    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+    const readmeFile = result.files.find((f) => f.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(authApi).toBeDefined();
+    expect(authApi!.content).toContain('public readonly sessions: AuthSessionsApi;');
+    expect(authApi!.content).toContain('this.sessions = new AuthSessionsApi(client);');
+    expect(authApi!.content).toContain('export class AuthSessionsApi');
+    expect(authApi!.content).toContain('public readonly current: AuthSessionsCurrentApi;');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async retrieve(): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async delete(): Promise<void>');
+    expect(authApi!.content).not.toContain('async createSession(');
+    expect(authApi!.content).not.toContain('async sessionsCreate(');
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('client.auth.sessions.create(body)');
+  });
+
+  it('should reject non-standard sdkwork v3 OpenAPI contracts under the strict standard profile', async () => {
+    const generator = new TypeScriptGenerator();
+    const invalidSpec: ApiSpec = {
+      ...sdkworkV3IamSpec,
+      paths: {
+        '/backend/v3/api/auth/sessions': {
+          post: {
+            summary: 'Create backend auth session',
+            operationId: 'auth__login',
+            tags: ['auth'],
+            responses: {
+              '200': { description: 'Success' },
+              '401': { description: 'Unauthorized' },
+            },
+          },
+        },
+      },
+    };
+
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'backend',
+        apiPrefix: '/backend/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      invalidSpec
+    );
+
+    expect(result.files).toEqual([]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].message).toContain('SDKWork v3 OpenAPI standard violations');
+    expect(result.errors[0].message).toContain('operationId "auth__login" must not contain "__"');
+    expect(result.errors[0].message).toContain('must not expose auth/session endpoints in backend-api');
+    expect(result.errors[0].message).toContain('must include application/problem+json');
   });
 
   it('should strip tag-like operationId prefixes into friendly method names', async () => {

@@ -351,6 +351,9 @@ export class TypeScriptUsagePlanner {
     }
     score += requiredParamCount * 12;
     score += optionalParamCount * 3;
+    if (this.config?.options?.standardProfile === 'sdkwork-v3') {
+      score += estimateSdkworkV3QuickStartBias(operation);
+    }
     return score;
   }
 }
@@ -416,7 +419,7 @@ export function buildTypeScriptResourceTree(
     node.operations.push(operation);
   }
 
-  if (config?.sdkType === 'ai') {
+  if (config && usesNestedResourceSurface(config)) {
     dedupeResourceTreeOperations(root, tag, config);
   }
 
@@ -433,7 +436,7 @@ export function resolveTypeScriptOperationSurfaces(
     return new Map<GeneratedApiOperation, TypeScriptOperationSurface>();
   }
 
-  if (config?.sdkType !== 'ai') {
+  if (!usesNestedResourceSurface(config)) {
     const methodNames = resolveTypeScriptMethodNames(tag, operations, config);
     return new Map(operations.map((operation) => [operation, {
       clientPropertyPath: [metadata.clientPropertyName],
@@ -499,6 +502,11 @@ function generateTypeScriptOperationName(
   config?: GeneratorConfig,
   resourcePathSegments?: string[],
 ): string {
+  const dottedOperationActionName = resolveDottedOperationActionName(operation, config, resourcePathSegments);
+  if (dottedOperationActionName) {
+    return dottedOperationActionName;
+  }
+
   const resourceActionName = generateResourceActionName(method, path, tag, config, resourcePathSegments);
   if (resourceActionName) {
     return resourceActionName;
@@ -533,7 +541,7 @@ function generateResourceActionName(
   config?: GeneratorConfig,
   resourcePathSegments?: string[],
 ): string {
-  if (config?.sdkType !== 'ai') {
+  if (!usesNestedResourceSurface(config)) {
     return '';
   }
 
@@ -589,6 +597,52 @@ function generateResourceActionName(
   }
 
   return '';
+}
+
+function usesNestedResourceSurface(config?: GeneratorConfig): boolean {
+  return config?.sdkType === 'ai' || config?.options?.standardProfile === 'sdkwork-v3';
+}
+
+function resolveDottedOperationActionName(
+  operation: GeneratedApiOperation,
+  config?: GeneratorConfig,
+  resourcePathSegments?: string[],
+): string {
+  if (config?.options?.standardProfile !== 'sdkwork-v3' || !resourcePathSegments?.length) {
+    return '';
+  }
+
+  const operationId = String(operation.operationId || '').trim();
+  if (!operationId.includes('.')) {
+    return '';
+  }
+
+  const parts = operationId.split('.').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) {
+    return '';
+  }
+
+  const resourceParts = parts.slice(0, -1).map((part) => normalizeStaticSegment(part)).filter(Boolean);
+  const canonicalResourcePath = resourcePathSegments.slice(1).map(canonicalResourcePart);
+  if (resourceParts.length > 0 && !sameCanonicalParts(resourceParts, canonicalResourcePath.slice(-resourceParts.length))) {
+    return '';
+  }
+
+  return TYPESCRIPT_CONFIG.namingConventions.methodName(parts[parts.length - 1]);
+}
+
+function estimateSdkworkV3QuickStartBias(operation: GeneratedApiOperation): number {
+  const operationId = String(operation.operationId || '').trim();
+  if (operationId === 'sessions.create') {
+    return -1000;
+  }
+
+  const isPublicOperation = Array.isArray(operation.security) && operation.security.length === 0;
+  if (isPublicOperation && operationId.endsWith('.create')) {
+    return -100;
+  }
+
+  return 0;
 }
 
 function actionNameForNestedResource(

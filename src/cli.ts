@@ -93,6 +93,7 @@ program
   .option('--common-package <spec>', 'Common package spec (language-specific, optional)')
   .option('--sdk-version <ver>', 'SDK version')
   .option('--fixed-sdk-version <ver>', 'Use an exact SDK version without auto-increment checks')
+  .option('--standard-profile <profile>', 'Enable a strict OpenAPI standard profile, for example sdkwork-v3')
   .option('--npm-registry <url>', 'Registry used for published TypeScript SDK version checks', 'https://registry.npmjs.org')
   .option('--npm-package-name <name>', 'TypeScript npm package used as the published version baseline for multi-language releases')
   .option('--sdk-root <path>', 'SDK workspace root used to scan sibling language package versions')
@@ -142,6 +143,7 @@ program
         commonPackage: options.commonPackage,
         sdkVersion: options.sdkVersion,
         fixedSdkVersion: options.fixedSdkVersion,
+        standardProfile: options.standardProfile,
         npmRegistry: options.npmRegistry,
         npmPackageName: options.npmPackageName,
         sdkRoot: options.sdkRoot,

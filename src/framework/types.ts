@@ -35,6 +35,7 @@ export interface GeneratorConfig {
 }
 
 export interface GeneratorOptions {
+  standardProfile?: 'sdkwork-v3';
   useBigInt?: boolean;
   useDateType?: boolean;
   generateClient?: boolean;

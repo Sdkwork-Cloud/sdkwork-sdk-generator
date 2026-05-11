@@ -11,11 +11,14 @@ export class HttpClientGenerator {
     const tags = Object.keys(ctx.apiGroups);
     const tagMetadata = buildTypeScriptTagMetadata(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const accessTokenHeader = this.resolveAccessTokenHeader(config, ctx.auth.apiKeyHeader)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveTypeScriptCommonPackage(config);
 
     return [
-      this.generateHttpClient(configType, apiKeyHeader, apiKeyUseBearer, commonPkg.importPath),
+      this.generateHttpClient(configType, apiKeyHeader, accessTokenHeader, apiKeyUseBearer, commonPkg.importPath),
       this.generateHttpIndex(),
       this.generateAuthIndex(commonPkg.importPath),
       this.generateSdkClass(clientName, configType, tagMetadata, config, commonPkg.importPath),
@@ -26,6 +29,7 @@ export class HttpClientGenerator {
   private generateHttpClient(
     configType: string,
     apiKeyHeader: string,
+    accessTokenHeader: string,
     apiKeyUseBearer: boolean,
     commonImportPath: string,
   ): GeneratedFile {
@@ -45,6 +49,7 @@ type HttpRequestOptions = RequestOptions & {
 
 export class HttpClient extends BaseHttpClient {
   private static readonly API_KEY_HEADER: string = '${apiKeyHeader}';
+  private static readonly ACCESS_TOKEN_HEADER: string = '${accessTokenHeader}';
   private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
 
   constructor(config: ${configType}) {
@@ -145,6 +150,7 @@ export class HttpClient extends BaseHttpClient {
 
     if (HttpClient.API_KEY_HEADER === 'Authorization' && HttpClient.API_KEY_USE_BEARER) {
       authConfig.authMode = 'apikey';
+      delete headers[HttpClient.ACCESS_TOKEN_HEADER];
       delete headers['Access-Token'];
       return;
     }
@@ -157,9 +163,10 @@ export class HttpClient extends BaseHttpClient {
     if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
       delete headers['Authorization'];
     }
-    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'access-token') {
-      delete headers['Access-Token'];
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== HttpClient.ACCESS_TOKEN_HEADER.toLowerCase()) {
+      delete headers[HttpClient.ACCESS_TOKEN_HEADER];
     }
+    delete headers['Access-Token'];
   }
 
   setAuthToken(token: string): void {
@@ -172,9 +179,11 @@ export class HttpClient extends BaseHttpClient {
 
   setAccessToken(token: string): void {
     const headers = this.getInternalHeaders();
-    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'access-token') {
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== HttpClient.ACCESS_TOKEN_HEADER.toLowerCase()) {
       delete headers[HttpClient.API_KEY_HEADER];
     }
+    headers[HttpClient.ACCESS_TOKEN_HEADER] = token;
+    delete headers['Access-Token'];
     super.setAccessToken(token);
   }
 
@@ -187,19 +196,36 @@ export class HttpClient extends BaseHttpClient {
     this.getInternalAuthConfig().tokenManager = manager;
   }
 
+  private applySdkworkAuthHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
+    const authConfig = this.getInternalAuthConfig();
+    const tokenManager = authConfig.tokenManager;
+    const accessToken = tokenManager?.getAccessToken?.();
+    if (!accessToken || HttpClient.ACCESS_TOKEN_HEADER === 'Access-Token') {
+      return headers;
+    }
+
+    const nextHeaders = {
+      ...(headers ?? {}),
+      [HttpClient.ACCESS_TOKEN_HEADER]: accessToken,
+    };
+    delete nextHeaders['Access-Token'];
+    return nextHeaders;
+  }
+
   async request<T>(path: string, options: HttpRequestOptions = {}): Promise<T> {
     const execute = (this as any).execute;
     if (typeof execute !== 'function') {
       throw new Error('BaseHttpClient execute method is not available');
     }
     const { body, headers, contentType, method = 'GET', ...rest } = options;
+    const requestHeaders = this.applySdkworkAuthHeaders(headers);
     return withRetry(
       () => execute.call(this, { 
         url: path, 
         method,
         ...rest,
         body: this.buildRequestBody(body, contentType),
-        headers: this.buildRequestHeaders(headers, body == null ? undefined : contentType),
+        headers: this.buildRequestHeaders(requestHeaders, body == null ? undefined : contentType),
       }),
       { maxRetries: 3 }
     );
@@ -211,8 +237,9 @@ export class HttpClient extends BaseHttpClient {
       throw new Error('BaseHttpClient stream method is not available');
     }
     const { body, headers, contentType, method = 'GET', ...rest } = options;
+    const authHeaders = this.applySdkworkAuthHeaders(headers);
     const requestHeaders = this.buildRequestHeaders(
-      { Accept: 'text/event-stream', ...(headers ?? {}) },
+      { Accept: 'text/event-stream', ...(authHeaders ?? {}) },
       body == null ? undefined : contentType,
     );
 
@@ -389,5 +416,12 @@ export * from './auth';
 
   private format(content: string): string {
     return content.trim() + '\n';
+  }
+
+  private resolveAccessTokenHeader(config: GeneratorConfig, detectedApiKeyHeader?: string): string {
+    if (config.options?.standardProfile === 'sdkwork-v3') {
+      return 'Sdkwork-Access-Token';
+    }
+    return detectedApiKeyHeader || 'Access-Token';
   }
 }

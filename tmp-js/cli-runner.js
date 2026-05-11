@@ -35,6 +35,9 @@ async function executeGenerate(options) {
     if (options.sdkVersion && options.fixedSdkVersion) {
         throw new Error('Use either --sdk-version or --fixed-sdk-version, not both.');
     }
+    if (options.standardProfile && options.standardProfile !== 'sdkwork-v3') {
+        throw new Error(`Unsupported standard profile: ${options.standardProfile}. Supported: sdkwork-v3`);
+    }
     const outputPath = resolve(options.output);
     const resolvedVersion = await resolveSdkVersion({
         sdkRoot: options.sdkRoot,
@@ -65,6 +68,9 @@ async function executeGenerate(options) {
         namespace: options.namespace,
         commonPackage: options.commonPackage,
         generateReadme: true,
+        options: options.standardProfile
+            ? { standardProfile: options.standardProfile }
+            : undefined,
     };
     const result = await generateSdk(config, options.spec);
     if (result.errors.length > 0) {

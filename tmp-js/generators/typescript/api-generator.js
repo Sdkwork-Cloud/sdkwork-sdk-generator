@@ -105,7 +105,7 @@ export class ApiGenerator {
         const className = metadata.className;
         const fileName = metadata.fileName;
         const referencedModels = new Set();
-        const resourceTree = config.sdkType === 'ai'
+        const resourceTree = config.sdkType === 'ai' || config.options?.standardProfile === 'sdkwork-v3'
             ? buildTypeScriptResourceTree(metadata.tag, operations, metadata, config)
             : undefined;
         const methods = resourceTree

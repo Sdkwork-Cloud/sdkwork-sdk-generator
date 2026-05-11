@@ -26,6 +26,9 @@ export class ReadmeGenerator {
     }).join('\n');
 
     const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
+    const accessTokenHeader = config.options?.standardProfile === 'sdkwork-v3'
+      ? 'Sdkwork-Access-Token'
+      : 'Access-Token';
     const authSection = buildMutuallyExclusiveAuthSection({
       codeFence: 'typescript',
       modeAExample: `const client = new ${clientName}({ baseUrl: '${config.baseUrl}' });
@@ -36,7 +39,7 @@ client.setAuthToken('your-auth-token');
 client.setAccessToken('your-access-token');
 // Sends:
 // Authorization: Bearer <authToken>
-// Access-Token: <accessToken>`,
+// ${accessTokenHeader}: <accessToken>`,
       apiKeyCall: 'setApiKey(...)',
       authTokenCall: 'setAuthToken(...)',
       accessTokenCall: 'setAccessToken(...)',

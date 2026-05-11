@@ -267,6 +267,9 @@ export class TypeScriptUsagePlanner {
         }
         score += requiredParamCount * 12;
         score += optionalParamCount * 3;
+        if (this.config?.options?.standardProfile === 'sdkwork-v3') {
+            score += estimateSdkworkV3QuickStartBias(operation);
+        }
         return score;
     }
 }
@@ -310,7 +313,7 @@ export function buildTypeScriptResourceTree(tag, operations, metadata, config) {
         }
         node.operations.push(operation);
     }
-    if (config?.sdkType === 'ai') {
+    if (config && usesNestedResourceSurface(config)) {
         dedupeResourceTreeOperations(root, tag, config);
     }
     return root;
@@ -319,7 +322,7 @@ export function resolveTypeScriptOperationSurfaces(tag, operations, metadata, co
     if (!Array.isArray(operations) || operations.length === 0) {
         return new Map();
     }
-    if (config?.sdkType !== 'ai') {
+    if (!usesNestedResourceSurface(config)) {
         const methodNames = resolveTypeScriptMethodNames(tag, operations, config);
         return new Map(operations.map((operation) => [operation, {
                 clientPropertyPath: [metadata.clientPropertyName],
@@ -366,6 +369,10 @@ export function resolveTypeScriptExpectedRequestPath(path, apiPrefix) {
     return `${normalizedPrefix}${normalizedPath}`;
 }
 function generateTypeScriptOperationName(method, path, operation, tag, config, resourcePathSegments) {
+    const dottedOperationActionName = resolveDottedOperationActionName(operation, config, resourcePathSegments);
+    if (dottedOperationActionName) {
+        return dottedOperationActionName;
+    }
     const resourceActionName = generateResourceActionName(method, path, tag, config, resourcePathSegments);
     if (resourceActionName) {
         return resourceActionName;
@@ -390,7 +397,7 @@ function generateTypeScriptOperationName(method, path, operation, tag, config, r
     return `${actionMap[method] || method}${TYPESCRIPT_CONFIG.namingConventions.modelName(resource)}`;
 }
 function generateResourceActionName(method, path, tag, config, resourcePathSegments) {
-    if (config?.sdkType !== 'ai') {
+    if (!usesNestedResourceSurface(config)) {
         return '';
     }
     const normalizedMethod = String(method || '').toLowerCase();
@@ -435,6 +442,39 @@ function generateResourceActionName(method, path, tag, config, resourcePathSegme
         return TYPESCRIPT_CONFIG.namingConventions.methodName(`${action}${suffixName}`);
     }
     return '';
+}
+function usesNestedResourceSurface(config) {
+    return config?.sdkType === 'ai' || config?.options?.standardProfile === 'sdkwork-v3';
+}
+function resolveDottedOperationActionName(operation, config, resourcePathSegments) {
+    if (config?.options?.standardProfile !== 'sdkwork-v3' || !resourcePathSegments?.length) {
+        return '';
+    }
+    const operationId = String(operation.operationId || '').trim();
+    if (!operationId.includes('.')) {
+        return '';
+    }
+    const parts = operationId.split('.').map((part) => part.trim()).filter(Boolean);
+    if (parts.length < 2) {
+        return '';
+    }
+    const resourceParts = parts.slice(0, -1).map((part) => normalizeStaticSegment(part)).filter(Boolean);
+    const canonicalResourcePath = resourcePathSegments.slice(1).map(canonicalResourcePart);
+    if (resourceParts.length > 0 && !sameCanonicalParts(resourceParts, canonicalResourcePath.slice(-resourceParts.length))) {
+        return '';
+    }
+    return TYPESCRIPT_CONFIG.namingConventions.methodName(parts[parts.length - 1]);
+}
+function estimateSdkworkV3QuickStartBias(operation) {
+    const operationId = String(operation.operationId || '').trim();
+    if (operationId === 'sessions.create') {
+        return -1000;
+    }
+    const isPublicOperation = Array.isArray(operation.security) && operation.security.length === 0;
+    if (isPublicOperation && operationId.endsWith('.create')) {
+        return -100;
+    }
+    return 0;
 }
 function actionNameForNestedResource(method, suffixSegments, hasPathParams) {
     if (method === 'get') {

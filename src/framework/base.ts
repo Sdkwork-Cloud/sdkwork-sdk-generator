@@ -19,6 +19,10 @@ import {
   normalizeOpenApiPathItemOperations,
 } from './http-methods.js';
 import {
+  formatSdkworkV3StandardIssues,
+  validateSdkworkV3Standard,
+} from './sdkwork-v3-standard.js';
+import {
   parseLocalJsonPointerRef,
   resolveLocalJsonPointerReference,
   getSchemaReferenceName,
@@ -181,6 +185,15 @@ export abstract class BaseGenerator {
       const compatibilityIssues = this.analyzeSpecCapabilities(spec);
       if (compatibilityIssues.length > 0) {
         throw new Error(this.formatCompatibilityIssues(compatibilityIssues));
+      }
+      if (config.options?.standardProfile === 'sdkwork-v3') {
+        const standardIssues = validateSdkworkV3Standard(spec, {
+          sdkType: config.sdkType,
+          apiPrefix: config.apiPrefix,
+        });
+        if (standardIssues.length > 0) {
+          throw new Error(formatSdkworkV3StandardIssues(standardIssues));
+        }
       }
       this.ctx = this.createSchemaContext(spec);
 
@@ -1216,6 +1229,7 @@ export abstract class BaseGenerator {
     const managedHeaders = new Set<string>([
       'authorization',
       'access-token',
+      'sdkwork-access-token',
     ]);
     if (auth?.apiKeyHeader) {
       managedHeaders.add(String(auth.apiKeyHeader).trim().toLowerCase());
@@ -1292,6 +1306,9 @@ export abstract class BaseGenerator {
       score += 1;
     }
     if (header === 'access-token') {
+      score -= 4;
+    }
+    if (header === 'sdkwork-access-token') {
       score -= 4;
     }
 
