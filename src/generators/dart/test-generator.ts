@@ -10,7 +10,7 @@ import {
 
 export class TestGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
-    const planner = new DartUsagePlanner(ctx);
+    const planner = new DartUsagePlanner(ctx, undefined, config);
     const plan = planner.selectQuickStartPlan();
     if (!plan) {
       throw new Error('Dart generateTests requires at least one API operation to build a smoke test.');

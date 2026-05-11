@@ -8,7 +8,7 @@ export class ReadmeGenerator {
         const packageName = getRustPackageName(config);
         const crateName = getRustCrateName(config);
         const tags = Object.keys(ctx.apiGroups);
-        const planner = new RustUsagePlanner(ctx);
+        const planner = new RustUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartImports = this.buildSupportImports(crateName, quickStartPlan);
         const quickStartSnippet = quickStartPlan

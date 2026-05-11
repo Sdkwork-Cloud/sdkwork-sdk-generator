@@ -7,7 +7,7 @@ export class ReadmeGenerator {
         const clientName = resolveSdkClientName(config);
         const pkgName = getFlutterPackageName(config);
         const tags = Object.keys(ctx.apiGroups);
-        const planner = new FlutterUsagePlanner(ctx);
+        const planner = new FlutterUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartSnippet = quickStartPlan
             ? renderFlutterUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })

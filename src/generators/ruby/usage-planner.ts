@@ -1,12 +1,12 @@
-import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import type { ApiParameter, ApiSchema, GeneratedApiOperation, GeneratorConfig, SchemaContext } from '../../framework/types.js';
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { getRubyType, RUBY_CONFIG } from './config.js';
 
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
@@ -62,8 +62,9 @@ export class RubyUsagePlanner {
   constructor(
     private readonly ctx: SchemaContext,
     private readonly modulePrefix: string,
+    private readonly config?: GeneratorConfig,
   ) {
-    this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+    this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
   }
 
   getModuleProperty(tag: string): string {
@@ -84,7 +85,7 @@ export class RubyUsagePlanner {
     if (operations.length === 0) {
       return undefined;
     }
-    const methodNames = resolveRubyMethodNames(tag, operations);
+    const methodNames = resolveRubyMethodNames(tag, operations, this.config);
     const operation = operations
       .map((candidate, index) => ({ candidate, index, score: this.scoreOperation(candidate) }))
       .sort((left, right) => (left.score - right.score) || (left.index - right.index))[0]?.candidate;
@@ -265,7 +266,13 @@ export class RubyUsagePlanner {
 export function resolveRubyMethodNames(
   tag: string,
   operations: GeneratedApiOperation[],
+  config?: GeneratorConfig,
 ): Map<GeneratedApiOperation, string> {
+  const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, RUBY_CONFIG, 'snake');
+  if (openAIStyleNames) {
+    return openAIStyleNames;
+  }
+
   return resolveScopedMethodNames(operations, (operation) => {
     if (operation.operationId) {
       const normalized = normalizeOperationId(operation.operationId);
@@ -487,7 +494,7 @@ function getConcreteParameters(operation: GeneratedApiOperation): ApiParameter[]
 function resolveSchema(ctx: SchemaContext, schema: ApiSchema | undefined): ApiSchema | undefined {
   if (!schema || typeof schema !== 'object') return schema;
   if (schema.$ref) {
-    const refName = String(schema.$ref).split('/').pop() || '';
+    const refName = getSchemaReferenceName(schema.$ref);
     return ctx.schemas[refName] || schema;
   }
   const composed = pickComposedSchema(schema);

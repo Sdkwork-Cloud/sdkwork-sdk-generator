@@ -1,5 +1,5 @@
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const CSHARP_CONFIG = {
     language: 'csharp',
     displayName: 'C# (.NET)',
@@ -51,7 +51,7 @@ export function getCSharpType(schema, config) {
         return 'object';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName);
     }
     const composed = pickComposedSchema(schema);

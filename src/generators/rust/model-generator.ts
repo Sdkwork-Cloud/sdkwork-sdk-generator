@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { collectSchemaReferences, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
+import { collectSchemaReferences, getSchemaReferenceName, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { sanitizeRustRawIdentifier } from './identifiers.js';
 
@@ -183,8 +183,7 @@ ${fields}
     visited.add(schema);
 
     if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop();
-      const modelName = RUST_CONFIG.namingConventions.modelName(refName ?? '');
+      const modelName = RUST_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref));
       if (knownModels.has(modelName)) {
         refs.add(modelName);
       }
@@ -215,8 +214,7 @@ function isDirectSelfReference(schema: any, modelName: string): boolean {
     return false;
   }
   if (schema.$ref) {
-    const refName = schema.$ref.split('/').pop();
-    return RUST_CONFIG.namingConventions.modelName(refName ?? '') === modelName;
+    return RUST_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref)) === modelName;
   }
 
   const composed = pickComposedSchema(schema);

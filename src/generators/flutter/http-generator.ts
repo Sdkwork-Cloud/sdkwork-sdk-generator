@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { FLUTTER_CONFIG, getFlutterPackageName } from './config.js';
@@ -9,7 +9,7 @@ export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/'/g, "\\'");
     const apiKeyAsBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveFlutterCommonPackage(config);
@@ -24,7 +24,8 @@ export class HttpClientGenerator {
   private generateHttpClient(config: GeneratorConfig, commonImportPath: string): GeneratedFile {
     return {
       path: 'lib/src/http/client.dart',
-      content: this.format(`import 'dart:convert';
+      content: this.format(`import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -72,6 +73,56 @@ class HttpClient extends BaseHttpClient {
           .timeout(Duration(milliseconds: timeout));
       final response = await http.Response.fromStream(streamed);
       return _parseResponse(response);
+    }
+  }
+
+  Stream<Map<String, dynamic>> streamJson(
+    String path, {
+    dynamic body,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    String contentType = 'application/json',
+  }) async* {
+    final uri = _buildUri(path, params);
+    final mergedHeaders = <String, String>{
+      ...this.headers,
+      'Accept': 'text/event-stream',
+      ...?headers,
+    };
+    final request = http.Request('POST', uri)
+      ..headers.addAll(_buildHeaders(mergedHeaders, contentType, body));
+    final encodedBody = _encodeBody(body, contentType);
+    if (encodedBody != null) {
+      if (encodedBody is List<int>) {
+        request.bodyBytes = encodedBody;
+      } else {
+        request.body = encodedBody.toString();
+      }
+    }
+
+    final response = await _rawClient
+        .send(request)
+        .timeout(Duration(milliseconds: timeout));
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      throw Exception('HTTP \${response.statusCode}: \$bodyText');
+    }
+
+    await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith(':') || !trimmed.startsWith('data:')) {
+        continue;
+      }
+      final data = trimmed.substring(5).trim();
+      if (data == '[DONE]') {
+        break;
+      }
+      final decoded = jsonDecode(data);
+      if (decoded is Map<String, dynamic>) {
+        yield decoded;
+      } else if (decoded is Map) {
+        yield Map<String, dynamic>.from(decoded);
+      }
     }
   }
 

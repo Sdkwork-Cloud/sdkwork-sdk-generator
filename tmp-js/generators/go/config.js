@@ -1,4 +1,4 @@
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const GO_CONFIG = {
     language: 'go',
     displayName: 'Go',
@@ -50,7 +50,7 @@ export function getGoType(schema, config) {
         return 'interface{}';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName);
     }
     const composed = pickComposedSchema(schema);

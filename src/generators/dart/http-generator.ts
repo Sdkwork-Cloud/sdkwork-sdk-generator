@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { DART_CONFIG, getDartPackageName } from './config.js';
 
@@ -8,7 +8,7 @@ export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/'/g, "\\'");
     const apiKeyAsBearer = ctx.auth.apiKeyAsBearer;
     const packageName = getDartPackageName(config);
@@ -174,6 +174,48 @@ class HttpClient {
 
     final httpResponse = await http.Response.fromStream(response);
     return _decodeResponse(httpResponse);
+  }
+
+  Stream<Map<String, dynamic>> streamJson(
+    String path, {
+    dynamic body,
+    Map<String, dynamic>? params,
+    Map<String, String>? headers,
+    String contentType = 'application/json',
+  }) async* {
+    final uri = _buildUri(path, params);
+    final request = http.Request('POST', uri)
+      ..headers.addAll(_buildHeaders({
+        'Accept': 'text/event-stream',
+        ...?headers,
+      }, contentType: body == null ? null : contentType));
+    final payload = _encodeBody(body, contentType);
+    if (payload != null) {
+      request.body = payload;
+    }
+
+    final response = await _client.send(request).timeout(_timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final bodyText = await response.stream.bytesToString();
+      throw Exception('SDKWork request failed (\${response.statusCode}): \$bodyText');
+    }
+
+    await for (final line in response.stream.transform(utf8.decoder).transform(const LineSplitter())) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith(':') || !trimmed.startsWith('data:')) {
+        continue;
+      }
+      final data = trimmed.substring(5).trim();
+      if (data == '[DONE]') {
+        break;
+      }
+      final decoded = jsonDecode(data);
+      if (decoded is Map<String, dynamic>) {
+        yield decoded;
+      } else if (decoded is Map) {
+        yield Map<String, dynamic>.from(decoded);
+      }
+    }
   }
 
   void close() {

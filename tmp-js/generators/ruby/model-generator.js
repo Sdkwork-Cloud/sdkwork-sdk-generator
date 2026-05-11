@@ -1,4 +1,4 @@
-import { resolveModelSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, resolveModelSchema } from '../../framework/schema.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
 export class ModelGenerator {
     generate(ctx, config) {
@@ -57,7 +57,7 @@ ${exports}
             return valueExpr;
         }
         if (schema.$ref) {
-            const modelName = RUBY_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+            const modelName = RUBY_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             return `${valueExpr}.is_a?(Hash) ? ${modelName}.from_hash(${valueExpr}) : nil`;
         }
         if (Array.isArray(schema.prefixItems)) {
@@ -81,7 +81,7 @@ ${exports}
     }
     deserializeArrayItemExpression(schema, itemExpr) {
         if (schema?.$ref) {
-            const modelName = RUBY_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+            const modelName = RUBY_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             return `${itemExpr}.is_a?(Hash) ? ${modelName}.from_hash(${itemExpr}) : ${itemExpr}`;
         }
         if (Array.isArray(schema?.prefixItems)) {

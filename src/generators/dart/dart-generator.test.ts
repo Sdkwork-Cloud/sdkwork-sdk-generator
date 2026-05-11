@@ -247,7 +247,7 @@ describe('Dart generator', () => {
     expect(apiFile!.content).toContain("import 'response_helpers.dart';");
     expect(apiFile!.content).toContain('final map = sdkworkResponseAsMap(response);');
     expect(apiFile!.content).toContain('PlusApiResultUserProfileVO.fromJson(map);');
-    expect(apiFile!.content).toContain("ApiPaths.appPath('/user/$userId')");
+    expect(apiFile!.content).toContain("ApiPaths.appPath('/user/\${serializePathParameter(userId, const PathParameterSpec('userId', 'simple', false))}')");
     expect(apiFile!.content).not.toContain("ApiPaths.appPath('/user/${userId}')");
     expect(apiFile!.content).toContain('final payload = body.toJson();');
     expect(apiFile!.content).not.toContain('final payload = body?.toJson();');

@@ -1,4 +1,4 @@
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const PYTHON_CONFIG = {
     language: 'python',
     displayName: 'Python',
@@ -70,7 +70,14 @@ const PYTHON_RESERVED_WORDS = new Set([
     'yield',
 ]);
 function toPascalCase(str) {
-    return str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '').replace(/^(.)/, c => c.toUpperCase());
+    return str
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[^a-zA-Z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join('');
 }
 function toSnakeCase(str) {
     return str.replace(/([a-z])([A-Z])/g, '$1_$2').replace(/[-\s]/g, '_').toLowerCase();
@@ -91,7 +98,7 @@ export function getPythonType(schema, config) {
         return 'Any';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName);
     }
     const composed = pickComposedSchema(schema);

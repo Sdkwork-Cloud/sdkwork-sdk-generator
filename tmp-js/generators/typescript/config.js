@@ -1,4 +1,4 @@
-import { getConstSchemaInfo, getTupleSchemaInfo, isNullSchema, normalizeSchemaTypeValue } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, isNullSchema, normalizeSchemaTypeValue } from '../../framework/schema.js';
 export const TYPESCRIPT_CONFIG = {
     language: 'typescript',
     displayName: 'TypeScript',
@@ -31,10 +31,18 @@ export const TYPESCRIPT_CONFIG = {
     },
 };
 function toPascalCase(str) {
-    return str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '').replace(/^(.)/, c => c.toUpperCase());
+    return str
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[^a-zA-Z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join('');
 }
 function toCamelCase(str) {
-    return str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '').replace(/^(.)/, c => c.toLowerCase());
+    const pascal = toPascalCase(str);
+    return pascal.charAt(0).toLowerCase() + pascal.slice(1);
 }
 function toKebabCase(str) {
     const normalized = str
@@ -77,7 +85,7 @@ export function getTypeScriptType(schema, config, knownModels) {
         return nullable ? `${intersectionType} | null` : intersectionType;
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         const modelName = config.namingConventions.modelName(refName);
         if (knownModels && !knownModels.has(modelName)) {
             return 'unknown';

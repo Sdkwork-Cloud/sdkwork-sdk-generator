@@ -3,7 +3,7 @@ import { getPythonPackageRoot } from './config.js';
 import { PythonUsagePlanner, renderPythonUsageSnippet, resolvePythonExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new PythonUsagePlanner(ctx);
+        const planner = new PythonUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Python generateTests requires at least one API operation to build a smoke test.');

@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
 import {
   buildLanguageReadmeTitle,
@@ -17,9 +17,9 @@ export class ReadmeGenerator {
     const clientName = resolveSdkClientName(config);
     const sdkTargetName = resolveSwiftPackageTargetName(config);
     const commonPkg = resolveSwiftCommonPackage(config);
-    const planner = new SwiftUsagePlanner(ctx);
+    const planner = new SwiftUsagePlanner(ctx, undefined, config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const quickStartPlan = planner.selectQuickStartPlan();
     const quickStartUsage = quickStartPlan
       ? renderSwiftUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })

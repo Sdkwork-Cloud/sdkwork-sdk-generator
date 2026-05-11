@@ -1,10 +1,37 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
 import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId } from '../../framework/naming.js';
 import { TYPESCRIPT_CONFIG } from './config.js';
 import { buildTypeScriptTagMetadataMap } from './tag-metadata.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
+const OPENAI_RESOURCE_ACTION_SEGMENTS = new Set([
+    'cancel',
+    'compact',
+    'complete',
+    'content',
+    'pause',
+    'resume',
+    'search',
+    'submit_tool_outputs',
+]);
+const OPENAI_TERMINAL_COLLECTION_ACTIONS = [
+    {
+        parentResourcePath: ['fine_tuning', 'jobs'],
+        segment: 'events',
+    },
+    {
+        parentResourcePath: ['vector_stores', 'file_batches'],
+        segment: 'files',
+    },
+];
+const OPENAI_RESOURCE_METHOD_OVERRIDES = [
+    {
+        resourcePath: ['fine_tuning', 'checkpoints', 'permissions'],
+        method: 'get',
+        methodName: 'retrieve',
+    },
+];
 const TYPESCRIPT_RESERVED_WORDS = new Set([
     'break',
     'case',
@@ -62,9 +89,10 @@ const TYPESCRIPT_RESERVED_WORDS = new Set([
     'unknown',
 ]);
 export class TypeScriptUsagePlanner {
-    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES) {
+    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES, config) {
         this.ctx = ctx;
-        this.tagMetadataMap = buildTypeScriptTagMetadataMap(Object.keys(ctx.apiGroups));
+        this.config = config;
+        this.tagMetadataMap = buildTypeScriptTagMetadataMap(Object.keys(ctx.apiGroups), config);
         this.preferredModules = preferredModules;
     }
     getModuleName(tag) {
@@ -85,8 +113,13 @@ export class TypeScriptUsagePlanner {
     }
     buildPlan(tag, operation) {
         const operations = this.ctx.apiGroups[tag]?.operations || [];
-        const methodName = resolveTypeScriptMethodNames(tag, operations).get(operation) || 'operation';
-        const moduleName = this.getModuleName(tag);
+        const metadata = this.tagMetadataMap.get(tag);
+        const surface = metadata
+            ? resolveTypeScriptOperationSurfaces(tag, operations, metadata, this.config).get(operation)
+            : undefined;
+        const methodName = surface?.methodName || resolveTypeScriptMethodNames(tag, operations, this.config).get(operation) || 'operation';
+        const clientPropertyPath = surface?.clientPropertyPath || [this.getModuleName(tag)];
+        const moduleName = clientPropertyPath.join('.');
         const transportMethod = String(operation.method || '').toLowerCase();
         const variables = [];
         const callArguments = [];
@@ -160,11 +193,12 @@ export class TypeScriptUsagePlanner {
             tag,
             moduleName,
             methodName,
+            clientPropertyPath,
             operation,
             transportMethod,
             requestBodyMediaType: requestBodyInfo?.mediaType,
             variables,
-            callExpression: `client.${moduleName}.${methodName}(${callArguments.join(', ')})`,
+            callExpression: `client.${clientPropertyPath.join('.')}.${methodName}(${callArguments.join(', ')})`,
             headerExpectations,
         };
     }
@@ -236,11 +270,76 @@ export class TypeScriptUsagePlanner {
         return score;
     }
 }
-export function resolveTypeScriptMethodNames(tag, operations) {
+export function resolveTypeScriptMethodNames(tag, operations, config, resourcePathSegments) {
     if (!Array.isArray(operations) || operations.length === 0) {
         return new Map();
     }
-    return resolveScopedMethodNames(operations, (operation) => generateTypeScriptOperationName(operation.method, operation.path, operation, tag));
+    return resolveScopedMethodNames(operations, (operation) => generateTypeScriptOperationName(operation.method, operation.path, operation, tag, config, resourcePathSegments));
+}
+export function buildTypeScriptResourceTree(tag, operations, metadata, config) {
+    const rootSegment = resolveRootResourceSegment(tag, operations, metadata, config);
+    const root = {
+        propertyName: metadata.clientPropertyName,
+        className: metadata.className,
+        resourcePathSegments: [rootSegment],
+        operations: [],
+        children: [],
+    };
+    const nodesByPath = new Map([
+        [resourcePathKey(root.resourcePathSegments), root],
+    ]);
+    for (const operation of operations) {
+        const resourcePathSegments = resolveOperationResourcePath(tag, operation, config, rootSegment);
+        let node = root;
+        for (let index = 1; index < resourcePathSegments.length; index += 1) {
+            const childPath = resourcePathSegments.slice(0, index + 1);
+            const key = resourcePathKey(childPath);
+            let child = nodesByPath.get(key);
+            if (!child) {
+                child = {
+                    propertyName: TYPESCRIPT_CONFIG.namingConventions.propertyName(resourcePathSegments[index]),
+                    className: buildNestedResourceClassName(metadata.className, childPath.slice(1)),
+                    resourcePathSegments: childPath,
+                    operations: [],
+                    children: [],
+                };
+                nodesByPath.set(key, child);
+                node.children.push(child);
+            }
+            node = child;
+        }
+        node.operations.push(operation);
+    }
+    if (config?.sdkType === 'ai') {
+        dedupeResourceTreeOperations(root, tag, config);
+    }
+    return root;
+}
+export function resolveTypeScriptOperationSurfaces(tag, operations, metadata, config) {
+    if (!Array.isArray(operations) || operations.length === 0) {
+        return new Map();
+    }
+    if (config?.sdkType !== 'ai') {
+        const methodNames = resolveTypeScriptMethodNames(tag, operations, config);
+        return new Map(operations.map((operation) => [operation, {
+                clientPropertyPath: [metadata.clientPropertyName],
+                methodName: methodNames.get(operation) || 'operation',
+                resourcePathSegments: [metadata.clientPropertyName],
+            }]));
+    }
+    const root = buildTypeScriptResourceTree(tag, operations, metadata, config);
+    const surfaces = new Map();
+    visitResourceNodes(root, [metadata.clientPropertyName], (node, clientPropertyPath) => {
+        const methodNames = resolveTypeScriptMethodNames(tag, node.operations, config, node.resourcePathSegments);
+        for (const operation of node.operations) {
+            surfaces.set(operation, {
+                clientPropertyPath,
+                methodName: methodNames.get(operation) || 'operation',
+                resourcePathSegments: node.resourcePathSegments,
+            });
+        }
+    });
+    return surfaces;
 }
 export function renderTypeScriptUsageSnippet(plan, mode, options = {}) {
     const setupLines = plan.variables.map((variable) => `const ${variable.name} = ${variable.initializerByMode[mode]};`);
@@ -266,7 +365,11 @@ export function resolveTypeScriptExpectedRequestPath(path, apiPrefix) {
     }
     return `${normalizedPrefix}${normalizedPath}`;
 }
-function generateTypeScriptOperationName(method, path, operation, tag) {
+function generateTypeScriptOperationName(method, path, operation, tag, config, resourcePathSegments) {
+    const resourceActionName = generateResourceActionName(method, path, tag, config, resourcePathSegments);
+    if (resourceActionName) {
+        return resourceActionName;
+    }
     if (operation.operationId) {
         const normalized = normalizeOperationId(operation.operationId);
         return TYPESCRIPT_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
@@ -285,6 +388,328 @@ function generateTypeScriptOperationName(method, path, operation, tag) {
         query: 'query',
     };
     return `${actionMap[method] || method}${TYPESCRIPT_CONFIG.namingConventions.modelName(resource)}`;
+}
+function generateResourceActionName(method, path, tag, config, resourcePathSegments) {
+    if (config?.sdkType !== 'ai') {
+        return '';
+    }
+    const normalizedMethod = String(method || '').toLowerCase();
+    const relativeSegments = getRelativePathSegments(path, config?.apiPrefix);
+    const resourceIndex = resourcePathSegments?.length
+        ? findResourcePathEndIndex(relativeSegments, resourcePathSegments)
+        : findResourceSegmentIndex(relativeSegments, stripGenericTagSuffix(toIdentifierParts(tag)));
+    if (resourceIndex < 0) {
+        return '';
+    }
+    const suffix = relativeSegments.slice(resourceIndex + 1);
+    const suffixSegments = suffix.filter((segment) => !isPathParameterSegment(segment));
+    const hasCurrentResourcePathParams = suffix.some(isPathParameterSegment);
+    if (suffixSegments.length === 1 && isActionSegment(suffixSegments[0])) {
+        return TYPESCRIPT_CONFIG.namingConventions.methodName(normalizeStaticSegment(suffixSegments[0]));
+    }
+    const overriddenMethodName = resolveOpenAIResourceMethodOverride(resourcePathSegments || [], normalizedMethod, suffixSegments);
+    if (overriddenMethodName) {
+        return overriddenMethodName;
+    }
+    if (normalizedMethod === 'get'
+        && suffixSegments.length === 1
+        && resourcePathSegments?.length
+        && isTerminalCollectionAction(resourcePathSegments, suffixSegments[0])) {
+        return TYPESCRIPT_CONFIG.namingConventions.methodName(`list${TYPESCRIPT_CONFIG.namingConventions.modelName(normalizeStaticSegment(suffixSegments[0]))}`);
+    }
+    if (normalizedMethod === 'get' && suffixSegments.length === 0) {
+        return hasCurrentResourcePathParams ? 'retrieve' : 'list';
+    }
+    if (normalizedMethod === 'post' && suffixSegments.length === 0) {
+        return hasCurrentResourcePathParams ? 'update' : 'create';
+    }
+    if ((normalizedMethod === 'put' || normalizedMethod === 'patch') && suffixSegments.length === 0) {
+        return 'update';
+    }
+    if (normalizedMethod === 'delete' && suffixSegments.length === 0) {
+        return 'delete';
+    }
+    if (suffixSegments.length > 0) {
+        const action = actionNameForNestedResource(normalizedMethod, suffixSegments, hasCurrentResourcePathParams);
+        const suffixName = renderNestedSuffixName(suffixSegments, action);
+        return TYPESCRIPT_CONFIG.namingConventions.methodName(`${action}${suffixName}`);
+    }
+    return '';
+}
+function actionNameForNestedResource(method, suffixSegments, hasPathParams) {
+    if (method === 'get') {
+        return hasPathParams ? 'retrieve' : 'list';
+    }
+    if (method === 'post') {
+        if (suffixSegments.length === 1 && isActionSegment(suffixSegments[0])) {
+            return '';
+        }
+        return 'create';
+    }
+    if (method === 'put' || method === 'patch') {
+        return 'update';
+    }
+    if (method === 'delete') {
+        return 'delete';
+    }
+    return TYPESCRIPT_CONFIG.namingConventions.methodName(method);
+}
+function renderNestedSuffixName(suffixSegments, action) {
+    return suffixSegments.map((segment, index) => {
+        const normalizedSegment = normalizeStaticSegment(segment);
+        const shouldSingularize = action === 'create' && index === suffixSegments.length - 1;
+        const displaySegment = shouldSingularize ? canonicalResourcePart(normalizedSegment) : normalizedSegment;
+        return TYPESCRIPT_CONFIG.namingConventions.modelName(displaySegment);
+    }).join('');
+}
+function isActionSegment(segment) {
+    return OPENAI_RESOURCE_ACTION_SEGMENTS.has(normalizeStaticSegment(segment));
+}
+function resolveOpenAIResourceMethodOverride(resourcePathSegments, method, suffixSegments) {
+    if (suffixSegments.length > 0 || resourcePathSegments.length === 0) {
+        return '';
+    }
+    const override = OPENAI_RESOURCE_METHOD_OVERRIDES.find((rule) => (rule.method === method && resourcePathMatches(rule.resourcePath, resourcePathSegments)));
+    return override?.methodName || '';
+}
+function isTerminalCollectionAction(resourcePathSegments, segment) {
+    const normalizedSegment = normalizeStaticSegment(segment);
+    return OPENAI_TERMINAL_COLLECTION_ACTIONS.some((rule) => (canonicalResourcePart(rule.segment) === canonicalResourcePart(normalizedSegment)
+        && resourcePathMatches(rule.parentResourcePath, resourcePathSegments)));
+}
+function isTerminalResourceAction(resourceSegments) {
+    if (resourceSegments.length <= 1) {
+        return false;
+    }
+    const terminalSegment = resourceSegments[resourceSegments.length - 1];
+    if (isActionSegment(terminalSegment)) {
+        return true;
+    }
+    return isTerminalCollectionAction(resourceSegments.slice(0, -1), terminalSegment);
+}
+function resolveRootResourceSegment(tag, operations, metadata, config) {
+    for (const operation of operations) {
+        const resourcePath = resolveOperationResourcePath(tag, operation, config, metadata.clientPropertyName);
+        if (resourcePath.length > 0) {
+            return resourcePath[0];
+        }
+    }
+    return normalizeStaticSegment(metadata.clientPropertyName) || metadata.clientPropertyName;
+}
+function dedupeResourceTreeOperations(node, tag, config) {
+    node.operations = selectCanonicalResourceOperations(node.operations, tag, config, node.resourcePathSegments);
+    for (const child of node.children) {
+        dedupeResourceTreeOperations(child, tag, config);
+    }
+}
+function selectCanonicalResourceOperations(operations, tag, config, resourcePathSegments) {
+    if (operations.length <= 1) {
+        return operations;
+    }
+    const selectedByMethodName = new Map();
+    operations.forEach((operation, index) => {
+        const methodName = generateTypeScriptOperationName(operation.method, operation.path, operation, tag, config, resourcePathSegments);
+        const score = scoreOperationPathForConfiguredPrefix(operation.path, config.apiPrefix);
+        const existing = selectedByMethodName.get(methodName);
+        if (!existing || score > existing.score || (score === existing.score && index < existing.index)) {
+            selectedByMethodName.set(methodName, { operation, score, index });
+        }
+    });
+    return Array.from(selectedByMethodName.values())
+        .sort((left, right) => left.index - right.index)
+        .map((entry) => entry.operation);
+}
+function resolveOperationResourcePath(tag, operation, config, fallbackRootSegment) {
+    const relativeSegments = getRelativePathSegments(operation.path, config?.apiPrefix);
+    const tagParts = stripGenericTagSuffix(toIdentifierParts(tag));
+    let resourceIndex = findResourceSegmentIndex(relativeSegments, tagParts);
+    if (resourceIndex < 0) {
+        resourceIndex = relativeSegments.findIndex((segment) => !isPathParameterSegment(segment));
+    }
+    if (resourceIndex < 0) {
+        return [fallbackRootSegment];
+    }
+    const resourceSegments = relativeSegments
+        .slice(resourceIndex)
+        .filter((segment) => !isPathParameterSegment(segment))
+        .map(normalizeStaticSegment)
+        .filter(Boolean);
+    if (isTerminalResourceAction(resourceSegments)) {
+        resourceSegments.pop();
+    }
+    return resourceSegments.length > 0 ? resourceSegments : [fallbackRootSegment];
+}
+function resourcePathKey(segments) {
+    return segments.map(canonicalResourcePart).join('/');
+}
+function buildNestedResourceClassName(rootClassName, childSegments) {
+    const rootBase = rootClassName.replace(/Api$/, '');
+    const childName = childSegments
+        .map((segment) => TYPESCRIPT_CONFIG.namingConventions.modelName(segment))
+        .join('');
+    return `${rootBase}${childName}Api`;
+}
+function visitResourceNodes(node, clientPropertyPath, visitor) {
+    visitor(node, clientPropertyPath);
+    for (const child of node.children) {
+        visitResourceNodes(child, [...clientPropertyPath, child.propertyName], visitor);
+    }
+}
+function getRelativePathSegments(path, apiPrefix) {
+    const pathSegments = toRawPathSegments(path);
+    const prefixSegments = toRawPathSegments(apiPrefix || '');
+    if (prefixSegments.length > 0
+        && startsWithSegments(pathSegments.map(normalizeStaticSegment), prefixSegments.map(normalizeStaticSegment))) {
+        return pathSegments.slice(prefixSegments.length);
+    }
+    return pathSegments;
+}
+function scoreOperationPathForConfiguredPrefix(path, apiPrefix) {
+    const pathSegments = toRawPathSegments(path).map(normalizeStaticSegment);
+    const primaryPrefix = toRawPathSegments(apiPrefix || '').map(normalizeStaticSegment);
+    const prefixes = resolvePrefixCandidates(primaryPrefix);
+    for (let index = 0; index < prefixes.length; index += 1) {
+        if (startsWithSegments(pathSegments, prefixes[index])) {
+            return prefixes.length - index;
+        }
+    }
+    return 0;
+}
+function resolvePrefixCandidates(primaryPrefix) {
+    if (primaryPrefix.length === 0) {
+        return [];
+    }
+    const candidates = [primaryPrefix];
+    const versionIndex = primaryPrefix.findIndex((segment) => /^v\d+$/.test(segment));
+    if (versionIndex >= 0) {
+        const alias = ['v1', ...primaryPrefix.slice(versionIndex + 1)];
+        if (!candidates.some((candidate) => sameStringSegments(candidate, alias))) {
+            candidates.push(alias);
+        }
+    }
+    return candidates;
+}
+function findResourceSegmentIndex(pathSegments, tagParts) {
+    if (pathSegments.length === 0 || tagParts.length === 0) {
+        return -1;
+    }
+    const normalizedPathSegments = pathSegments.map(normalizeStaticSegment);
+    for (let length = Math.min(tagParts.length, normalizedPathSegments.length); length > 0; length -= 1) {
+        for (let index = 0; index <= normalizedPathSegments.length - length; index += 1) {
+            const window = normalizedPathSegments.slice(index, index + length);
+            if (sameCanonicalParts(window, tagParts.slice(tagParts.length - length))) {
+                return index + length - 1;
+            }
+        }
+    }
+    return -1;
+}
+function findResourcePathEndIndex(pathSegments, resourcePathSegments) {
+    if (pathSegments.length === 0 || resourcePathSegments.length === 0) {
+        return -1;
+    }
+    let resourceIndex = 0;
+    for (let pathIndex = 0; pathIndex < pathSegments.length; pathIndex += 1) {
+        const segment = pathSegments[pathIndex];
+        if (isPathParameterSegment(segment)) {
+            continue;
+        }
+        if (canonicalResourcePart(normalizeStaticSegment(segment)) !== canonicalResourcePart(resourcePathSegments[resourceIndex])) {
+            continue;
+        }
+        resourceIndex += 1;
+        if (resourceIndex === resourcePathSegments.length) {
+            return pathIndex;
+        }
+    }
+    return -1;
+}
+function sameCanonicalParts(left, right) {
+    if (left.length !== right.length) {
+        return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+        if (canonicalResourcePart(left[index]) !== canonicalResourcePart(right[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+function resourcePathMatches(rulePath, resourcePathSegments) {
+    if (rulePath.length !== resourcePathSegments.length) {
+        return false;
+    }
+    for (let index = 0; index < rulePath.length; index += 1) {
+        if (canonicalResourcePart(rulePath[index]) !== canonicalResourcePart(resourcePathSegments[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+function startsWithSegments(pathSegments, prefixSegments) {
+    if (pathSegments.length < prefixSegments.length) {
+        return false;
+    }
+    for (let index = 0; index < prefixSegments.length; index += 1) {
+        if (pathSegments[index] !== prefixSegments[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+function sameStringSegments(left, right) {
+    if (left.length !== right.length) {
+        return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+function stripGenericTagSuffix(parts) {
+    const removable = new Set(['management', 'controller', 'module', 'service', 'api']);
+    const next = [...parts];
+    while (next.length > 1 && removable.has(next[next.length - 1])) {
+        next.pop();
+    }
+    return next;
+}
+function toRawPathSegments(value) {
+    return String(value || '')
+        .split('/')
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+}
+function normalizeStaticSegment(segment) {
+    if (isPathParameterSegment(segment)) {
+        return segment;
+    }
+    return toIdentifierParts(segment).join('_');
+}
+function isPathParameterSegment(segment) {
+    return segment.startsWith('{') && segment.endsWith('}');
+}
+function toIdentifierParts(value) {
+    return String(value || '')
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '')
+        .toLowerCase()
+        .split('_')
+        .filter(Boolean);
+}
+function canonicalResourcePart(value) {
+    const input = String(value || '').toLowerCase();
+    if (input.endsWith('ies') && input.length > 3) {
+        return `${input.slice(0, -3)}y`;
+    }
+    if (input.length > 3 && input.endsWith('s') && !input.endsWith('ss')) {
+        return input.slice(0, -1);
+    }
+    return input;
 }
 function extractPathParams(path) {
     const matches = path.match(/\{([^}]+)\}/g) || [];
@@ -440,7 +865,7 @@ function resolveSchema(ctx, schema) {
         return schema;
     }
     if (schema.$ref) {
-        const refName = String(schema.$ref).split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         return ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);

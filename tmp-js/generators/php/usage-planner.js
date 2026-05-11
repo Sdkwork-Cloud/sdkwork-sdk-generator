@@ -1,13 +1,15 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { PHP_CONFIG, getPhpType } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
 export class PhpUsagePlanner {
-    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES) {
+    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES, config) {
         this.ctx = ctx;
-        this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+        this.config = config;
+        this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
         this.preferredModules = preferredModules;
         this.knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => PHP_CONFIG.namingConventions.modelName(schemaName)));
     }
@@ -29,7 +31,7 @@ export class PhpUsagePlanner {
     }
     buildPlan(tag, operation) {
         const operations = this.ctx.apiGroups[tag]?.operations || [];
-        const methodName = resolvePhpMethodNames(tag, operations).get(operation) || 'operation';
+        const methodName = resolvePhpMethodNames(tag, operations, this.config).get(operation) || 'operation';
         const moduleProperty = this.getModuleProperty(tag);
         const variables = [];
         const callArguments = [];
@@ -320,9 +322,13 @@ export class PhpUsagePlanner {
         return this.knownModels.has(typeName);
     }
 }
-export function resolvePhpMethodNames(tag, operations) {
+export function resolvePhpMethodNames(tag, operations, config) {
     if (!Array.isArray(operations) || operations.length === 0) {
         return new Map();
+    }
+    const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, PHP_CONFIG, 'camel');
+    if (openAIStyleNames) {
+        return openAIStyleNames;
     }
     return resolveScopedMethodNames(operations, (operation) => generatePhpOperationName(operation.method, operation.path, operation, tag));
 }
@@ -737,7 +743,7 @@ function resolveSchema(ctx, schema) {
         return schema;
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         return ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);

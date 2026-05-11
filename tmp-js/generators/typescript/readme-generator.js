@@ -5,7 +5,7 @@ export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
         const pkgName = config.packageName || `@sdkwork/${config.sdkType}-sdk`;
-        const planner = new TypeScriptUsagePlanner(ctx);
+        const planner = new TypeScriptUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartModule = quickStartPlan?.moduleName || 'example';
         const quickStartMethod = quickStartPlan?.methodName || 'list';

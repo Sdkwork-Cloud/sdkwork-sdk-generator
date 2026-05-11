@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveModelSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, resolveModelSchema } from '../../framework/schema.js';
 import { PHP_CONFIG, getPhpNamespace, getPhpType } from './config.js';
 
 export class ModelGenerator {
@@ -118,7 +118,7 @@ ${exports}
     }
 
     if (schema.$ref) {
-      const refName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? 'self' : refName;
       return `is_array(${valueExpr}) ? ${refTarget}::fromArray(${valueExpr}) : null`;
     }
@@ -150,7 +150,7 @@ ${exports}
 
   private deserializeArrayItemExpression(schema: any, itemExpr: string, currentModelName: string): string {
     if (schema?.$ref) {
-      const refName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? 'self' : refName;
       return `is_array(${itemExpr}) ? ${refTarget}::fromArray(${itemExpr}) : ${itemExpr}`;
     }
@@ -182,7 +182,7 @@ ${exports}
     }
 
     if (schema.$ref) {
-      const refName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? 'self' : refName;
       return `${valueExpr} instanceof ${refTarget} ? ${valueExpr}->toArray() : ${valueExpr}`;
     }
@@ -206,7 +206,7 @@ ${exports}
 
   private serializeArrayItemExpression(schema: any, itemExpr: string, currentModelName: string): string {
     if (schema?.$ref) {
-      const refName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? 'self' : refName;
       return `${itemExpr} instanceof ${refTarget} ? ${itemExpr}->toArray() : ${itemExpr}`;
     }
@@ -235,7 +235,7 @@ ${exports}
     }
 
     if (schema.$ref) {
-      refs.add(PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model'));
+      refs.add(PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model'));
       return refs;
     }
 

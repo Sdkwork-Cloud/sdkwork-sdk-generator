@@ -4,11 +4,12 @@ import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framewor
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import {
   extractOpenApiParameterContentSchema,
   requiresExplicitOpenApiQuerySerialization,
@@ -138,12 +139,18 @@ interface QueryParameterBinding extends NamedParameterBinding {
   contentType?: string;
 }
 
+interface HeaderParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  contentType?: string;
+}
+
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const files: GeneratedFile[] = [];
     const namespace = getCSharpNamespace(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const knownModels = new Set<string>(
       Object.keys(ctx.schemas).map((schemaName) => CSHARP_CONFIG.namingConventions.modelName(schemaName))
     );
@@ -168,13 +175,16 @@ export class ApiGenerator {
     config: GeneratorConfig,
     knownModels: Set<string>
   ): GeneratedFile {
+    operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
     const className = `${CSHARP_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-    const methodNames = resolveScopedMethodNames(operations, (op) =>
-      this.generateOperationId(op.method, op.path, op, tag)
-    );
+    const methodNames = resolveOpenAIStyleMethodNames(tag, operations, config, CSHARP_CONFIG, 'pascal')
+      || resolveScopedMethodNames(operations, (op) =>
+        this.generateOperationId(op.method, op.path, op, tag)
+      );
     const methods = operations
       .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'Operation', knownModels, namespace))
       .join('\n\n');
+    const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
     const needsRequestHeaderHelpers = operations.some((op) => {
       const allParameters = op.allParameters || op.parameters || [];
       return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
@@ -204,6 +214,7 @@ namespace ${namespace}.Api
         }
 
 ${methods}
+${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     }
@@ -227,6 +238,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
     const headerParams = allParameters.filter((param: any) => param?.in === 'header');
     const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const pathOpenApiParams = allParameters.filter((param: any) => param?.in === 'path');
     const hasQuery = queryParams.length > 0;
     const hasRawQueryString = queryStringParams.length > 0;
     const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -244,7 +256,9 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const requestType = requestBodySchema
       ? this.qualifyKnownModelTypes(getCSharpType(requestBodySchema, CSHARP_CONFIG), knownModels, namespace)
       : 'object';
-    const responseSchema = this.extractResponseSchema(op);
+    const eventStreamInfo = extractEventStreamResponseInfo(op);
+    const isEventStreamResponse = Boolean(eventStreamInfo);
+    const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const responseType = responseSchema
       ? this.qualifyKnownModelTypes(getCSharpType(responseSchema, CSHARP_CONFIG), knownModels, namespace)
       : this.inferFallbackResponseType(op);
@@ -259,10 +273,17 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         hasHeaders ? 'requestHeaders' : '',
       ]
     );
-    const pathParams = rawPathParams.map((rawName) => ({
-      rawName,
-      safeName: pathParamNames.get(rawName) || rawName,
-    }));
+    const pathParams = rawPathParams.map((rawName) => {
+      const parameter = pathOpenApiParams.find((candidate: any) => candidate?.name === rawName);
+      const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+      return {
+        rawName,
+        safeName: pathParamNames.get(rawName) || rawName,
+        type: parameter?.schema ? this.qualifyKnownModelTypes(getCSharpType(parameter.schema, CSHARP_CONFIG), knownModels, namespace) : 'string',
+        style: serialization.style,
+        explode: serialization.explode,
+      };
+    });
     const parameterReservedNames = [
       ...pathParams.map((param) => param.safeName),
       hasBody ? 'body' : '',
@@ -273,8 +294,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryBindings = hasExplicitQuerySerialization
       ? this.createQueryParameterBindings(queryParams, knownModels, namespace, parameterReservedNames)
       : [];
-    const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, namespace, parameterReservedNames);
-    const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, namespace, [
+    const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, namespace, parameterReservedNames);
+    const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, namespace, [
       ...parameterReservedNames,
       ...queryBindings.map((binding) => binding.safeName),
       ...headerBindings.map((binding) => binding.safeName),
@@ -286,7 +307,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 
     const params: string[] = [];
     if (pathParams.length) {
-      params.push(...pathParams.map((param) => `string ${param.safeName}`));
+      params.push(...pathParams.map((param) => `${param.type} ${param.safeName}`));
     }
     if (hasBody && requestBodyRequired) {
       if (requestBodyRequired) {
@@ -311,8 +332,11 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
-      const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, CSHARP_RESERVED_WORDS);
-      return `{${safeName}}`;
+      const param = pathParams.find((candidate) => candidate.rawName === paramName);
+      const safeName = param?.safeName || pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, CSHARP_RESERVED_WORDS);
+      const style = param?.style || 'simple';
+      const explode = param?.explode ?? false;
+      return `{SerializePathParameter(${safeName}, new PathParameterSpec(${this.formatCSharpString(paramName)}, ${this.formatCSharpString(style)}, ${explode ? 'true' : 'false'}))}`;
     });
     const pathExpression = pathParams.length > 0 ? `$\"${pathTemplate}\"` : `\"${pathTemplate}\"`;
     const pathCall = `ApiPaths.${CSHARP_CONFIG.namingConventions.modelName(config.sdkType)}Path(${pathExpression})`;
@@ -451,8 +475,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
       : call;
     const requestHeaderBlock = hasHeaders
       ? `            var requestHeaders = BuildRequestHeaders(
-${this.renderNamedParameterDictionary(headerBindings, 16)},
-${this.renderNamedParameterDictionary(cookieBindings, 16)}
+${this.renderHeaderParameterDictionary(headerBindings, 16)},
+${this.renderHeaderParameterDictionary(cookieBindings, 16)}
             );
 `
       : '';
@@ -463,6 +487,14 @@ ${this.renderQueryParameterSpecs(queryBindings, 16)}
             });
 `
       : '';
+
+    if (isEventStreamResponse) {
+      const streamCall = `_client.StreamAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
+      return `${docComment}        public IAsyncEnumerable<${responseType}> ${methodName}Async(${params.join(', ')})
+        {
+${queryBlock}${requestHeaderBlock}            return ${streamCall};
+        }`;
+    }
 
     if (responseType === 'void') {
       return `${docComment}        public async Task ${methodName}Async(${params.join(', ')})
@@ -520,6 +552,23 @@ ${queryBlock}${requestHeaderBlock}            return ${effectiveCall};
     });
   }
 
+  private createHeaderParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    namespace: string,
+    reservedNames: Iterable<string>
+  ): HeaderParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, knownModels, namespace, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
   private getNamedParameterType(parameter: any, knownModels: Set<string>, namespace: string): string {
     const contentSchema = extractOpenApiParameterContentSchema(parameter);
     if (contentSchema) {
@@ -545,6 +594,22 @@ ${queryBlock}${requestHeaderBlock}            return ${effectiveCall};
       return `${indent}    [${this.formatCSharpString(String(binding.parameter?.name || binding.safeName))}] = ${binding.safeName},`;
     });
     return [`${indent}new Dictionary<string, object?>`, `${indent}{`, ...lines, `${indent}}`].join('\n');
+  }
+
+  private renderHeaderParameterDictionary(bindings: HeaderParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}new Dictionary<string, HeaderParameterSpec>()`;
+    }
+    const lines = bindings.map((binding) => {
+      return `${indent}    [${this.formatCSharpString(String(binding.parameter?.name || binding.safeName))}] = new HeaderParameterSpec(${[
+        binding.safeName,
+        this.formatCSharpString(binding.style),
+        binding.explode ? 'true' : 'false',
+        binding.contentType ? this.formatCSharpString(binding.contentType) : 'null',
+      ].join(', ')}),`;
+    });
+    return [`${indent}new Dictionary<string, HeaderParameterSpec>`, `${indent}{`, ...lines, `${indent}}`].join('\n');
   }
 
   private formatCSharpString(value: string): string {
@@ -694,10 +759,114 @@ ${queryBlock}${requestHeaderBlock}            return ${effectiveCall};
         }`;
   }
 
+  private generatePathSerializationHelpers(): string {
+    return `        private sealed record PathParameterSpec(string Name, string Style, bool Explode);
+
+        private static string SerializePathParameter(object? value, PathParameterSpec spec)
+        {
+            if (value is null)
+            {
+                return string.Empty;
+            }
+            var style = string.IsNullOrWhiteSpace(spec.Style) ? "simple" : spec.Style;
+            if (value is System.Collections.IDictionary dictionary)
+            {
+                return SerializePathObject(spec.Name, dictionary, style, spec.Explode);
+            }
+            if (value is System.Collections.IEnumerable enumerable && value is not string)
+            {
+                return SerializePathArray(spec.Name, enumerable, style, spec.Explode);
+            }
+            return PathPrimitivePrefix(spec.Name, style) + Uri.EscapeDataString(value.ToString() ?? string.Empty);
+        }
+
+        private static string SerializePathArray(string name, System.Collections.IEnumerable values, string style, bool explode)
+        {
+            var serialized = new List<string>();
+            foreach (var item in values)
+            {
+                if (item is not null)
+                {
+                    serialized.Add(Uri.EscapeDataString(item.ToString() ?? string.Empty));
+                }
+            }
+            if (serialized.Count == 0)
+            {
+                return PathPrefix(name, style);
+            }
+            if (style == "matrix")
+            {
+                if (explode)
+                {
+                    var parts = new List<string>();
+                    foreach (var item in serialized)
+                    {
+                        parts.Add(";" + name + "=" + item);
+                    }
+                    return string.Join(string.Empty, parts);
+                }
+                return ";" + name + "=" + string.Join(",", serialized);
+            }
+            var separator = explode ? "." : ",";
+            return PathPrefix(name, style) + string.Join(separator, serialized);
+        }
+
+        private static string SerializePathObject(string name, System.Collections.IDictionary values, string style, bool explode)
+        {
+            var entries = new List<string>();
+            var exploded = new List<string>();
+            foreach (System.Collections.DictionaryEntry item in values)
+            {
+                if (item.Value is null)
+                {
+                    continue;
+                }
+                var escapedKey = Uri.EscapeDataString(item.Key.ToString() ?? string.Empty);
+                var escapedValue = Uri.EscapeDataString(item.Value.ToString() ?? string.Empty);
+                if (explode)
+                {
+                    exploded.Add(style == "matrix" ? ";" + escapedKey + "=" + escapedValue : escapedKey + "=" + escapedValue);
+                }
+                else
+                {
+                    entries.Add(escapedKey);
+                    entries.Add(escapedValue);
+                }
+            }
+            if (style == "matrix")
+            {
+                return explode ? string.Join(string.Empty, exploded) : ";" + name + "=" + string.Join(",", entries);
+            }
+            if (explode)
+            {
+                var separator = style == "label" ? "." : ",";
+                return PathPrefix(name, style) + string.Join(separator, exploded);
+            }
+            return PathPrefix(name, style) + string.Join(",", entries);
+        }
+
+        private static string PathPrefix(string name, string style)
+        {
+            return style switch
+            {
+                "label" => ".",
+                "matrix" => ";" + name,
+                _ => string.Empty,
+            };
+        }
+
+        private static string PathPrimitivePrefix(string name, string style)
+        {
+            return style == "matrix" ? ";" + name + "=" : PathPrefix(name, style);
+        }`;
+  }
+
   private generateRequestHeaderHelpers(): string {
-    return `        private static Dictionary<string, string>? BuildRequestHeaders(
-            Dictionary<string, object?> headers,
-            Dictionary<string, object?> cookies)
+    return `        private sealed record HeaderParameterSpec(object? Value, string Style, bool Explode, string? ContentType);
+
+        private static Dictionary<string, string>? BuildRequestHeaders(
+            Dictionary<string, HeaderParameterSpec> headers,
+            Dictionary<string, HeaderParameterSpec> cookies)
         {
             var requestHeaders = new Dictionary<string, string>();
             foreach (var item in headers)
@@ -720,7 +889,7 @@ ${queryBlock}${requestHeaderBlock}            return ${effectiveCall};
             return requestHeaders.Count == 0 ? null : requestHeaders;
         }
 
-        private static string BuildCookieHeader(Dictionary<string, object?> cookies)
+        private static string BuildCookieHeader(Dictionary<string, HeaderParameterSpec> cookies)
         {
             var pairs = new List<string>();
             foreach (var item in cookies)
@@ -734,21 +903,46 @@ ${queryBlock}${requestHeaderBlock}            return ${effectiveCall};
             return string.Join("; ", pairs);
         }
 
-        private static string? SerializeParameterValue(object? value)
+        private static string? SerializeParameterValue(HeaderParameterSpec? parameter)
         {
+            var value = parameter?.Value;
             if (value is null)
             {
                 return null;
+            }
+            if (!string.IsNullOrWhiteSpace(parameter!.ContentType))
+            {
+                return System.Text.Json.JsonSerializer.Serialize(value);
             }
             if (value is System.Collections.IEnumerable enumerable && value is not string)
             {
                 var values = new List<string>();
                 foreach (var item in enumerable)
                 {
-                    var serialized = SerializeParameterValue(item);
-                    if (serialized is not null)
+                    if (item is not null)
                     {
-                        values.Add(serialized);
+                        values.Add(item.ToString() ?? string.Empty);
+                    }
+                }
+                return string.Join(",", values);
+            }
+            if (value is System.Collections.IDictionary dictionary)
+            {
+                var values = new List<string>();
+                foreach (System.Collections.DictionaryEntry item in dictionary)
+                {
+                    if (item.Value is null)
+                    {
+                        continue;
+                    }
+                    if (parameter.Explode)
+                    {
+                        values.Add((item.Key.ToString() ?? string.Empty) + "=" + (item.Value.ToString() ?? string.Empty));
+                    }
+                    else
+                    {
+                        values.Add(item.Key.ToString() ?? string.Empty);
+                        values.Add(item.Value.ToString() ?? string.Empty);
                     }
                 }
                 return string.Join(",", values);

@@ -8,7 +8,7 @@ export class ReadmeGenerator {
         const gemName = getRubyGemName(config);
         const tags = Object.keys(ctx.apiGroups);
         const modulePrefix = getRubyModuleSegments(config).join('::');
-        const planner = new RubyUsagePlanner(ctx, modulePrefix);
+        const planner = new RubyUsagePlanner(ctx, modulePrefix, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartSnippet = quickStartPlan
             ? renderRubyUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })

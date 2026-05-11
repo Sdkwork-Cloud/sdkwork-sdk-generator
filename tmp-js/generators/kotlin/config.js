@@ -1,5 +1,5 @@
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const KOTLIN_CONFIG = {
     language: 'kotlin',
     displayName: 'Kotlin',
@@ -126,7 +126,7 @@ export function getKotlinType(schema, config) {
         return 'Any';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName);
     }
     const composed = pickComposedSchema(schema);

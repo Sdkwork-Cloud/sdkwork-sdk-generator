@@ -1,7 +1,9 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { GO_CONFIG, getGoType } from './config.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 const GO_RESERVED_WORDS = new Set([
@@ -35,7 +37,7 @@ export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => GO_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
             const group = ctx.apiGroups[tag];
@@ -51,11 +53,14 @@ export class ApiGenerator {
         return config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
     }
     generateApiFile(tag, resolvedTagName, operations, config, knownModels) {
+        operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
         const structName = `${GO_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
         const fileName = GO_CONFIG.namingConventions.fileName(resolvedTagName);
-        const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
+        const methodNames = resolveOpenAIStyleMethodNames(tag, operations, config, GO_CONFIG, 'pascal')
+            || resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const moduleName = this.getModuleName(config);
-        const needsFmt = operations.some((op) => this.extractPathParams(op.path).length > 0);
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
+        const needsFmt = needsPathSerializationHelpers;
         const needsRequestHeaderHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -72,10 +77,10 @@ export class ApiGenerator {
             return generated.content;
         })
             .join('\n\n');
-        const encodingJsonImport = needsQuerySerializationHelpers ? '    "encoding/json"\n' : '';
+        const encodingJsonImport = (needsQuerySerializationHelpers || needsRequestHeaderHelpers) ? '    "encoding/json"\n' : '';
         const fmtImport = (needsFmt || needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "fmt"\n' : '';
-        const netUrlImport = (needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "net/url"\n' : '';
-        const stringsImport = (needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "strings"\n' : '';
+        const netUrlImport = (needsPathSerializationHelpers || needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "net/url"\n' : '';
+        const stringsImport = (needsPathSerializationHelpers || needsRequestHeaderHelpers || needsQuerySerializationHelpers) ? '    "strings"\n' : '';
         const typesImport = referencedModels.size > 0 ? `    sdktypes "${moduleName}/types"\n` : '';
         return {
             path: `api/${fileName}.go`,
@@ -95,8 +100,10 @@ func New${structName}(client *sdkhttp.Client) *${structName} {
 
 ${methods}
 
+${needsPathSerializationHelpers ? this.generatePathSerializationHelpers() : ''}
 ${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
 ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
+${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsRequestHeaderHelpers ? this.generateCollectionConversionHelpers() : ''}
 `),
             language: 'go',
             description: `${tag} API module`,
@@ -109,6 +116,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const pathOpenApiParams = allParameters.filter((param) => param?.in === 'path');
         const hasQuery = queryParams.length > 0;
         const hasRawQueryString = queryStringParams.length > 0;
         const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -127,7 +135,9 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             ? getGoType(requestBodySchema, GO_CONFIG)
             : 'interface{}';
         const requestType = this.qualifyGoType(rawRequestType, knownModels);
-        const responseSchema = this.extractResponseSchema(op);
+        const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const isEventStreamResponse = Boolean(eventStreamInfo);
+        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const rawResponseType = responseSchema
             ? getGoType(responseSchema, GO_CONFIG)
             : this.inferFallbackResponseType(op);
@@ -146,10 +156,17 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             hasHeaders ? 'headers' : '',
             hasHeaders ? 'requestHeaders' : '',
         ]);
-        const pathParams = rawPathParams.map((rawName) => ({
-            rawName,
-            safeName: pathParamNames.get(rawName) || rawName,
-        }));
+        const pathParams = rawPathParams.map((rawName) => {
+            const parameter = pathOpenApiParams.find((candidate) => candidate?.name === rawName);
+            const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+            return {
+                rawName,
+                safeName: pathParamNames.get(rawName) || rawName,
+                type: parameter?.schema ? this.qualifyGoType(getGoType(parameter.schema, GO_CONFIG), knownModels) : 'string',
+                style: serialization.style,
+                explode: serialization.explode,
+            };
+        });
         const parameterReservedNames = [
             ...pathParams.map((param) => param.safeName),
             hasBody ? 'body' : '',
@@ -161,8 +178,8 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const queryBindings = hasExplicitQuerySerialization
             ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
             : [];
-        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+        const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
             ...parameterReservedNames,
             ...queryBindings.map((binding) => binding.safeName),
             ...headerBindings.map((binding) => binding.safeName),
@@ -173,7 +190,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = [];
         if (pathParams.length > 0) {
-            params.push(...pathParams.map((param) => `${param.safeName} string`));
+            params.push(...pathParams.map((param) => `${param.safeName} ${param.type}`));
         }
         if (hasBody && requestBodyRequired) {
             const bodyType = requestBodyRequired ? requestType : this.toOptionalGoType(requestType);
@@ -195,7 +212,9 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, '%s');
         const formattedPath = pathParams.length > 0
-            ? `fmt.Sprintf("${pathTemplate}", ${pathParams.map((param) => param.safeName).join(', ')})`
+            ? `fmt.Sprintf("${pathTemplate}", ${pathParams.map((param) => {
+                return `SerializePathParameter(${param.safeName}, PathParameterSpec{Name: ${this.formatGoString(param.rawName)}, Style: ${this.formatGoString(param.style)}, Explode: ${param.explode ? 'true' : 'false'}})`;
+            }).join(', ')})`
             : `"${pathTemplate}"`;
         const prefixedPath = `${GO_CONFIG.namingConventions.modelName(config.sdkType)}ApiPath(${formattedPath})`;
         const requestPath = hasRawQueryString
@@ -366,6 +385,15 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
     })
 `
             : '';
+        if (isEventStreamResponse) {
+            const streamCall = `sdkhttp.Stream[${responseType}](a.client, "${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'})`;
+            return {
+                content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) (*sdkhttp.SSEStream[${responseType}], error) {
+${queryBlock}${requestHeaderBlock}    return ${streamCall}
+}`,
+                referencedModels,
+            };
+        }
         return {
             content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) (${responseType}, error) {
 ${queryBlock}${requestHeaderBlock}    raw, err := ${call}
@@ -386,6 +414,17 @@ ${queryBlock}${requestHeaderBlock}    raw, err := ${call}
                 style: serialization.style,
                 explode: serialization.explode,
                 allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    createHeaderParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
                 contentType: serialization.contentType,
             };
         });
@@ -420,18 +459,29 @@ ${queryBlock}${requestHeaderBlock}    raw, err := ${call}
     renderNamedParameterMap(bindings, indentation) {
         const indent = ' '.repeat(indentation);
         if (bindings.length === 0) {
-            return `${indent}map[string]interface{}{}`;
+            return `${indent}map[string]ParameterSpec{}`;
         }
         const lines = bindings.map((binding) => {
             const valueExpression = binding.required ? binding.safeName : this.optionalHeaderValueExpression(binding.safeName);
-            return `${indent}map[string]interface{}{${this.formatGoString(String(binding.parameter?.name || binding.safeName))}: ${valueExpression},}`;
+            return `${indent}map[string]ParameterSpec{${this.formatGoString(String(binding.parameter?.name || binding.safeName))}: ${this.renderParameterSpec(binding, valueExpression)},}`;
         });
         return bindings.length === 1
             ? lines[0]
-            : [`${indent}map[string]interface{}{`, ...bindings.map((binding) => {
+            : [`${indent}map[string]ParameterSpec{`, ...bindings.map((binding) => {
                     const valueExpression = binding.required ? binding.safeName : this.optionalHeaderValueExpression(binding.safeName);
-                    return `${indent}    ${this.formatGoString(String(binding.parameter?.name || binding.safeName))}: ${valueExpression},`;
+                    return `${indent}    ${this.formatGoString(String(binding.parameter?.name || binding.safeName))}: ${this.renderParameterSpec(binding, valueExpression)},`;
                 }), `${indent}}`].join('\n');
+    }
+    renderParameterSpec(binding, valueExpression) {
+        const parts = [
+            `Value: ${valueExpression}`,
+            `Style: ${this.formatGoString(binding.style)}`,
+            `Explode: ${binding.explode ? 'true' : 'false'}`,
+        ];
+        if (binding.contentType) {
+            parts.push(`ContentType: ${this.formatGoString(binding.contentType)}`);
+        }
+        return `ParameterSpec{${parts.join(', ')}}`;
     }
     optionalHeaderValueExpression(identifier) {
         return `func() interface{} { if ${identifier} == nil { return nil }; return *${identifier} }()`;
@@ -583,7 +633,204 @@ func EncodeQueryValue(value string, allowReserved bool) string {
     return encoded
 }
 
-func stringSliceToInterface(values []string) []interface{} {
+`;
+    }
+    generatePathSerializationHelpers() {
+        return `type PathParameterSpec struct {
+    Name    string
+    Style   string
+    Explode bool
+}
+
+func SerializePathParameter(value interface{}, spec PathParameterSpec) string {
+    if value == nil {
+        return ""
+    }
+    style := spec.Style
+    if style == "" {
+        style = "simple"
+    }
+
+    switch typed := value.(type) {
+    case []string:
+        return SerializePathArray(spec.Name, stringSliceToInterface(typed), style, spec.Explode)
+    case []int:
+        return SerializePathArray(spec.Name, intSliceToInterface(typed), style, spec.Explode)
+    case []interface{}:
+        return SerializePathArray(spec.Name, typed, style, spec.Explode)
+    case map[string]string:
+        return SerializePathObject(spec.Name, stringMapToInterface(typed), style, spec.Explode)
+    case map[string]int:
+        return SerializePathObject(spec.Name, intMapToInterface(typed), style, spec.Explode)
+    case map[string]interface{}:
+        return SerializePathObject(spec.Name, typed, style, spec.Explode)
+    default:
+        return PathPrefix(spec.Name, style) + url.PathEscape(fmt.Sprint(value))
+    }
+}
+
+func SerializePathArray(name string, values []interface{}, style string, explode bool) string {
+    serialized := make([]string, 0, len(values))
+    for _, item := range values {
+        if item != nil {
+            serialized = append(serialized, url.PathEscape(fmt.Sprint(item)))
+        }
+    }
+    if len(serialized) == 0 {
+        return PathPrefix(name, style)
+    }
+    if style == "matrix" {
+        if explode {
+            parts := make([]string, 0, len(serialized))
+            for _, item := range serialized {
+                parts = append(parts, ";"+name+"="+item)
+            }
+            return strings.Join(parts, "")
+        }
+        return ";" + name + "=" + strings.Join(serialized, ",")
+    }
+    separator := ","
+    if explode {
+        separator = "."
+    }
+    return PathPrefix(name, style) + strings.Join(serialized, separator)
+}
+
+func SerializePathObject(name string, values map[string]interface{}, style string, explode bool) string {
+    entries := make([]string, 0, len(values)*2)
+    exploded := make([]string, 0, len(values))
+    for key, value := range values {
+        if value == nil {
+            continue
+        }
+        escapedKey := url.PathEscape(key)
+        escapedValue := url.PathEscape(fmt.Sprint(value))
+        if explode {
+            if style == "matrix" {
+                exploded = append(exploded, ";"+escapedKey+"="+escapedValue)
+            } else {
+                exploded = append(exploded, escapedKey+"="+escapedValue)
+            }
+        } else {
+            entries = append(entries, escapedKey, escapedValue)
+        }
+    }
+    if style == "matrix" {
+        if explode {
+            return strings.Join(exploded, "")
+        }
+        return ";" + name + "=" + strings.Join(entries, ",")
+    }
+    if explode {
+        separator := ","
+        if style == "label" {
+            separator = "."
+        }
+        return PathPrefix(name, style) + strings.Join(exploded, separator)
+    }
+    return PathPrefix(name, style) + strings.Join(entries, ",")
+}
+
+func PathPrefix(name string, style string) string {
+    if style == "label" {
+        return "."
+    }
+    if style == "matrix" {
+        return ";" + name
+    }
+    return ""
+}`;
+    }
+    generateRequestHeaderHelpers() {
+        return `type ParameterSpec struct {
+    Value       interface{}
+    Style       string
+    Explode     bool
+    ContentType string
+}
+
+func BuildRequestHeaders(headers map[string]ParameterSpec, cookies map[string]ParameterSpec) map[string]string {
+    requestHeaders := map[string]string{}
+    for name, parameter := range headers {
+        if serialized, ok := SerializeParameterValue(parameter); ok {
+            requestHeaders[name] = serialized
+        }
+    }
+
+    if cookieHeader := BuildCookieHeader(cookies); cookieHeader != "" {
+        if existing, ok := requestHeaders["Cookie"]; ok && existing != "" {
+            requestHeaders["Cookie"] = existing + "; " + cookieHeader
+        } else {
+            requestHeaders["Cookie"] = cookieHeader
+        }
+    }
+
+    if len(requestHeaders) == 0 {
+        return nil
+    }
+    return requestHeaders
+}
+
+func BuildCookieHeader(cookies map[string]ParameterSpec) string {
+    pairs := make([]string, 0, len(cookies))
+    for name, parameter := range cookies {
+        if serialized, ok := SerializeParameterValue(parameter); ok {
+            pairs = append(pairs, url.QueryEscape(name)+"="+url.QueryEscape(serialized))
+        }
+    }
+    return strings.Join(pairs, "; ")
+}
+
+func SerializeParameterValue(parameter ParameterSpec) (string, bool) {
+    value := parameter.Value
+    if value == nil {
+        return "", false
+    }
+    if parameter.ContentType != "" {
+        encoded, _ := json.Marshal(value)
+        return string(encoded), true
+    }
+    switch typed := value.(type) {
+    case string:
+        return typed, true
+    case fmt.Stringer:
+        return typed.String(), true
+    case []string:
+        return strings.Join(typed, ","), true
+    case []int:
+        values := make([]string, 0, len(typed))
+        for _, item := range typed {
+            values = append(values, fmt.Sprint(item))
+        }
+        return strings.Join(values, ","), true
+    case map[string]string:
+        return SerializeHeaderObject(stringMapToInterface(typed), parameter.Explode), true
+    case map[string]int:
+        return SerializeHeaderObject(intMapToInterface(typed), parameter.Explode), true
+    case map[string]interface{}:
+        return SerializeHeaderObject(typed, parameter.Explode), true
+    default:
+        return fmt.Sprint(value), true
+    }
+}
+
+func SerializeHeaderObject(values map[string]interface{}, explode bool) string {
+    serialized := make([]string, 0, len(values)*2)
+    for key, value := range values {
+        if value == nil {
+            continue
+        }
+        if explode {
+            serialized = append(serialized, key+"="+fmt.Sprint(value))
+        } else {
+            serialized = append(serialized, key, fmt.Sprint(value))
+        }
+    }
+    return strings.Join(serialized, ",")
+}`;
+    }
+    generateCollectionConversionHelpers() {
+        return `func stringSliceToInterface(values []string) []interface{} {
     result := make([]interface{}, 0, len(values))
     for _, value := range values {
         result = append(result, value)
@@ -613,61 +860,6 @@ func intMapToInterface(values map[string]int) map[string]interface{} {
         result[key] = value
     }
     return result
-}`;
-    }
-    generateRequestHeaderHelpers() {
-        return `func BuildRequestHeaders(headers map[string]interface{}, cookies map[string]interface{}) map[string]string {
-    requestHeaders := map[string]string{}
-    for name, value := range headers {
-        if serialized, ok := SerializeParameterValue(value); ok {
-            requestHeaders[name] = serialized
-        }
-    }
-
-    if cookieHeader := BuildCookieHeader(cookies); cookieHeader != "" {
-        if existing, ok := requestHeaders["Cookie"]; ok && existing != "" {
-            requestHeaders["Cookie"] = existing + "; " + cookieHeader
-        } else {
-            requestHeaders["Cookie"] = cookieHeader
-        }
-    }
-
-    if len(requestHeaders) == 0 {
-        return nil
-    }
-    return requestHeaders
-}
-
-func BuildCookieHeader(cookies map[string]interface{}) string {
-    pairs := make([]string, 0, len(cookies))
-    for name, value := range cookies {
-        if serialized, ok := SerializeParameterValue(value); ok {
-            pairs = append(pairs, url.QueryEscape(name)+"="+url.QueryEscape(serialized))
-        }
-    }
-    return strings.Join(pairs, "; ")
-}
-
-func SerializeParameterValue(value interface{}) (string, bool) {
-    if value == nil {
-        return "", false
-    }
-    switch typed := value.(type) {
-    case string:
-        return typed, true
-    case fmt.Stringer:
-        return typed.String(), true
-    case []string:
-        return strings.Join(typed, ","), true
-    case []int:
-        values := make([]string, 0, len(typed))
-        for _, item := range typed {
-            values = append(values, fmt.Sprint(item))
-        }
-        return strings.Join(values, ","), true
-    default:
-        return fmt.Sprint(value), true
-    }
 }`;
     }
     generateOperationId(method, path, op, tag) {

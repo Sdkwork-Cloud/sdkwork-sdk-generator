@@ -1,14 +1,16 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const packageRoot = getPythonPackageRoot(config);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => PYTHON_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
@@ -20,9 +22,11 @@ export class ApiGenerator {
         return files;
     }
     generateApiFile(tag, resolvedTagName, operations, config, packageRoot, knownModels) {
+        operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
         const className = `${PYTHON_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
         const fileName = PYTHON_CONFIG.namingConventions.fileName(resolvedTagName);
-        const scopedMethodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
+        const scopedMethodNames = resolveOpenAIStyleMethodNames(tag, operations, config, PYTHON_CONFIG, 'snake')
+            || resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const methodNames = new Map();
         for (const op of operations) {
             const scopedName = scopedMethodNames.get(op) || 'operation';
@@ -40,16 +44,21 @@ export class ApiGenerator {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
         });
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
         const needsQuerySerializationHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
         });
+        const needsIteratorImport = operations.some((op) => Boolean(extractEventStreamResponseInfo(op)));
+        const typingImports = ['Any', 'Dict', needsIteratorImport ? 'Iterator' : '', 'List', 'Optional']
+            .filter(Boolean)
+            .join(', ');
         const modelImports = referencedModels.size > 0
             ? `from ..models import ${Array.from(referencedModels).sort((a, b) => a.localeCompare(b)).join(', ')}\n`
             : '';
         return {
             path: `${packageRoot}/api/${fileName}.py`,
-            content: this.format(`from typing import Any, Dict, List, Optional
+            content: this.format(`from typing import ${typingImports}
 from ..http_client import HttpClient
 ${modelImports}
 def _append_query_string(path: str, raw_query_string: str) -> str:
@@ -59,6 +68,7 @@ def _append_query_string(path: str, raw_query_string: str) -> str:
     separator = '&' if '?' in path else '?'
     return f"{path}{separator}{query}"
 
+${needsPathSerializationHelpers ? this.generatePathSerializationHelpers() : ''}
 ${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
 ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 
@@ -81,6 +91,7 @@ ${methods}
         const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const pathOpenApiParams = allParameters.filter((param) => param?.in === 'path');
         const hasQuery = queryParams.length > 0;
         const hasRawQueryString = queryStringParams.length > 0;
         const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -99,7 +110,9 @@ ${methods}
             ? getPythonType(requestBodySchema, PYTHON_CONFIG)
             : 'Any';
         const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
-        const responseSchema = this.extractResponseSchema(op);
+        const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const isEventStreamResponse = Boolean(eventStreamInfo);
+        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const responseType = responseSchema
             ? getPythonType(responseSchema, PYTHON_CONFIG)
             : this.inferFallbackResponseType(op);
@@ -116,10 +129,17 @@ ${methods}
             hasRawQueryString ? 'raw_query_string' : '',
             hasHeaders ? 'request_headers' : '',
         ]);
-        const pathParams = rawPathParams.map((rawName) => ({
-            rawName,
-            safeName: pathParamNames.get(rawName) || rawName,
-        }));
+        const pathParams = rawPathParams.map((rawName) => {
+            const parameter = pathOpenApiParams.find((candidate) => candidate?.name === rawName);
+            const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+            return {
+                rawName,
+                safeName: pathParamNames.get(rawName) || rawName,
+                type: parameter?.schema ? getPythonType(parameter.schema, PYTHON_CONFIG) : 'str',
+                style: serialization.style,
+                explode: serialization.explode,
+            };
+        });
         const parameterReservedNames = [
             ...pathParams.map((param) => param.safeName),
             hasBody ? 'body' : '',
@@ -130,8 +150,8 @@ ${methods}
         const queryBindings = hasExplicitQuerySerialization
             ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
             : [];
-        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+        const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
             ...parameterReservedNames,
             ...queryBindings.map((binding) => binding.safeName),
             ...headerBindings.map((binding) => binding.safeName),
@@ -142,7 +162,7 @@ ${methods}
         const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = ['self'];
         if (pathParams.length) {
-            params.push(...pathParams.map((param) => `${param.safeName}: str`));
+            params.push(...pathParams.map((param) => `${param.safeName}: ${param.type}`));
         }
         if (hasBody && requestBodyRequired) {
             if (requestBodyRequired) {
@@ -176,8 +196,11 @@ ${methods}
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const rawPath = this.withApiPrefix(config.apiPrefix, normalizedOperationPath);
         const pathTemplate = rawPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
-            const safeName = pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);
-            return `{${safeName}}`;
+            const binding = pathParams.find((param) => param.rawName === paramName);
+            const safeName = binding?.safeName || pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);
+            const style = binding?.style || 'simple';
+            const explode = binding?.explode ? 'True' : 'False';
+            return `{serialize_path_parameter(${safeName}, {'name': ${this.formatPythonString(paramName)}, 'style': ${this.formatPythonString(style)}, 'explode': ${explode}})}`;
         });
         const pathExpression = hasRawQueryString
             ? `_append_query_string(f"${pathTemplate}", raw_query_string)`
@@ -226,6 +249,20 @@ ${this.renderNamedParameterDict(headerBindings, 12)},
 ${this.renderNamedParameterDict(cookieBindings, 12)}
         )\n`
             : '';
+        if (isEventStreamResponse) {
+            const streamArgs = [
+                pathExpression,
+                `method='${toHttpMethodLiteral(httpMethod)}'`,
+                hasBody ? (useDataArgument ? 'data=body' : 'json=body') : '',
+                hasQuery && !hasExplicitQuerySerialization ? 'params=params' : '',
+                isFormUrlencodedBody ? 'headers=form_headers' : hasHeaders ? 'headers=request_headers' : '',
+            ].filter(Boolean).join(', ');
+            return {
+                content: `    def ${methodName}(${params.join(', ')}) -> Iterator[${responseType}]:
+${docComment}${queryBlock}${requestHeaderBlock}${formHeaderLine}        return self._client.stream_json(${streamArgs})`,
+                referencedModels,
+            };
+        }
         return {
             content: `    def ${methodName}(${params.join(', ')}) -> ${responseType}:
 ${docComment}${queryBlock}${requestHeaderBlock}${formHeaderLine}        return ${call}`,
@@ -240,6 +277,17 @@ ${docComment}${queryBlock}${requestHeaderBlock}${formHeaderLine}        return $
                 style: serialization.style,
                 explode: serialization.explode,
                 allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    createHeaderParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
                 contentType: serialization.contentType,
             };
         });
@@ -279,7 +327,15 @@ ${docComment}${queryBlock}${requestHeaderBlock}${formHeaderLine}        return $
             return `${indent}{}`;
         }
         const lines = bindings.map((binding) => {
-            return `${indent}    ${this.formatPythonString(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
+            const parts = [
+                `'value': ${binding.safeName}`,
+                `'style': ${this.formatPythonString(binding.style)}`,
+                `'explode': ${binding.explode ? 'True' : 'False'}`,
+            ];
+            if (binding.contentType) {
+                parts.push(`'content_type': ${this.formatPythonString(binding.contentType)}`);
+            }
+            return `${indent}    ${this.formatPythonString(String(binding.parameter?.name || binding.safeName))}: {${parts.join(', ')}},`;
         });
         return [`${indent}{`, ...lines, `${indent}}`].join('\n');
     }
@@ -415,11 +471,75 @@ def encode_query_value(value: str, allow_reserved: bool) -> str:
     return quote(value, safe=':/?#[]@!$&\\'()*+,;=' if allow_reserved else '')
 `;
     }
+    generatePathSerializationHelpers() {
+        return `def serialize_path_parameter(value: Any, spec: Dict[str, Any]) -> str:
+    if value is None:
+        return ''
+
+    style = str(spec.get('style') or 'simple')
+    name = str(spec.get('name') or '')
+    explode = bool(spec.get('explode'))
+    if isinstance(value, (list, tuple)):
+        return serialize_path_array(name, value, style, explode)
+    if isinstance(value, dict):
+        return serialize_path_object(name, value, style, explode)
+    return path_prefix(name, style) + encode_path_value(serialize_path_primitive(value))
+
+
+def serialize_path_array(name: str, values: Any, style: str, explode: bool) -> str:
+    serialized = [encode_path_value(serialize_path_primitive(item)) for item in values if item is not None]
+    if not serialized:
+        return path_prefix(name, style)
+    if style == 'matrix':
+        return ''.join(f";{name}={item}" for item in serialized) if explode else f";{name}={','.join(serialized)}"
+    return path_prefix(name, style) + ('.' if explode else ',').join(serialized)
+
+
+def serialize_path_object(name: str, value: Dict[str, Any], style: str, explode: bool) -> str:
+    entries = [(key, entry_value) for key, entry_value in value.items() if entry_value is not None]
+    if not entries:
+        return path_prefix(name, style)
+    if style == 'matrix':
+        if explode:
+            return ''.join(f";{encode_path_value(str(key))}={encode_path_value(serialize_path_primitive(entry_value))}" for key, entry_value in entries)
+        serialized = ','.join(item for key, entry_value in entries for item in (encode_path_value(str(key)), encode_path_value(serialize_path_primitive(entry_value))))
+        return f";{name}={serialized}"
+    if explode:
+        separator = '.' if style == 'label' else ','
+        serialized = separator.join(f"{encode_path_value(str(key))}={encode_path_value(serialize_path_primitive(entry_value))}" for key, entry_value in entries)
+    else:
+        serialized = ','.join(item for key, entry_value in entries for item in (encode_path_value(str(key)), encode_path_value(serialize_path_primitive(entry_value))))
+    return path_prefix(name, style) + serialized
+
+
+def path_prefix(name: str, style: str) -> str:
+    if style == 'label':
+        return '.'
+    if style == 'matrix':
+        return f";{name}"
+    return ''
+
+
+def encode_path_value(value: str) -> str:
+    from urllib.parse import quote
+
+    return quote(value, safe='')
+
+
+def serialize_path_primitive(value: Any) -> str:
+    if isinstance(value, dict):
+        import json
+
+        return json.dumps(value, separators=(',', ':'))
+    return str(value)
+
+`;
+    }
     generateRequestHeaderHelpers() {
-        return `def build_request_headers(headers: Dict[str, Any], cookies: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, str]]:
+        return `def build_request_headers(headers: Dict[str, Dict[str, Any]], cookies: Optional[Dict[str, Dict[str, Any]]] = None) -> Optional[Dict[str, str]]:
     request_headers: Dict[str, str] = {}
-    for name, value in headers.items():
-        serialized = serialize_parameter_value(value)
+    for name, parameter in headers.items():
+        serialized = serialize_parameter_value(parameter)
         if serialized is not None:
             request_headers[name] = serialized
 
@@ -434,30 +554,40 @@ def encode_query_value(value: str, allow_reserved: bool) -> str:
     return request_headers or None
 
 
-def build_cookie_header(cookies: Dict[str, Any]) -> Optional[str]:
+def build_cookie_header(cookies: Dict[str, Dict[str, Any]]) -> Optional[str]:
     from urllib.parse import quote
 
     pairs: List[str] = []
-    for name, value in cookies.items():
-        serialized = serialize_parameter_value(value)
+    for name, parameter in cookies.items():
+        serialized = serialize_parameter_value(parameter)
         if serialized is not None:
             pairs.append(f"{quote(str(name), safe='')}={quote(serialized, safe='')}")
     return '; '.join(pairs) if pairs else None
 
 
-def serialize_parameter_value(value: Any) -> Optional[str]:
+def serialize_parameter_value(parameter: Optional[Dict[str, Any]]) -> Optional[str]:
+    value = None if parameter is None else parameter.get('value')
     if value is None:
         return None
-    if isinstance(value, (list, tuple)):
-        return ','.join(
-            item
-            for item in (serialize_parameter_value(item) for item in value)
-            if item is not None
-        )
-    if isinstance(value, dict):
+    if parameter and parameter.get('content_type'):
         import json
 
         return json.dumps(value, separators=(',', ':'))
+    if isinstance(value, (list, tuple)):
+        return ','.join(serialize_header_primitive(item) for item in value if item is not None)
+    if isinstance(value, dict):
+        return serialize_header_object(value, bool(parameter and parameter.get('explode')))
+    return serialize_header_primitive(value)
+
+
+def serialize_header_object(value: Dict[str, Any], explode: bool) -> str:
+    entries = [(key, entry_value) for key, entry_value in value.items() if entry_value is not None]
+    if explode:
+        return ','.join(f"{key}={serialize_header_primitive(entry_value)}" for key, entry_value in entries)
+    return ','.join(item for key, entry_value in entries for item in (str(key), serialize_header_primitive(entry_value)))
+
+
+def serialize_header_primitive(value: Any) -> str:
     return str(value)
 `;
     }

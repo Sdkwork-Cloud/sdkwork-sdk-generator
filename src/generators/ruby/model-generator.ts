@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveModelSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, resolveModelSchema } from '../../framework/schema.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
 
 export class ModelGenerator {
@@ -66,7 +66,7 @@ ${exports}
     }
 
     if (schema.$ref) {
-      const modelName = RUBY_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = RUBY_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return `${valueExpr}.is_a?(Hash) ? ${modelName}.from_hash(${valueExpr}) : nil`;
     }
 
@@ -96,7 +96,7 @@ ${exports}
 
   private deserializeArrayItemExpression(schema: any, itemExpr: string): string {
     if (schema?.$ref) {
-      const modelName = RUBY_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = RUBY_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return `${itemExpr}.is_a?(Hash) ? ${modelName}.from_hash(${itemExpr}) : ${itemExpr}`;
     }
 

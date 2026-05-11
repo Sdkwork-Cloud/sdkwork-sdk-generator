@@ -1,14 +1,16 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { SWIFT_CONFIG, getSwiftType } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => SWIFT_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
             const group = ctx.apiGroups[tag];
@@ -20,11 +22,14 @@ export class ApiGenerator {
         return files;
     }
     generateApiFile(tag, resolvedTagName, operations, config, knownModels) {
+        operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
         const className = `${SWIFT_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-        const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
+        const methodNames = resolveOpenAIStyleMethodNames(tag, operations, config, SWIFT_CONFIG, 'camel')
+            || resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const methods = operations
             .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
             .join('\n\n');
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
         const needsRequestHeaderHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -45,6 +50,7 @@ public class ${className} {
     }
 
 ${methods}
+${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 }
@@ -60,6 +66,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const pathOpenApiParams = allParameters.filter((param) => param?.in === 'path');
         const hasQuery = queryParams.length > 0;
         const hasRawQueryString = queryStringParams.length > 0;
         const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -77,7 +84,9 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         const requestType = requestBodySchema
             ? this.ensureKnownType(getSwiftType(requestBodySchema, SWIFT_CONFIG), knownModels)
             : 'Any';
-        const responseSchema = this.extractResponseSchema(op);
+        const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const isEventStreamResponse = Boolean(eventStreamInfo);
+        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const responseType = responseSchema
             ? this.ensureKnownType(getSwiftType(responseSchema, SWIFT_CONFIG), knownModels)
             : this.inferFallbackResponseType(op);
@@ -90,10 +99,17 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
             hasRawQueryString ? 'rawQueryString' : '',
             hasHeaders ? 'requestHeaders' : '',
         ]);
-        const pathParams = rawPathParams.map((rawName) => ({
-            rawName,
-            safeName: pathParamNames.get(rawName) || rawName,
-        }));
+        const pathParams = rawPathParams.map((rawName) => {
+            const parameter = pathOpenApiParams.find((candidate) => candidate?.name === rawName);
+            const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+            return {
+                rawName,
+                safeName: pathParamNames.get(rawName) || rawName,
+                type: parameter?.schema ? this.ensureKnownType(getSwiftType(parameter.schema, SWIFT_CONFIG), knownModels) : 'String',
+                style: serialization.style,
+                explode: serialization.explode,
+            };
+        });
         const parameterReservedNames = [
             ...pathParams.map((param) => param.safeName),
             hasBody ? 'body' : '',
@@ -104,8 +120,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         const queryBindings = hasExplicitQuerySerialization
             ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
             : [];
-        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+        const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
             ...parameterReservedNames,
             ...queryBindings.map((binding) => binding.safeName),
             ...headerBindings.map((binding) => binding.safeName),
@@ -116,7 +132,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = [];
         if (pathParams.length) {
-            params.push(...pathParams.map((param) => `${param.safeName}: String`));
+            params.push(...pathParams.map((param) => `${param.safeName}: ${param.type}`));
         }
         if (hasBody && requestBodyRequired) {
             if (requestBodyRequired) {
@@ -141,8 +157,11 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
-            const safeName = pathParamNames.get(paramName) || SWIFT_CONFIG.namingConventions.propertyName(paramName);
-            return `\\(${safeName})`;
+            const param = pathParams.find((candidate) => candidate.rawName === paramName);
+            const safeName = param?.safeName || pathParamNames.get(paramName) || SWIFT_CONFIG.namingConventions.propertyName(paramName);
+            const style = param?.style || 'simple';
+            const explode = param?.explode ?? false;
+            return `\\(serializePathParameter(${safeName}, PathParameterSpec(name: ${this.formatSwiftString(paramName)}, style: ${this.formatSwiftString(style)}, explode: ${explode ? 'true' : 'false'})))`;
         });
         const pathCall = `ApiPaths.${SWIFT_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
         const requestPathCall = hasRawQueryString
@@ -308,11 +327,25 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
             : '';
         const requestHeaderBlock = hasHeaders
             ? `        let requestHeaders = buildRequestHeaders(
-${this.renderNamedParameterDictionary(headerBindings, 12)},
-${this.renderNamedParameterDictionary(cookieBindings, 12)}
+${this.renderHeaderParameterDictionary(headerBindings, 12)},
+${this.renderHeaderParameterDictionary(cookieBindings, 12)}
         )
 `
             : '';
+        if (isEventStreamResponse) {
+            const streamArgs = [
+                this.formatSwiftString(toHttpMethodLiteral(httpMethod)),
+                requestPathCall,
+                hasBody ? 'body: body' : 'body: nil',
+                hasQuery && !hasExplicitQuerySerialization ? 'params: params' : 'params: nil',
+                hasHeaders ? 'headers: requestHeaders' : 'headers: nil',
+                hasBody && requestBodyInfo?.mediaType ? `contentType: "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'contentType: nil',
+                `responseType: ${responseType}.self`,
+            ].join(', ');
+            return `${docComment}    public func ${methodName}(${params.join(', ')}) throws -> AsyncThrowingStream<${responseType}, Error> {
+${queryBlock}${requestHeaderBlock}        return try client.stream(${streamArgs})
+    }`;
+        }
         if (responseType === 'Void') {
             return `${docComment}    public func ${methodName}(${params.join(', ')}) async throws -> Void {
 ${queryBlock}${requestHeaderBlock}        _ = ${call}
@@ -353,6 +386,17 @@ ${queryBlock}${requestHeaderBlock}        return ${call}
             };
         });
     }
+    createHeaderParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                contentType: serialization.contentType,
+            };
+        });
+    }
     getNamedParameterType(parameter, knownModels) {
         const contentSchema = extractOpenApiParameterContentSchema(parameter);
         if (contentSchema) {
@@ -372,6 +416,16 @@ ${queryBlock}${requestHeaderBlock}        return ${call}
         }
         const lines = bindings.map((binding) => {
             return `${indent}    ${this.formatSwiftString(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
+        });
+        return [`${indent}[`, ...lines, `${indent}]`].join('\n');
+    }
+    renderHeaderParameterDictionary(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        if (bindings.length === 0) {
+            return `${indent}[:]`;
+        }
+        const lines = bindings.map((binding) => {
+            return `${indent}    ${this.formatSwiftString(String(binding.parameter?.name || binding.safeName))}: HeaderParameterSpec(value: ${binding.safeName}, style: ${this.formatSwiftString(binding.style)}, explode: ${binding.explode ? 'true' : 'false'}, contentType: ${binding.contentType ? this.formatSwiftString(binding.contentType) : 'nil'}),`;
         });
         return [`${indent}[`, ...lines, `${indent}]`].join('\n');
     }
@@ -487,11 +541,94 @@ ${queryBlock}${requestHeaderBlock}        return ${call}
         value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
     }`;
     }
+    generatePathSerializationHelpers() {
+        return `    private struct PathParameterSpec {
+        let name: String
+        let style: String
+        let explode: Bool
+    }
+
+    private func serializePathParameter(_ value: Any?, _ spec: PathParameterSpec) -> String {
+        guard let value else { return "" }
+        let style = spec.style.isEmpty ? "simple" : spec.style
+        if let array = value as? [Any] {
+            return serializePathArray(spec.name, array, style, spec.explode)
+        }
+        if let object = value as? [String: Any] {
+            return serializePathObject(spec.name, object, style, spec.explode)
+        }
+        return pathPrimitivePrefix(spec.name, style) + pathEncode(String(describing: value))
+    }
+
+    private func serializePathArray(_ name: String, _ values: [Any], _ style: String, _ explode: Bool) -> String {
+        let serialized = values.map { pathEncode(String(describing: $0)) }
+        if serialized.isEmpty { return pathPrefix(name, style) }
+        if style == "matrix" {
+            if explode {
+                return serialized.map { ";\\(name)=\\($0)" }.joined()
+            }
+            return ";\\(name)=" + serialized.joined(separator: ",")
+        }
+        let separator = explode ? "." : ","
+        return pathPrefix(name, style) + serialized.joined(separator: separator)
+    }
+
+    private func serializePathObject(_ name: String, _ values: [String: Any], _ style: String, _ explode: Bool) -> String {
+        var entries: [String] = []
+        var exploded: [String] = []
+        for (key, value) in values {
+            let escapedKey = pathEncode(key)
+            let escapedValue = pathEncode(String(describing: value))
+            if explode {
+                if style == "matrix" {
+                    exploded.append(";\\(escapedKey)=\\(escapedValue)")
+                } else {
+                    exploded.append("\\(escapedKey)=\\(escapedValue)")
+                }
+            } else {
+                entries.append(escapedKey)
+                entries.append(escapedValue)
+            }
+        }
+        if style == "matrix" {
+            if explode {
+                return exploded.joined()
+            }
+            return ";\\(name)=" + entries.joined(separator: ",")
+        }
+        if explode {
+            let separator = style == "label" ? "." : ","
+            return pathPrefix(name, style) + exploded.joined(separator: separator)
+        }
+        return pathPrefix(name, style) + entries.joined(separator: ",")
+    }
+
+    private func pathPrefix(_ name: String, _ style: String) -> String {
+        if style == "label" { return "." }
+        if style == "matrix" { return ";\\(name)" }
+        return ""
+    }
+
+    private func pathPrimitivePrefix(_ name: String, _ style: String) -> String {
+        style == "matrix" ? ";\\(name)=" : pathPrefix(name, style)
+    }
+
+    private func pathEncode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }`;
+    }
     generateRequestHeaderHelpers() {
-        return `    private func buildRequestHeaders(_ headers: [String: Any?], _ cookies: [String: Any?]) -> [String: String]? {
+        return `    private struct HeaderParameterSpec {
+        let value: Any?
+        let style: String
+        let explode: Bool
+        let contentType: String?
+    }
+
+    private func buildRequestHeaders(_ headers: [String: HeaderParameterSpec], _ cookies: [String: HeaderParameterSpec]) -> [String: String]? {
         var requestHeaders: [String: String] = [:]
-        for (name, value) in headers {
-            if let serialized = serializeParameterValue(value) {
+        for (name, parameter) in headers {
+            if let serialized = serializeParameterValue(parameter) {
                 requestHeaders[name] = serialized
             }
         }
@@ -503,18 +640,38 @@ ${queryBlock}${requestHeaderBlock}        return ${call}
         return requestHeaders.isEmpty ? nil : requestHeaders
     }
 
-    private func buildCookieHeader(_ cookies: [String: Any?]) -> String? {
-        let pairs = cookies.compactMap { name, value -> String? in
-            guard let serialized = serializeParameterValue(value) else { return nil }
+    private func buildCookieHeader(_ cookies: [String: HeaderParameterSpec]) -> String? {
+        let pairs = cookies.compactMap { name, parameter -> String? in
+            guard let serialized = serializeParameterValue(parameter) else { return nil }
             return "\\(urlEncode(name))=\\(urlEncode(serialized))"
         }
         return pairs.isEmpty ? nil : pairs.joined(separator: "; ")
     }
 
-    private func serializeParameterValue(_ value: Any?) -> String? {
-        guard let value else { return nil }
+    private func serializeParameterValue(_ parameter: HeaderParameterSpec?) -> String? {
+        guard let parameter, let value = parameter.value else { return nil }
+        if let contentType = parameter.contentType, !contentType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if JSONSerialization.isValidJSONObject(value),
+               let data = try? JSONSerialization.data(withJSONObject: value, options: []),
+               let json = String(data: data, encoding: .utf8) {
+                return json
+            }
+            return String(describing: value)
+        }
         if let array = value as? [Any?] {
-            return array.compactMap { serializeParameterValue($0) }.joined(separator: ",")
+            return array.compactMap { $0.map { String(describing: $0) } }.joined(separator: ",")
+        }
+        if let object = value as? [String: Any] {
+            var values: [String] = []
+            for (key, item) in object {
+                if parameter.explode {
+                    values.append("\\(key)=\\(item)")
+                } else {
+                    values.append(key)
+                    values.append(String(describing: item))
+                }
+            }
+            return values.joined(separator: ",")
         }
         if let date = value as? Date {
             return ISO8601DateFormatter().string(from: date)

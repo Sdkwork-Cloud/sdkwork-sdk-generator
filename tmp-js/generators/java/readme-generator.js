@@ -1,4 +1,4 @@
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
@@ -11,8 +11,8 @@ export class ReadmeGenerator {
         const identity = resolveJvmSdkIdentity(config);
         const commonPkg = resolveJvmCommonPackage(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const planner = new JavaUsagePlanner(ctx);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
+        const planner = new JavaUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartImports = this.renderImports(identity.packageRoot, commonPkg.importRoot, clientName, quickStartPlan);
         const quickStartSnippet = quickStartPlan

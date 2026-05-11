@@ -1,4 +1,5 @@
 import { TYPESCRIPT_CONFIG } from './config.js';
+import { resolveOpenAIStyleResourceName } from '../../framework/openai-surface.js';
 const REMOVABLE_TAG_SUFFIXES = new Set([
     'management',
     'controller',
@@ -25,6 +26,9 @@ function simplifyTagFileName(fileName) {
     }
     return segments.join('-') || fileName || 'default';
 }
+function resolveResourceSurfaceName(simplified, config) {
+    return resolveOpenAIStyleResourceName(simplified, config);
+}
 function toPascalCase(value) {
     const normalized = value
         .split(/[^a-zA-Z0-9]+/)
@@ -41,24 +45,25 @@ function toCamelCase(value) {
     const camel = pascal.charAt(0).toLowerCase() + pascal.slice(1);
     return /^[A-Za-z_]/.test(camel) ? camel : `api${pascal}`;
 }
-export function buildTypeScriptTagMetadata(tags) {
+export function buildTypeScriptTagMetadata(tags, config) {
     const usedClassNames = new Set();
     const usedPropertyNames = new Set();
     return tags.map((tag) => {
         const fileName = TYPESCRIPT_CONFIG.namingConventions.fileName(tag);
         const simplified = simplifyTagFileName(fileName);
-        const className = dedupeName(`${toPascalCase(simplified)}Api`, usedClassNames);
+        const surfaceName = resolveResourceSurfaceName(simplified, config);
+        const className = dedupeName(`${toPascalCase(surfaceName)}Api`, usedClassNames);
         usedClassNames.add(className);
-        const clientPropertyName = dedupeName(toCamelCase(simplified), usedPropertyNames);
+        const clientPropertyName = dedupeName(toCamelCase(surfaceName), usedPropertyNames);
         usedPropertyNames.add(clientPropertyName);
         return {
             tag,
-            fileName,
+            fileName: config?.sdkType === 'ai' ? surfaceName : fileName,
             className,
             clientPropertyName,
         };
     });
 }
-export function buildTypeScriptTagMetadataMap(tags) {
-    return new Map(buildTypeScriptTagMetadata(tags).map((meta) => [meta.tag, meta]));
+export function buildTypeScriptTagMetadataMap(tags, config) {
+    return new Map(buildTypeScriptTagMetadata(tags, config).map((meta) => [meta.tag, meta]));
 }

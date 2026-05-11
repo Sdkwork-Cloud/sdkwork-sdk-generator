@@ -10,7 +10,7 @@ import {
 
 export class TestGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
-    const planner = new FlutterUsagePlanner(ctx);
+    const planner = new FlutterUsagePlanner(ctx, undefined, config);
     const plan = planner.selectQuickStartPlan();
     if (!plan) {
       throw new Error('Flutter generateTests requires at least one API operation to build a smoke test.');

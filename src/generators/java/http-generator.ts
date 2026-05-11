@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -11,7 +11,7 @@ export class HttpClientGenerator {
     const identity = resolveJvmSdkIdentity(config);
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveJvmCommonPackage(config);
@@ -37,9 +37,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import okhttp3.*;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -290,6 +294,46 @@ public class HttpClient {
             .method(method, requestBody)
             .build();
         return execute(request);
+    }
+
+    public <T> Iterable<T> stream(
+        String method,
+        String path,
+        Object body,
+        Map<String, Object> params,
+        Map<String, String> requestHeaders,
+        String contentType,
+        TypeReference<T> typeReference
+    ) throws Exception {
+        RequestBody requestBody = body == null ? null : createRequestBody(body, contentType);
+        Request request = applyHeaders(new Request.Builder(), requestHeaders)
+            .url(buildUrl(path, params))
+            .addHeader("Accept", "text/event-stream")
+            .method(method, requestBody)
+            .build();
+        Response response = client.newCall(request).execute();
+        if (!response.isSuccessful()) {
+            String responseBody = response.body() != null ? response.body().string() : "";
+            response.close();
+            throw new RuntimeException("HTTP " + response.code() + ": " + responseBody);
+        }
+        List<T> events = new ArrayList<>();
+        try (Response closeableResponse = response;
+             BufferedReader reader = new BufferedReader(new InputStreamReader(closeableResponse.body().byteStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty() || line.startsWith(":") || !line.startsWith("data:")) {
+                    continue;
+                }
+                String data = line.substring(5).trim();
+                if ("[DONE]".equals(data)) {
+                    break;
+                }
+                events.add(mapper.readValue(data, typeReference));
+            }
+        }
+        return events;
     }
 
     public Object get(String path) throws Exception {

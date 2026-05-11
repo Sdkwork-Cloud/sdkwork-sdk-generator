@@ -4,7 +4,7 @@ import { getCSharpNamespace } from './config.js';
 import { CSharpUsagePlanner, renderCSharpUsageSnippet, resolveCSharpExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new CSharpUsagePlanner(ctx);
+        const planner = new CSharpUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('C# generateTests requires at least one API operation to build a smoke test.');

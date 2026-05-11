@@ -1,14 +1,16 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
-import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { FLUTTER_CONFIG, FLUTTER_RESERVED_WORDS, getFlutterType } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => FLUTTER_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
             const group = ctx.apiGroups[tag];
@@ -21,9 +23,11 @@ export class ApiGenerator {
         return files;
     }
     generateApiFile(tag, resolvedTagName, operations, config, knownModels) {
+        operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
         const className = `${FLUTTER_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
         const fileName = FLUTTER_CONFIG.namingConventions.fileName(resolvedTagName);
-        const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
+        const methodNames = resolveOpenAIStyleMethodNames(tag, operations, config, FLUTTER_CONFIG, 'camel')
+            || resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
         const methods = operations
             .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
             .join('\n\n');
@@ -37,6 +41,7 @@ export class ApiGenerator {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
         });
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
         const needsQuerySerializationHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
@@ -57,6 +62,7 @@ class ${className} {
 ${methods}
 }
 
+${needsPathSerializationHelpers ? this.generatePathSerializationHelpers() : ''}
 ${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
 ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 `),
@@ -71,6 +77,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const pathOpenApiParams = allParameters.filter((param) => param?.in === 'path');
         const hasQuery = queryParams.length > 0;
         const hasRawQueryString = queryStringParams.length > 0;
         const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -89,7 +96,9 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `, contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
             : '';
-        const responseSchema = this.extractResponseSchema(op);
+        const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const isEventStreamResponse = Boolean(eventStreamInfo);
+        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const responseType = responseSchema
             ? this.ensureKnownType(getFlutterType(responseSchema, FLUTTER_CONFIG), knownModels)
             : this.inferFallbackResponseType(op);
@@ -100,10 +109,17 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             hasHeaders ? 'requestHeaders' : '',
             hasBody ? 'payload' : '',
         ]);
-        const pathParams = rawPathParams.map((rawName) => ({
-            rawName,
-            safeName: pathParamNames.get(rawName) || rawName,
-        }));
+        const pathParams = rawPathParams.map((rawName) => {
+            const parameter = pathOpenApiParams.find((candidate) => candidate?.name === rawName);
+            const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+            return {
+                rawName,
+                safeName: pathParamNames.get(rawName) || rawName,
+                type: parameter?.schema ? this.ensureKnownType(getFlutterType(parameter.schema, FLUTTER_CONFIG), knownModels) : 'String',
+                style: serialization.style,
+                explode: serialization.explode,
+            };
+        });
         const parameterReservedNames = [
             ...pathParams.map((pathParam) => pathParam.safeName),
             hasBody ? 'body' : '',
@@ -115,8 +131,8 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const queryBindings = hasExplicitQuerySerialization
             ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
             : [];
-        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+        const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
             ...parameterReservedNames,
             ...queryBindings.map((binding) => binding.safeName),
             ...headerBindings.map((binding) => binding.safeName),
@@ -128,7 +144,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const requiredParams = [];
         const optionalParams = [];
         if (pathParams.length) {
-            requiredParams.push(...pathParams.map((pathParam) => `String ${pathParam.safeName}`));
+            requiredParams.push(...pathParams.map((pathParam) => `${pathParam.type} ${pathParam.safeName}`));
         }
         if (hasBody && requestBodyRequired) {
             if (requestBodyRequired) {
@@ -159,8 +175,11 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             : requiredParams;
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
-            const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, FLUTTER_RESERVED_WORDS);
-            return `$${safeName}`;
+            const param = pathParams.find((candidate) => candidate.rawName === paramName);
+            const safeName = param?.safeName || pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, FLUTTER_RESERVED_WORDS);
+            const style = param?.style || 'simple';
+            const explode = param?.explode ?? false;
+            return `\${serializePathParameter(${safeName}, const PathParameterSpec(${this.formatDartString(paramName)}, ${this.formatDartString(style)}, ${explode ? 'true' : 'false'}))}`;
         });
         const pathCall = `ApiPaths.${FLUTTER_CONFIG.namingConventions.methodName(config.sdkType)}Path('${pathTemplate}')`;
         const requestPathCall = hasRawQueryString
@@ -200,11 +219,18 @@ ${this.renderQueryParameterSpecs(queryBindings, 6)}
             : '';
         const requestHeaderBlock = hasHeaders
             ? `    final requestHeaders = buildRequestHeaders(
-${this.renderNamedParameterMap(headerBindings, 6)},
-${this.renderNamedParameterMap(cookieBindings, 6)},
+${this.renderHeaderParameterMap(headerBindings, 6)},
+${this.renderHeaderParameterMap(cookieBindings, 6)},
     );
 `
             : '';
+        if (isEventStreamResponse) {
+            const streamCall = `_client.streamJson(${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
+            return `${docComment}  Stream<${responseType}> ${methodName}(${params.join(', ')}) {
+${queryBlock}${requestHeaderBlock}${payloadLine}    return ${streamCall}
+        .map((event) => ${this.deserializeStreamEventExpression(responseSchema, 'event')});
+  }`;
+        }
         if (responseType === 'void') {
             return `${docComment}  Future<void> ${methodName}(${params.join(', ')}) async {
 ${queryBlock}${requestHeaderBlock}${payloadLine}    await ${call};
@@ -246,6 +272,17 @@ ${queryBlock}${requestHeaderBlock}${payloadLine}    final response = await ${cal
             };
         });
     }
+    createHeaderParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                contentType: serialization.contentType,
+            };
+        });
+    }
     getNamedParameterType(parameter, knownModels) {
         const contentSchema = extractOpenApiParameterContentSchema(parameter);
         if (contentSchema) {
@@ -270,6 +307,21 @@ ${queryBlock}${requestHeaderBlock}${payloadLine}    final response = await ${cal
             return `${indent}  ${this.formatDartString(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
         });
         return [`${indent}<String, dynamic>{`, ...lines, `${indent}}`].join('\n');
+    }
+    renderHeaderParameterMap(bindings, indentation) {
+        const indent = ' '.repeat(indentation);
+        if (bindings.length === 0) {
+            return `${indent}<String, HeaderParameterSpec>{}`;
+        }
+        const lines = bindings.map((binding) => {
+            return `${indent}  ${this.formatDartString(String(binding.parameter?.name || binding.safeName))}: HeaderParameterSpec(${[
+                binding.safeName,
+                this.formatDartString(binding.style),
+                binding.explode ? 'true' : 'false',
+                binding.contentType ? this.formatDartString(binding.contentType) : 'null',
+            ].join(', ')}),`;
+        });
+        return [`${indent}<String, HeaderParameterSpec>{`, ...lines, `${indent}}`].join('\n');
     }
     formatDartString(value) {
         return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
@@ -421,15 +473,97 @@ String encodeQueryValue(String value, bool allowReserved) {
 
 String urlEncode(String value) => Uri.encodeQueryComponent(value);`;
     }
+    generatePathSerializationHelpers() {
+        return `class PathParameterSpec {
+  final String name;
+  final String style;
+  final bool explode;
+
+  const PathParameterSpec(this.name, this.style, this.explode);
+}
+
+String serializePathParameter(dynamic value, PathParameterSpec spec) {
+  if (value == null) return '';
+  final style = spec.style.trim().isEmpty ? 'simple' : spec.style;
+  if (value is Iterable) {
+    return serializePathArray(spec.name, value, style, spec.explode);
+  }
+  if (value is Map) {
+    return serializePathObject(spec.name, value, style, spec.explode);
+  }
+  return pathPrimitivePrefix(spec.name, style) + Uri.encodeComponent(value.toString());
+}
+
+String serializePathArray(String name, Iterable values, String style, bool explode) {
+  final serialized = values.where((item) => item != null).map((item) => Uri.encodeComponent(item.toString())).toList();
+  if (serialized.isEmpty) return pathPrefix(name, style);
+  if (style == 'matrix') {
+    if (explode) {
+      return serialized.map((item) => ';$name=$item').join();
+    }
+    return ';$name=\${serialized.join(',')}';
+  }
+  final separator = explode ? '.' : ',';
+  return pathPrefix(name, style) + serialized.join(separator);
+}
+
+String serializePathObject(String name, Map values, String style, bool explode) {
+  final entries = <String>[];
+  final exploded = <String>[];
+  values.forEach((key, value) {
+    if (value == null) return;
+    final escapedKey = Uri.encodeComponent(key.toString());
+    final escapedValue = Uri.encodeComponent(value.toString());
+    if (explode) {
+      if (style == 'matrix') {
+        exploded.add(';$escapedKey=$escapedValue');
+      } else {
+        exploded.add('$escapedKey=$escapedValue');
+      }
+    } else {
+      entries.add(escapedKey);
+      entries.add(escapedValue);
+    }
+  });
+  if (style == 'matrix') {
+    if (explode) return exploded.join();
+    return ';$name=\${entries.join(',')}';
+  }
+  if (explode) {
+    final separator = style == 'label' ? '.' : ',';
+    return pathPrefix(name, style) + exploded.join(separator);
+  }
+  return pathPrefix(name, style) + entries.join(',');
+}
+
+String pathPrefix(String name, String style) {
+  if (style == 'label') return '.';
+  if (style == 'matrix') return ';$name';
+  return '';
+}
+
+String pathPrimitivePrefix(String name, String style) {
+  return style == 'matrix' ? ';$name=' : pathPrefix(name, style);
+}`;
+    }
     generateRequestHeaderHelpers() {
-        return `Map<String, String>? buildRequestHeaders(
-  Map<String, dynamic> headers, [
-  Map<String, dynamic> cookies = const {},
+        return `class HeaderParameterSpec {
+  final dynamic value;
+  final String style;
+  final bool explode;
+  final String? contentType;
+
+  HeaderParameterSpec(this.value, this.style, this.explode, this.contentType);
+}
+
+Map<String, String>? buildRequestHeaders(
+  Map<String, HeaderParameterSpec> headers, [
+  Map<String, HeaderParameterSpec> cookies = const {},
 ]) {
   final requestHeaders = <String, String>{};
 
-  headers.forEach((name, value) {
-    final serialized = serializeParameterValue(value);
+  headers.forEach((name, parameter) {
+    final serialized = serializeParameterValue(parameter);
     if (serialized != null) {
       requestHeaders[name] = serialized;
     }
@@ -445,10 +579,10 @@ String urlEncode(String value) => Uri.encodeQueryComponent(value);`;
   return requestHeaders.isEmpty ? null : requestHeaders;
 }
 
-String? buildCookieHeader(Map<String, dynamic> cookies) {
+String? buildCookieHeader(Map<String, HeaderParameterSpec> cookies) {
   final pairs = <String>[];
-  cookies.forEach((name, value) {
-    final serialized = serializeParameterValue(value);
+  cookies.forEach((name, parameter) {
+    final serialized = serializeParameterValue(parameter);
     if (serialized != null) {
       pairs.add('\${Uri.encodeComponent(name)}=\${Uri.encodeComponent(serialized)}');
     }
@@ -456,16 +590,33 @@ String? buildCookieHeader(Map<String, dynamic> cookies) {
   return pairs.isEmpty ? null : pairs.join('; ');
 }
 
-String? serializeParameterValue(dynamic value) {
+String? serializeParameterValue(HeaderParameterSpec? parameter) {
+  final value = parameter?.value;
   if (value == null) return null;
+  if (parameter!.contentType != null && parameter.contentType!.trim().isNotEmpty) {
+    return jsonEncode(value);
+  }
   if (value is DateTime) return value.toIso8601String();
   if (value is Iterable) {
     return value
-        .map(serializeParameterValue)
+        .where((item) => item != null)
+        .map((item) => item.toString())
         .whereType<String>()
         .join(',');
   }
-  if (value is Map) return jsonEncode(value);
+  if (value is Map) {
+    final serialized = <String>[];
+    value.forEach((key, item) {
+      if (item == null) return;
+      if (parameter.explode) {
+        serialized.add('$key=$item');
+      } else {
+        serialized.add(key.toString());
+        serialized.add(item.toString());
+      }
+    });
+    return serialized.join(',');
+  }
   return value.toString();
 }`;
     }
@@ -515,7 +666,7 @@ String? serializeParameterValue(dynamic value) {
             return valueExpr;
         }
         if (schema.$ref) {
-            const refName = FLUTTER_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+            const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             return `(() {
       final map = responseValueToMap(${valueExpr});
       return map == null ? null : ${refName}.fromJson(map);
@@ -554,7 +705,7 @@ String? serializeParameterValue(dynamic value) {
     }
     deserializeArrayItemExpression(schema, itemExpr) {
         if (schema?.$ref) {
-            const refName = FLUTTER_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+            const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             return `(() {
         final map = sdkworkResponseAsMap(${itemExpr});
         return map == null ? null : ${refName}.fromJson(map);
@@ -606,8 +757,15 @@ String? serializeParameterValue(dynamic value) {
         }
         return itemExpr;
     }
+    deserializeStreamEventExpression(schema, valueExpr) {
+        if (schema?.$ref) {
+            const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
+            return `${refName}.fromJson(${valueExpr})`;
+        }
+        return this.deserializeArrayItemExpression(schema, valueExpr);
+    }
     methodNeedsResponseHelpers(op) {
-        const responseSchema = this.extractResponseSchema(op);
+        const responseSchema = extractEventStreamResponseInfo(op)?.schema ?? this.extractResponseSchema(op);
         if (!responseSchema || typeof responseSchema !== 'object') {
             return false;
         }
@@ -616,7 +774,7 @@ String? serializeParameterValue(dynamic value) {
     methodUsesModels(op, knownModels) {
         const supportsRequestBody = supportsRequestBodyByDefault(String(op.method || '').toLowerCase());
         const requestBodySchema = supportsRequestBody ? this.extractRequestBodyInfo(op)?.schema : undefined;
-        const responseSchema = this.extractResponseSchema(op);
+        const responseSchema = extractEventStreamResponseInfo(op)?.schema ?? this.extractResponseSchema(op);
         return this.schemaUsesModels(requestBodySchema, knownModels) || this.schemaUsesModels(responseSchema, knownModels);
     }
     schemaUsesModels(schema, knownModels, visited = new Set()) {
@@ -625,7 +783,7 @@ String? serializeParameterValue(dynamic value) {
         }
         visited.add(schema);
         if (schema.$ref) {
-            const modelName = FLUTTER_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || '');
+            const modelName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref));
             return knownModels.has(modelName);
         }
         if (Array.isArray(schema.prefixItems)

@@ -8,7 +8,7 @@ export class ReadmeGenerator {
         const packageName = getPhpPackageName(config);
         const namespace = getPhpNamespace(config);
         const tags = Object.keys(ctx.apiGroups);
-        const planner = new PhpUsagePlanner(ctx);
+        const planner = new PhpUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartImports = this.buildModelImports(namespace, quickStartPlan);
         const quickStartSnippet = quickStartPlan

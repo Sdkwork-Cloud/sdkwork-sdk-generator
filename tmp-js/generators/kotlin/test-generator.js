@@ -4,7 +4,7 @@ import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { KotlinUsagePlanner, renderKotlinUsageSnippet, resolveKotlinExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new KotlinUsagePlanner(ctx);
+        const planner = new KotlinUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Kotlin generateTests requires at least one API operation to build a smoke test.');

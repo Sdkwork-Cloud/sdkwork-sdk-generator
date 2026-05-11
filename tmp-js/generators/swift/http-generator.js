@@ -1,4 +1,4 @@
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { SWIFT_CONFIG } from './config.js';
@@ -6,7 +6,7 @@ export class HttpClientGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         const commonPkg = resolveSwiftCommonPackage(config);
@@ -331,6 +331,51 @@ public class HttpClient {
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response, as: responseType)
+    }
+
+    public func stream<T: Decodable>(
+        _ method: String,
+        _ path: String,
+        body: Any? = nil,
+        params: [String: Any]? = nil,
+        headers requestHeaders: [String: String]? = nil,
+        contentType: String? = nil,
+        responseType: T.Type
+    ) throws -> AsyncThrowingStream<T, Error> {
+        var request = URLRequest(url: try buildURL(path, params: params))
+        request.httpMethod = method
+        request.timeoutInterval = timeout
+        let requestBody = try createRequestBody(body: body, contentType: contentType)
+        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType)
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = requestBody.bodyData
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let (bytes, response) = try await session.bytes(for: request)
+                    if let httpResp = response as? HTTPURLResponse, !(200...299).contains(httpResp.statusCode) {
+                        throw URLError(.badServerResponse)
+                    }
+                    for try await rawLine in bytes.lines {
+                        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if line.isEmpty || line.hasPrefix(":") || !line.hasPrefix("data:") {
+                            continue
+                        }
+                        let data = String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if data == "[DONE]" {
+                            continuation.finish()
+                            return
+                        }
+                        continuation.yield(try decoder.decode(T.self, from: Data(data.utf8)))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     public func put(

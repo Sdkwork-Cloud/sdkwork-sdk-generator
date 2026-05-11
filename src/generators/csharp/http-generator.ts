@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { CSHARP_CONFIG, getCSharpNamespace } from './config.js';
@@ -10,7 +10,7 @@ export class HttpClientGenerator {
     const namespace = getCSharpNamespace(config);
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveCSharpCommonPackage(config);
@@ -36,6 +36,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -373,6 +374,41 @@ namespace ${namespace}.Http
             using var request = BuildRequest(System.Net.Http.HttpMethod.Post, path, parameters, requestHeaders, content);
             var response = await _client.SendAsync(request);
             return await ReadResponseAsync<T>(response);
+        }
+
+        public async IAsyncEnumerable<T> StreamAsync<T>(
+            string method,
+            string path,
+            object? body = null,
+            Dictionary<string, object>? parameters = null,
+            Dictionary<string, string>? requestHeaders = null,
+            string? contentType = null)
+        {
+            using var content = CreateContent(body, contentType);
+            using var request = BuildRequest(new System.Net.Http.HttpMethod(method), path, parameters, requestHeaders, content);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            response.EnsureSuccessStatusCode();
+            await using var responseStream = await response.Content.ReadAsStreamAsync();
+            using var reader = new StreamReader(responseStream);
+            while (!reader.EndOfStream)
+            {
+                var line = await reader.ReadLineAsync();
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith(":") || !line.StartsWith("data:"))
+                {
+                    continue;
+                }
+                var data = line.Substring(5).Trim();
+                if (data == "[DONE]")
+                {
+                    yield break;
+                }
+                var item = JsonSerializer.Deserialize<T>(data);
+                if (item != null)
+                {
+                    yield return item;
+                }
+            }
         }
 
         public async Task<T?> PutAsync<T>(

@@ -3,7 +3,7 @@ import { getRustCrateName } from './config.js';
 import { RustUsagePlanner, resolveRustExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new RustUsagePlanner(ctx);
+        const planner = new RustUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Rust generateTests requires at least one API operation to build a smoke test.');

@@ -1,5 +1,5 @@
 import { toSafeCamelIdentifier, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const JAVA_CONFIG = {
     language: 'java',
     displayName: 'Java',
@@ -126,7 +126,7 @@ export function getJavaType(schema, config) {
         return 'Object';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName);
     }
     const composed = pickComposedSchema(schema);

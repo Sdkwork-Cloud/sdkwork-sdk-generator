@@ -5,6 +5,7 @@ import {
   isNullSchema,
   normalizeSchemaTypeValue,
   pickComposedSchema,
+  getSchemaReferenceName,
   resolveMediaTypeSchema,
   resolveModelSchema,
   resolveSchemaReference,
@@ -192,5 +193,11 @@ describe('framework schema helpers', () => {
         value: { type: 'integer' },
       },
     });
+  });
+
+  it('decodes escaped JSON Pointer schema reference names for generated identifiers', () => {
+    expect(getSchemaReferenceName('#/components/schemas/Audit~1Event')).toBe('Audit/Event');
+    expect(getSchemaReferenceName('#/components/schemas/Audit~0Meta')).toBe('Audit~Meta');
+    expect(getSchemaReferenceName('#/components/schemas/Percent%20Encoded')).toBe('Percent Encoded');
   });
 });

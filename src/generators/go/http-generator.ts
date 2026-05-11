@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveGoCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GO_CONFIG } from './config.js';
@@ -9,7 +9,7 @@ export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveGoCommonPackage(config);
@@ -39,6 +39,7 @@ export class HttpClientGenerator {
       content: this.format(`package http
 
 import (
+    "bufio"
     "bytes"
     "encoding/json"
     "fmt"
@@ -195,6 +196,106 @@ func (c *Client) Request(
     contentType string,
 ) (interface{}, error) {
     return c.request(method, path, query, body, requestHeaders, contentType)
+}
+
+type SSEStream[T any] struct {
+    scanner *bufio.Scanner
+    body    io.ReadCloser
+}
+
+func (s *SSEStream[T]) Next() (T, bool, error) {
+    var zero T
+    for s.scanner.Scan() {
+        line := strings.TrimSpace(s.scanner.Text())
+        if line == "" || strings.HasPrefix(line, ":") {
+            continue
+        }
+        if !strings.HasPrefix(line, "data:") {
+            continue
+        }
+        data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+        if data == "[DONE]" {
+            _ = s.Close()
+            return zero, false, nil
+        }
+        var event T
+        if err := json.Unmarshal([]byte(data), &event); err != nil {
+            return zero, false, err
+        }
+        return event, true, nil
+    }
+    if err := s.scanner.Err(); err != nil {
+        return zero, false, err
+    }
+    _ = s.Close()
+    return zero, false, nil
+}
+
+func (s *SSEStream[T]) Close() error {
+    if s.body == nil {
+        return nil
+    }
+    err := s.body.Close()
+    s.body = nil
+    return err
+}
+
+func Stream[T any](
+    c *Client,
+    method string,
+    path string,
+    body interface{},
+    query map[string]interface{},
+    requestHeaders map[string]string,
+    contentType string,
+) (*SSEStream[T], error) {
+    requestURL, err := url.Parse(c.baseURL + path)
+    if err != nil {
+        return nil, err
+    }
+
+    if len(query) > 0 {
+        q := requestURL.Query()
+        for key, value := range query {
+            q.Set(key, fmt.Sprint(value))
+        }
+        requestURL.RawQuery = q.Encode()
+    }
+
+    reqBody, resolvedContentType, bodyErr := c.buildRequestBody(body, contentType)
+    if bodyErr != nil {
+        return nil, bodyErr
+    }
+
+    req, requestErr := http.NewRequest(method, requestURL.String(), reqBody)
+    if requestErr != nil {
+        return nil, requestErr
+    }
+
+    mergedHeaders := c.mergeHeaders(requestHeaders)
+    for key, value := range mergedHeaders {
+        req.Header.Set(key, value)
+    }
+    req.Header.Set("Accept", "text/event-stream")
+    if reqBody != nil && resolvedContentType != "" && req.Header.Get("Content-Type") == "" {
+        req.Header.Set("Content-Type", resolvedContentType)
+    }
+
+    resp, doErr := c.httpClient.Do(req)
+    if doErr != nil {
+        return nil, doErr
+    }
+
+    if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+        defer resp.Body.Close()
+        responseBody, _ := io.ReadAll(resp.Body)
+        return nil, fmt.Errorf("http status %d: %s", resp.StatusCode, string(responseBody))
+    }
+
+    return &SSEStream[T]{
+        scanner: bufio.NewScanner(resp.Body),
+        body:    resp.Body,
+    }, nil
 }
 
 func (c *Client) mergeHeaders(requestHeaders map[string]string) common.HttpHeaders {

@@ -1,14 +1,16 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { KOTLIN_CONFIG, getKotlinType } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
 const KOTLIN_JSON_CONTENT_TYPE = 'application/json';
 export class KotlinUsagePlanner {
-    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES) {
+    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES, config) {
         this.ctx = ctx;
-        this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+        this.config = config;
+        this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
         this.preferredModules = preferredModules;
         this.knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => KOTLIN_CONFIG.namingConventions.modelName(schemaName)));
     }
@@ -30,7 +32,7 @@ export class KotlinUsagePlanner {
     }
     buildPlan(tag, operation) {
         const operations = this.ctx.apiGroups[tag]?.operations || [];
-        const methodName = resolveKotlinMethodNames(tag, operations).get(operation) || 'operation';
+        const methodName = resolveKotlinMethodNames(tag, operations, this.config).get(operation) || 'operation';
         const moduleName = this.getModuleName(tag);
         const transportMethod = String(operation.method || '').toLowerCase();
         const variables = [];
@@ -323,9 +325,13 @@ export class KotlinUsagePlanner {
         return this.knownModels.has(typeName);
     }
 }
-export function resolveKotlinMethodNames(tag, operations) {
+export function resolveKotlinMethodNames(tag, operations, config) {
     if (!Array.isArray(operations) || operations.length === 0) {
         return new Map();
+    }
+    const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, KOTLIN_CONFIG, 'camel');
+    if (openAIStyleNames) {
+        return openAIStyleNames;
     }
     return resolveScopedMethodNames(operations, (operation) => generateKotlinOperationName(operation.method, operation.path, operation, tag));
 }
@@ -772,7 +778,7 @@ function resolveSchema(ctx, schema) {
         return schema;
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         return ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);

@@ -9,7 +9,7 @@ export class HttpClientGenerator {
     const configType = resolveTypeScriptConfigTypeName(config);
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const tagMetadata = buildTypeScriptTagMetadata(tags);
+    const tagMetadata = buildTypeScriptTagMetadata(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveTypeScriptCommonPackage(config);
@@ -203,6 +203,33 @@ export class HttpClient extends BaseHttpClient {
       }),
       { maxRetries: 3 }
     );
+  }
+
+  async *streamJson<T>(path: string, options: HttpRequestOptions = {}): AsyncIterable<T> {
+    const stream = (BaseHttpClient.prototype as any).stream;
+    if (typeof stream !== 'function') {
+      throw new Error('BaseHttpClient stream method is not available');
+    }
+    const { body, headers, contentType, method = 'GET', ...rest } = options;
+    const requestHeaders = this.buildRequestHeaders(
+      { Accept: 'text/event-stream', ...(headers ?? {}) },
+      body == null ? undefined : contentType,
+    );
+
+    for await (const data of stream.call(this, path, {
+      method,
+      ...rest,
+      body: this.buildRequestBody(body, contentType),
+      headers: requestHeaders,
+    })) {
+      if (data === '[DONE]') {
+        return;
+      }
+      if (typeof data !== 'string' || data.trim().length === 0) {
+        continue;
+      }
+      yield JSON.parse(data) as T;
+    }
   }
 
   async get<T>(path: string, params?: QueryParams, headers?: Record<string, string>): Promise<T> {

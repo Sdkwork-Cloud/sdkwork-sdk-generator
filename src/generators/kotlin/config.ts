@@ -1,6 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const KOTLIN_CONFIG: LanguageConfig = {
   language: 'kotlin',
@@ -133,7 +133,7 @@ export function getKotlinType(schema: any, config: LanguageConfig): string {
   }
 
   if (schema.$ref) {
-    const refName = schema.$ref.split('/').pop();
+    const refName = getSchemaReferenceName(schema.$ref);
     return config.namingConventions.modelName(refName);
   }
 

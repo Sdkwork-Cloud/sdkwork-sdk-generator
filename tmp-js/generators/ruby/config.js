@@ -1,6 +1,6 @@
 import { toSafeSnakeIdentifier } from '../../framework/identifiers.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const RUBY_CONFIG = {
     language: 'ruby',
     displayName: 'Ruby',
@@ -92,7 +92,7 @@ export function getRubyType(schema, config) {
         return 'Object';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName || 'Model');
     }
     const composed = pickComposedSchema(schema);

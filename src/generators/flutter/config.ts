@@ -1,7 +1,7 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const FLUTTER_RESERVED_WORDS = new Set([
   'abstract',
@@ -126,7 +126,7 @@ export function getFlutterType(schema: any, config: LanguageConfig): string {
   }
 
   if (schema.$ref) {
-    const refName = schema.$ref.split('/').pop();
+    const refName = getSchemaReferenceName(schema.$ref);
     return config.namingConventions.modelName(refName);
   }
 

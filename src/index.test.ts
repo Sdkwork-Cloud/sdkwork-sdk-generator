@@ -325,6 +325,57 @@ describe('Generator registry', () => {
     expect(readme!.content).toContain('`custom/`');
   });
 
+  it('should keep TypeScript common exports minimal for project-specific SDK guards', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, mockSpec);
+    const commonFile = getGeneratedFile(result.files, 'src/types/common.ts');
+
+    expect(commonFile.content).toContain(
+      "export type { Page, RequestConfig, RequestOptions, QueryParams } from '@sdkwork/sdk-common';",
+    );
+    expect(commonFile.content).not.toContain('PageResult');
+  });
+
+  it('should generate closed empty TypeScript interfaces for sealed empty object schemas', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, {
+      openapi: '3.0.0',
+      info: { title: 'Empty Request API', version: '1.0.0' },
+      paths: {
+        '/sessions': {
+          post: {
+            summary: 'Create app session',
+            operationId: 'createAppSession',
+            tags: ['Session'],
+            requestBody: {
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/CreateAppSessionRequest' },
+                },
+              },
+            },
+            responses: { '200': { description: 'Success' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          CreateAppSessionRequest: {
+            type: 'object',
+            description: 'Explicit empty request body for create app session.',
+            properties: {},
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    const requestFile = getGeneratedFile(result.files, 'src/types/create-app-session-request.ts');
+
+    expect(requestFile.content).toContain('/** Explicit empty request body for create app session. */');
+    expect(requestFile.content).toContain('export interface CreateAppSessionRequest {}');
+    expect(requestFile.content).not.toContain('Record<string, unknown>');
+  });
+
   it('should emit sdk metadata with standardized capabilities and ownership boundaries', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate({ ...baseConfig, generateTests: true }, mockSpec);
@@ -1000,6 +1051,109 @@ const openApi31ConstSpec = {
   },
 } as unknown as ApiSpec;
 
+const escapedJsonPointerRefSpec = {
+  openapi: '3.1.0',
+  info: { title: 'Escaped JSON Pointer API', version: '1.0.0' },
+  paths: {
+    '/audit': {
+      get: {
+        summary: 'Get escaped ref envelope',
+        operationId: 'getEscapedRefEnvelope',
+        tags: ['Escaped Ref'],
+        responses: {
+          '200': {
+            description: 'Escaped ref envelope',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/EscapedEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      'Audit/Event': {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+      'Audit~Meta': {
+        type: 'object',
+        properties: {
+          traceId: { type: 'string' },
+        },
+      },
+      EscapedEnvelope: {
+        type: 'object',
+        required: ['event'],
+        properties: {
+          event: { $ref: '#/components/schemas/Audit~1Event' },
+          meta: { $ref: '#/components/schemas/Audit~0Meta' },
+        },
+      },
+    },
+  },
+} as unknown as ApiSpec;
+
+const escapedOpenApiComponentRefSpec = {
+  openapi: '3.1.0',
+  info: { title: 'Escaped OpenAPI Component Ref API', version: '1.0.0' },
+  paths: {
+    '/audit/{eventId}': {
+      get: {
+        summary: 'Get audit event through escaped OpenAPI component refs',
+        operationId: 'getAuditEventWithEscapedRefs',
+        tags: ['Audit'],
+        parameters: [
+          { name: 'eventId', in: 'path', required: true, schema: { type: 'string' } },
+          { $ref: '#/components/parameters/Audit~1Filter' },
+          { $ref: '#/components/parameters/Trace%20Id' },
+        ],
+        responses: {
+          '200': { $ref: '#/components/responses/Audit~1EventResponse' },
+        },
+      },
+    },
+  },
+  components: {
+    parameters: {
+      'Audit/Filter': {
+        name: 'filter',
+        in: 'query',
+        schema: { type: 'string' },
+      },
+      'Trace Id': {
+        name: 'X-Trace-Id',
+        in: 'header',
+        schema: { type: 'string' },
+      },
+    },
+    responses: {
+      'Audit/EventResponse': {
+        description: 'Audit event',
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/AuditEvent' },
+          },
+        },
+      },
+    },
+    schemas: {
+      AuditEvent: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+    },
+  },
+} as unknown as ApiSpec;
+
 const pythonKeywordPropertySpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Python Keyword Property API', version: '1.0.0' },
@@ -1142,6 +1296,166 @@ const scalarHeaderCookieParameterSpec: ApiSpec = {
   },
   components: {
     schemas: {},
+  },
+};
+
+const advancedParameterSerializationSpec: ApiSpec = {
+  openapi: '3.1.1',
+  info: { title: 'Advanced Parameter Serialization API', version: '1.0.0' },
+  paths: {
+    '/resources/{tenant}/{labels}/{matrix}': {
+      get: {
+        summary: 'Read resource with OpenAPI transport serialization',
+        operationId: 'readSerializedResource',
+        tags: ['Resource'],
+        parameters: [
+          {
+            name: 'tenant',
+            in: 'path',
+            required: true,
+            style: 'simple',
+            explode: false,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'labels',
+            in: 'path',
+            required: true,
+            style: 'label',
+            explode: true,
+            schema: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+            },
+          },
+          {
+            name: 'matrix',
+            in: 'path',
+            required: true,
+            style: 'matrix',
+            explode: false,
+            schema: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+          },
+          {
+            name: 'X-Trace-Parts',
+            in: 'header',
+            required: true,
+            style: 'simple',
+            explode: true,
+            schema: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+            },
+          },
+          {
+            name: 'session',
+            in: 'cookie',
+            required: false,
+            style: 'form',
+            explode: false,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    mode: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const eventStreamResponseSpec: ApiSpec = {
+  openapi: '3.1.1',
+  info: { title: 'Streaming Chat API', version: '1.0.0' },
+  paths: {
+    '/chat/completions': {
+      post: {
+        summary: 'Create streaming chat completion',
+        operationId: 'createChatCompletion',
+        tags: ['Chat'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateChatCompletionRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Streaming chunks',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ChatCompletionObject' },
+              },
+              'text/event-stream; charset=utf-8': {
+                schema: { $ref: '#/components/schemas/ChatCompletionChunk' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      CreateChatCompletionRequest: {
+        type: 'object',
+        required: ['model', 'messages'],
+        properties: {
+          model: { type: 'string' },
+          stream: { type: 'boolean' },
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: true,
+            },
+          },
+        },
+      },
+      ChatCompletionObject: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          object: { type: 'string' },
+        },
+      },
+      ChatCompletionChunk: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          object: { type: 'string' },
+          choices: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                index: { type: 'integer' },
+                delta: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+                finish_reason: { type: ['string', 'null'] },
+              },
+            },
+          },
+        },
+      },
+    },
   },
 };
 
@@ -1637,6 +1951,79 @@ const prefixedOperationIdSpec: ApiSpec = {
   },
 };
 
+const suffixVerbOperationIdSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Suffix Verb OperationId API', version: '1.0.0' },
+  paths: {
+    '/skills/{skillId}/enable': {
+      post: {
+        summary: 'Enable skill',
+        operationId: 'enableSkill',
+        tags: ['Skill'],
+        parameters: [{ name: 'skillId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/skills/{skillId}/disable': {
+      post: {
+        summary: 'Disable skill',
+        operationId: 'disableSkill',
+        tags: ['Skill'],
+        parameters: [{ name: 'skillId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/skills/{skillId}/review/approve': {
+      post: {
+        summary: 'Approve skill',
+        operationId: 'approveSkill',
+        tags: ['Skill'],
+        parameters: [{ name: 'skillId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/skills/{skillId}/review/reject': {
+      post: {
+        summary: 'Reject skill',
+        operationId: 'rejectSkill',
+        tags: ['Skill'],
+        parameters: [{ name: 'skillId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/apps/{appId}/publish': {
+      post: {
+        summary: 'Publish app',
+        operationId: 'publishApp',
+        tags: ['App'],
+        parameters: [{ name: 'appId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/apps/{appId}/offline': {
+      post: {
+        summary: 'Offline app',
+        operationId: 'offlineApp',
+        tags: ['App'],
+        parameters: [{ name: 'appId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/apps/{appId}': {
+      get: {
+        summary: 'Fetch app',
+        operationId: 'fetchApp',
+        tags: ['App'],
+        parameters: [{ name: 'appId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
 const nonAsciiTagSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Non-ASCII Tag API', version: '1.0.0' },
@@ -1785,6 +2172,41 @@ const aiDomainGroupingSpec: ApiSpec = {
         operationId: 'listChatCompletionMessages',
         tags: ['Chat'],
         parameters: [{ name: 'completion_id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const aiOpenAiResourceNamingSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'AI OpenAI Resource Naming API', version: '1.0.0' },
+  paths: {
+    ...aiDomainGroupingSpec.paths,
+    '/ai/v3/files': {
+      get: {
+        summary: 'List files',
+        operationId: 'listFiles',
+        tags: ['File'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/ai/v3/batches': {
+      get: {
+        summary: 'List batches',
+        operationId: 'listBatches',
+        tags: ['Batch'],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+    '/ai/v3/responses': {
+      post: {
+        summary: 'Create response',
+        operationId: 'createResponse',
+        tags: ['Response'],
         responses: { '200': { description: 'Success' } },
       },
     },
@@ -3024,6 +3446,171 @@ describe('OpenAPI Security And Compliance', () => {
     }
   });
 
+  it('should decode escaped JSON Pointer component refs across generated SDK languages', async () => {
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        filePath: 'src/types/escaped-envelope.ts',
+        expected: [
+          "import type { AuditEvent } from './audit-event';",
+          "import type { AuditMeta } from './audit-meta';",
+          'event: AuditEvent;',
+          'meta?: AuditMeta;',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'event: unknown;', 'meta?: unknown;'],
+      },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        filePath: 'sdkwork_backend_sdk/models/escaped_envelope.py',
+        expected: [
+          'from .audit_event import AuditEvent',
+          'from .audit_meta import AuditMeta',
+          'event: AuditEvent',
+          'meta: Optional[AuditMeta] = None',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'event: Any', 'meta: Optional[Any]'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        filePath: 'types/escaped_envelope.go',
+        expected: [
+          'Event AuditEvent `json:"event"`',
+          'Meta AuditMeta `json:"meta"`',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'interface{} `json:"event"`', 'interface{} `json:"meta"`'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        filePath: 'src/main/java/com/sdkwork/backend/model/EscapedEnvelope.java',
+        expected: [
+          'private AuditEvent event;',
+          'private AuditMeta meta;',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'private Object event;', 'private Object meta;'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        filePath: 'src/main/kotlin/com/sdkwork/backend/EscapedEnvelope.kt',
+        expected: [
+          'val event: AuditEvent? = null',
+          'val meta: AuditMeta? = null',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'val event: Any? = null', 'val meta: Any? = null'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        filePath: 'Models/EscapedEnvelope.cs',
+        expected: [
+          'public AuditEvent? Event { get; set; }',
+          'public AuditMeta? Meta { get; set; }',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'public object? Event', 'public object? Meta'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        filePath: 'src/models/escaped_envelope.rs',
+        expected: [
+          'use crate::models::{AuditEvent, AuditMeta};',
+          'pub event: AuditEvent,',
+          'pub meta: Option<AuditMeta>,',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'pub event: serde_json::Value', 'pub meta: Option<serde_json::Value>'],
+      },
+      {
+        language: 'dart' as const,
+        generator: new DartGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final AuditEvent? event;',
+          'final AuditMeta? meta;',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'final dynamic event;', 'final dynamic meta;'],
+      },
+      {
+        language: 'flutter' as const,
+        generator: new FlutterGenerator(),
+        filePath: 'lib/src/models.dart',
+        expected: [
+          'final AuditEvent? event;',
+          'final AuditMeta? meta;',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'final dynamic event;', 'final dynamic meta;'],
+      },
+      {
+        language: 'swift' as const,
+        generator: new SwiftGenerator(),
+        filePath: 'Sources/Models.swift',
+        expected: [
+          'public let event: AuditEvent?',
+          'public let meta: AuditMeta?',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'public let event: Any?', 'public let meta: Any?'],
+      },
+      {
+        language: 'php' as const,
+        generator: new PhpGenerator(),
+        filePath: 'src/Models/EscapedEnvelope.php',
+        expected: [
+          'use SDKWork\\Backend\\Models\\AuditEvent;',
+          'use SDKWork\\Backend\\Models\\AuditMeta;',
+          'public ?AuditEvent $event = null;',
+          'public ?AuditMeta $meta = null;',
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', 'public mixed $event', 'public mixed $meta'],
+      },
+      {
+        language: 'ruby' as const,
+        generator: new RubyGenerator(),
+        filePath: 'lib/sdkwork/backend_sdk/models/escaped_envelope.rb',
+        expected: [
+          "@event = attributes['event'].is_a?(Hash) ? AuditEvent.from_hash(attributes['event']) : nil",
+          "@meta = attributes['meta'].is_a?(Hash) ? AuditMeta.from_hash(attributes['meta']) : nil",
+        ],
+        forbidden: ['Audit1Event', 'Audit0Meta', "@event = attributes['event']\n", "@meta = attributes['meta']\n"],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language },
+        escapedJsonPointerRefSpec
+      );
+      const modelFile = getGeneratedFile(result.files, testCase.filePath);
+
+      expect(result.errors).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(modelFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(modelFile.content, `${testCase.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should resolve escaped OpenAPI component refs before SDK generation', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, escapedOpenApiComponentRefSpec);
+
+    expect(result.errors).toEqual([]);
+    const auditApi = getGeneratedFile(result.files, 'src/api/audit.ts');
+    expect(auditApi.content).toContain('async getAuditEventWithEscapedRefs(');
+    expect(auditApi.content).toContain('filter?: string');
+    expect(auditApi.content).toContain('xTraceId?: string');
+    expect(auditApi.content).toContain("name: 'filter'");
+    expect(auditApi.content).toContain('buildQueryString(');
+    expect(auditApi.content).toContain('buildRequestHeaders(');
+    expect(auditApi.content).toContain("'X-Trace-Id': { value: xTraceId, style: 'simple', explode: false }");
+    expect(auditApi.content).toContain('Promise<AuditEvent>');
+    expect(auditApi.content).not.toContain('GENERATION_ERROR');
+  });
+
   it('should escape python keyword property names', async () => {
     const generator = new PythonGenerator();
     const result = await generator.generate(
@@ -3153,12 +3740,14 @@ describe('OpenAPI Security And Compliance', () => {
     );
 
     expect(tsApi).toBeDefined();
-    expect(tsApi!.content).toContain('class_: string | number');
-    expect(tsApi!.content).toContain('userId: string | number');
-    expect(tsApi!.content).toContain('headers: string | number');
+    expect(tsApi!.content).toContain('class_: string');
+    expect(tsApi!.content).toContain('userId: string');
+    expect(tsApi!.content).toContain('headers: string');
     expect(tsApi!.content).toContain('xTraceId?: string');
     expect(tsApi!.content).not.toContain('headers?: Record<string, string>');
-    expect(tsApi!.content).toContain('/keyword-model/${class_}/${userId}/${headers}');
+    expect(tsApi!.content).toContain("serializePathParameter(class_, { name: 'class', style: 'simple', explode: false })");
+    expect(tsApi!.content).toContain("serializePathParameter(userId, { name: 'user-id', style: 'simple', explode: false })");
+    expect(tsApi!.content).toContain("serializePathParameter(headers, { name: 'headers', style: 'simple', explode: false })");
 
     const pyGenerator = new PythonGenerator();
     const pyResult = await pyGenerator.generate({ ...baseConfig, language: 'python' }, pathParameterIdentifierSpec);
@@ -3172,7 +3761,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(pyApi!.content).toContain('headers: str');
     expect(pyApi!.content).toContain('x_trace_id: Optional[str] = None');
     expect(pyApi!.content).not.toContain('headers: Optional[Dict[str, str]] = None');
-    expect(pyApi!.content).toContain('f"/api/v1/keyword-model/{class_}/{user_id}/{headers}"');
+    expect(pyApi!.content).toContain("serialize_path_parameter(class_, {'name': 'class', 'style': 'simple', 'explode': False})");
+    expect(pyApi!.content).toContain("serialize_path_parameter(user_id, {'name': 'user-id', 'style': 'simple', 'explode': False})");
+    expect(pyApi!.content).toContain("serialize_path_parameter(headers, {'name': 'headers', 'style': 'simple', 'explode': False})");
   });
 
   it('should generate named TypeScript header and cookie parameters with Cookie header assembly', async () => {
@@ -3184,8 +3775,8 @@ describe('OpenAPI Security And Compliance', () => {
     expect(apiFile).toBeDefined();
     expect(apiFile!.content).toContain('async listResources(xTraceId: string, sessionId?: string): Promise<void>');
     expect(apiFile!.content).toContain("const requestHeaders = buildRequestHeaders(");
-    expect(apiFile!.content).toContain("'X-Trace-Id': xTraceId");
-    expect(apiFile!.content).toContain("session_id: sessionId");
+    expect(apiFile!.content).toContain("'X-Trace-Id': { value: xTraceId, style: 'simple', explode: false }");
+    expect(apiFile!.content).toContain("session_id: { value: sessionId, style: 'form', explode: true }");
     expect(apiFile!.content).toContain('this.client.get<void>(backendApiPath(`/resources`), undefined, requestHeaders)');
     expect(apiFile!.content).not.toContain('headers?: Record<string, string>');
   });
@@ -3819,8 +4410,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'def list_resources(self, x_trace_id: str, session_id: Optional[str] = None) -> None:',
           'request_headers = build_request_headers(',
-          "'X-Trace-Id': x_trace_id",
-          "'session_id': session_id",
+          "'X-Trace-Id': {'value': x_trace_id, 'style': 'simple', 'explode': False}",
+          "'session_id': {'value': session_id, 'style': 'form', 'explode': True}",
           'headers=request_headers',
         ],
         forbidden: ['headers: Optional[Dict[str, str]] = None'],
@@ -3832,8 +4423,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'Future<void> listResources(String xTraceId, [String? sessionId]) async {',
           'final requestHeaders = buildRequestHeaders(',
-          "'X-Trace-Id': xTraceId",
-          "'session_id': sessionId",
+          "'X-Trace-Id': HeaderParameterSpec(xTraceId, 'simple', false, null)",
+          "'session_id': HeaderParameterSpec(sessionId, 'form', true, null)",
           'headers: requestHeaders',
         ],
         forbidden: ['Map<String, String>? headers'],
@@ -3845,8 +4436,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'Future<void> listResources(String xTraceId, [String? sessionId]) async {',
           'final requestHeaders = buildRequestHeaders(',
-          "'X-Trace-Id': xTraceId",
-          "'session_id': sessionId",
+          "'X-Trace-Id': HeaderParameterSpec(xTraceId, 'simple', false, null)",
+          "'session_id': HeaderParameterSpec(sessionId, 'form', true, null)",
           'headers: requestHeaders',
         ],
         forbidden: ['Map<String, String>? headers'],
@@ -3858,8 +4449,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'func (a *ResourceApi) ListResources(xTraceId string, sessionId *string)',
           'headers := BuildRequestHeaders(',
-          '"X-Trace-Id": xTraceId',
-          '"session_id": func() interface{} { if sessionId == nil { return nil }; return *sessionId }()',
+          '"X-Trace-Id": ParameterSpec{Value: xTraceId, Style: "simple", Explode: false}',
+          '"session_id": ParameterSpec{Value: func() interface{} { if sessionId == nil { return nil }; return *sessionId }(), Style: "form", Explode: true}',
           'a.client.Get(BackendApiPath("/resources"), nil, headers)',
         ],
         forbidden: ['headers map[string]string'],
@@ -3871,8 +4462,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'public Void listResources(String xTraceId, String sessionId)',
           'Map<String, String> requestHeaders = buildRequestHeaders(',
-          '"X-Trace-Id", xTraceId',
-          '"session_id", sessionId',
+          'Map.of("X-Trace-Id", new HeaderParameterSpec(xTraceId, "simple", false, null))',
+          'Map.of("session_id", new HeaderParameterSpec(sessionId, "form", true, null))',
           'client.get(ApiPaths.backendPath("/resources"), null, requestHeaders)',
         ],
         forbidden: ['Map<String, String> headers'],
@@ -3884,8 +4475,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'suspend fun listResources(xTraceId: String, sessionId: String? = null)',
           'val requestHeaders = buildRequestHeaders(',
-          '"X-Trace-Id" to xTraceId',
-          '"session_id" to sessionId',
+          '"X-Trace-Id" to HeaderParameterSpec(xTraceId, "simple", false, null)',
+          '"session_id" to HeaderParameterSpec(sessionId, "form", true, null)',
           'client.get(ApiPaths.backendPath("/resources"), null, requestHeaders)',
         ],
         forbidden: ['headers: Map<String, String>? = null'],
@@ -3897,8 +4488,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'public func listResources(xTraceId: String, sessionId: String? = nil) async throws -> Void',
           'let requestHeaders = buildRequestHeaders(',
-          '"X-Trace-Id": xTraceId',
-          '"session_id": sessionId',
+          '"X-Trace-Id": HeaderParameterSpec(value: xTraceId, style: "simple", explode: false, contentType: nil)',
+          '"session_id": HeaderParameterSpec(value: sessionId, style: "form", explode: true, contentType: nil)',
           'headers: requestHeaders',
         ],
         forbidden: ['headers: [String: String]? = nil'],
@@ -3910,8 +4501,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'public async Task ListResourcesAsync(string xTraceId, string? sessionId = null)',
           'var requestHeaders = BuildRequestHeaders(',
-          '["X-Trace-Id"] = xTraceId',
-          '["session_id"] = sessionId',
+          '["X-Trace-Id"] = new HeaderParameterSpec(xTraceId, "simple", false, null)',
+          '["session_id"] = new HeaderParameterSpec(sessionId, "form", true, null)',
           '_client.GetAsync<object>(ApiPaths.BackendPath("/resources"), null, requestHeaders)',
         ],
         forbidden: ['Dictionary<string, string>? headers = null'],
@@ -3923,8 +4514,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'pub async fn list_resources(&self, x_trace_id: &str, session_id: Option<&str>) -> Result<(), SdkworkError>',
           'let headers = build_request_headers(',
-          '("X-Trace-Id", serialize_parameter_value(&x_trace_id))',
-          '("session_id", session_id.as_ref().and_then(serialize_parameter_value))',
+          '("X-Trace-Id", HeaderParameterSpec::new(x_trace_id, "simple", false, None))',
+          '("session_id", HeaderParameterSpec::new(session_id, "form", true, None))',
           'self.client.get(&path, None, headers.as_ref()).await',
         ],
         forbidden: ['headers: Option<&RequestHeaders>'],
@@ -3936,8 +4527,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'public function listResources(string $xTraceId, ?string $sessionId = null): void',
           '$requestHeaders = $this->buildRequestHeaders(',
-          "'X-Trace-Id' => $xTraceId",
-          "'session_id' => $sessionId",
+          "'X-Trace-Id' => new HeaderParameterSpec($xTraceId, 'simple', false, null)",
+          "'session_id' => new HeaderParameterSpec($sessionId, 'form', true, null)",
           "'headers' => $requestHeaders",
         ],
         forbidden: ['array $headers = []'],
@@ -3949,8 +4540,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'def list_resources(x_trace_id, session_id: nil)',
           'request_headers = build_request_headers(',
-          "'X-Trace-Id' => x_trace_id",
-          "'session_id' => session_id",
+          "'X-Trace-Id' => HeaderParameterSpec.new(x_trace_id, 'simple', false, nil)",
+          "'session_id' => HeaderParameterSpec.new(session_id, 'form', true, nil)",
           'options[:headers] = request_headers unless request_headers.empty?',
         ],
         forbidden: ['headers: {}'],
@@ -3978,12 +4569,445 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(rustApi.content).toContain('pub async fn list_resources(&self, x_retry_count: i64, debug_mode: Option<bool>) -> Result<(), SdkworkError>');
-    expect(rustApi.content).toContain('("X-Retry-Count", serialize_parameter_value(&x_retry_count))');
-    expect(rustApi.content).toContain('("debug_mode", debug_mode.as_ref().and_then(serialize_parameter_value))');
-    expect(rustApi.content).toContain('fn build_request_headers(headers: &[(&str, Option<String>)], cookies: &[(&str, Option<String>)])');
-    expect(rustApi.content).toContain('fn serialize_parameter_value<T: serde::Serialize>(value: &T) -> Option<String>');
+    expect(rustApi.content).toContain('("X-Retry-Count", HeaderParameterSpec::new(x_retry_count, "simple", false, None))');
+    expect(rustApi.content).toContain('("debug_mode", HeaderParameterSpec::new(debug_mode, "form", true, None))');
+    expect(rustApi.content).toContain('fn build_request_headers(headers: &[(&str, HeaderParameterSpec)], cookies: &[(&str, HeaderParameterSpec)])');
+    expect(rustApi.content).toContain('fn serialize_header_parameter(parameter: &HeaderParameterSpec) -> Option<String>');
     expect(rustApi.content).not.toContain('x_retry_count: &str');
     expect(rustApi.content).not.toContain('debug_mode: Option<&str>');
+  });
+
+  it('should generate OpenAPI path header and cookie parameter serialization metadata across SDK languages', async () => {
+    const cases = [
+      {
+        generator: new TypeScriptGenerator(),
+        config: baseConfig,
+        apiPath: 'src/api/resource.ts',
+        expected: [
+          'async readSerialized(tenant: string, labels: Record<string, string>, matrix: string[], xTraceParts: Record<string, string>, session?: Record<string, unknown>): Promise<void>',
+          'serializePathParameter(tenant, { name: \'tenant\', style: \'simple\', explode: false })',
+          'serializePathParameter(labels, { name: \'labels\', style: \'label\', explode: true })',
+          'serializePathParameter(matrix, { name: \'matrix\', style: \'matrix\', explode: false })',
+          "buildRequestHeaders(",
+          "'X-Trace-Parts': { value: xTraceParts, style: 'simple', explode: true }",
+          "session: { value: session, style: 'form', explode: false, contentType: 'application/json' }",
+        ],
+        forbidden: ['/${tenant}/${labels}/${matrix}'],
+      },
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const },
+        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        expected: [
+          'def read_serialized(self, tenant: str, labels: Dict[str, str], matrix: List[str], x_trace_parts: Dict[str, str], session: Optional[Dict[str, Any]] = None) -> None:',
+          "serialize_path_parameter(tenant, {'name': 'tenant', 'style': 'simple', 'explode': False})",
+          "serialize_path_parameter(labels, {'name': 'labels', 'style': 'label', 'explode': True})",
+          "serialize_path_parameter(matrix, {'name': 'matrix', 'style': 'matrix', 'explode': False})",
+          'request_headers = build_request_headers(',
+          "'X-Trace-Parts': {'value': x_trace_parts, 'style': 'simple', 'explode': True}",
+          "'session': {'value': session, 'style': 'form', 'explode': False, 'content_type': 'application/json'}",
+        ],
+        forbidden: ['{tenant}/{labels}/{matrix}'],
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const },
+        apiPath: 'api/resource.go',
+        expected: [
+          'func (a *ResourceApi) ReadSerialized(tenant string, labels map[string]string, matrix []string, xTraceParts map[string]string, session *map[string]interface{}) (struct{}, error)',
+          'SerializePathParameter(tenant, PathParameterSpec{Name: "tenant", Style: "simple", Explode: false})',
+          'SerializePathParameter(labels, PathParameterSpec{Name: "labels", Style: "label", Explode: true})',
+          'SerializePathParameter(matrix, PathParameterSpec{Name: "matrix", Style: "matrix", Explode: false})',
+          'headers := BuildRequestHeaders(',
+          '"X-Trace-Parts": ParameterSpec{Value: xTraceParts, Style: "simple", Explode: true}',
+          '"session": ParameterSpec{Value: func() interface{} { if session == nil { return nil }; return *session }(), Style: "form", Explode: false, ContentType: "application/json"}',
+        ],
+        forbidden: ['fmt.Sprintf("/resources/%s/%s/%s", tenant, labels, matrix)'],
+      },
+      {
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const },
+        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        expected: [
+          'public Void readSerialized(String tenant, Map<String, String> labels, List<String> matrix, Map<String, String> xTraceParts, Map<String, Object> session) throws Exception',
+          'serializePathParameter(tenant, new PathParameterSpec("tenant", "simple", false))',
+          'serializePathParameter(labels, new PathParameterSpec("labels", "label", true))',
+          'serializePathParameter(matrix, new PathParameterSpec("matrix", "matrix", false))',
+          'Map<String, String> requestHeaders = buildRequestHeaders(',
+          'new HeaderParameterSpec(xTraceParts, "simple", true, null)',
+          'new HeaderParameterSpec(session, "form", false, "application/json")',
+        ],
+        forbidden: ['"/resources/" + tenant + "/" + labels + "/" + matrix + "'],
+      },
+      {
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const },
+        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        expected: [
+          'suspend fun readSerialized(tenant: String, labels: Map<String, String>, matrix: List<String>, xTraceParts: Map<String, String>, session: Map<String, Any>? = null): Unit',
+          'serializePathParameter(tenant, PathParameterSpec("tenant", "simple", false))',
+          'serializePathParameter(labels, PathParameterSpec("labels", "label", true))',
+          'serializePathParameter(matrix, PathParameterSpec("matrix", "matrix", false))',
+          'val requestHeaders = buildRequestHeaders(',
+          'HeaderParameterSpec(xTraceParts, "simple", true, null)',
+          'HeaderParameterSpec(session, "form", false, "application/json")',
+        ],
+        forbidden: ['"/resources/$tenant/$labels/$matrix"'],
+      },
+      {
+        generator: new DartGenerator(),
+        config: { ...baseConfig, language: 'dart' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expected: [
+          'Future<void> readSerialized(String tenant, Map<String, String> labels, List<String> matrix, Map<String, String> xTraceParts, [Map<String, dynamic>? session]) async {',
+          "serializePathParameter(tenant, const PathParameterSpec('tenant', 'simple', false))",
+          "serializePathParameter(labels, const PathParameterSpec('labels', 'label', true))",
+          "serializePathParameter(matrix, const PathParameterSpec('matrix', 'matrix', false))",
+          'final requestHeaders = buildRequestHeaders(',
+          "'X-Trace-Parts': HeaderParameterSpec(xTraceParts, 'simple', true, null)",
+          "'session': HeaderParameterSpec(session, 'form', false, 'application/json')",
+        ],
+        forbidden: ["'/resources/$tenant/$labels/$matrix'"],
+      },
+      {
+        generator: new FlutterGenerator(),
+        config: { ...baseConfig, language: 'flutter' as const },
+        apiPath: 'lib/src/api/resource.dart',
+        expected: [
+          'Future<void> readSerialized(String tenant, Map<String, String> labels, List<String> matrix, Map<String, String> xTraceParts, [Map<String, dynamic>? session]) async {',
+          "serializePathParameter(tenant, const PathParameterSpec('tenant', 'simple', false))",
+          "serializePathParameter(labels, const PathParameterSpec('labels', 'label', true))",
+          "serializePathParameter(matrix, const PathParameterSpec('matrix', 'matrix', false))",
+          'final requestHeaders = buildRequestHeaders(',
+          "'X-Trace-Parts': HeaderParameterSpec(xTraceParts, 'simple', true, null)",
+          "'session': HeaderParameterSpec(session, 'form', false, 'application/json')",
+        ],
+        forbidden: ["'/resources/$tenant/$labels/$matrix'"],
+      },
+      {
+        generator: new SwiftGenerator(),
+        config: { ...baseConfig, language: 'swift' as const },
+        apiPath: 'Sources/API/ResourceApi.swift',
+        expected: [
+          'public func readSerialized(tenant: String, labels: [String: String], matrix: [String], xTraceParts: [String: String], session: [String: Any]? = nil) async throws -> Void',
+          'serializePathParameter(tenant, PathParameterSpec(name: "tenant", style: "simple", explode: false))',
+          'serializePathParameter(labels, PathParameterSpec(name: "labels", style: "label", explode: true))',
+          'serializePathParameter(matrix, PathParameterSpec(name: "matrix", style: "matrix", explode: false))',
+          'let requestHeaders = buildRequestHeaders(',
+          '"X-Trace-Parts": HeaderParameterSpec(value: xTraceParts, style: "simple", explode: true, contentType: nil)',
+          '"session": HeaderParameterSpec(value: session, style: "form", explode: false, contentType: "application/json")',
+        ],
+        forbidden: ['"/resources/\\(tenant)/\\(labels)/\\(matrix)"'],
+      },
+      {
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const },
+        apiPath: 'Api/ResourceApi.cs',
+        expected: [
+          'public async Task ReadSerializedAsync(string tenant, Dictionary<string, string> labels, List<string> matrix, Dictionary<string, string> xTraceParts, Dictionary<string, object>? session = null)',
+          'SerializePathParameter(tenant, new PathParameterSpec("tenant", "simple", false))',
+          'SerializePathParameter(labels, new PathParameterSpec("labels", "label", true))',
+          'SerializePathParameter(matrix, new PathParameterSpec("matrix", "matrix", false))',
+          'var requestHeaders = BuildRequestHeaders(',
+          'new HeaderParameterSpec(xTraceParts, "simple", true, null)',
+          'new HeaderParameterSpec(session, "form", false, "application/json")',
+        ],
+        forbidden: ['$"/resources/{tenant}/{labels}/{matrix}"'],
+      },
+      {
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const },
+        apiPath: 'src/api/resource.rs',
+        expected: [
+          'pub async fn read_serialized(&self, tenant: &str, labels: &std::collections::HashMap<String, String>, matrix: &[String], x_trace_parts: &std::collections::HashMap<String, String>, session: Option<&serde_json::Value>) -> Result<(), SdkworkError>',
+          'serialize_path_parameter(tenant, PathParameterSpec::new("tenant", "simple", false))',
+          'serialize_path_parameter(labels, PathParameterSpec::new("labels", "label", true))',
+          'serialize_path_parameter(matrix, PathParameterSpec::new("matrix", "matrix", false))',
+          'let headers = build_request_headers(',
+          '("X-Trace-Parts", HeaderParameterSpec::new(x_trace_parts, "simple", true, None))',
+          '("session", HeaderParameterSpec::new(session, "form", false, Some("application/json")))',
+        ],
+        forbidden: ['format!("/resources/{}/{}/{}", tenant, labels, matrix)'],
+      },
+      {
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const },
+        apiPath: 'src/Api/Resource.php',
+        expected: [
+          'public function readSerialized(string $tenant, array $labels, array $matrix, array $xTraceParts, ?array $session = null): void',
+          "new PathParameterSpec('tenant', 'simple', false)",
+          "new PathParameterSpec('labels', 'label', true)",
+          "new PathParameterSpec('matrix', 'matrix', false)",
+          '$requestHeaders = $this->buildRequestHeaders(',
+          "new HeaderParameterSpec($xTraceParts, 'simple', true, null)",
+          "new HeaderParameterSpec($session, 'form', false, 'application/json')",
+        ],
+        forbidden: ["rawurlencode((string) $value)"],
+      },
+      {
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const },
+        apiPath: 'lib/sdkwork/backend_sdk/api/resource.rb',
+        expected: [
+          'def read_serialized(tenant, labels, matrix, x_trace_parts, session: nil)',
+          "PathParameterSpec.new('tenant', 'simple', false)",
+          "PathParameterSpec.new('labels', 'label', true)",
+          "PathParameterSpec.new('matrix', 'matrix', false)",
+          'request_headers = build_request_headers(',
+          "HeaderParameterSpec.new(x_trace_parts, 'simple', true, nil)",
+          "HeaderParameterSpec.new(session, 'form', false, 'application/json')",
+        ],
+        forbidden: ['CGI.escape(value.to_s)'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, advancedParameterSerializationSpec);
+      const apiFile = getGeneratedFile(result.files, testCase.apiPath);
+
+      expect(result.errors, testCase.config.language).toEqual([]);
+      for (const expected of testCase.expected) {
+        expect(apiFile.content, `${testCase.config.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(apiFile.content, `${testCase.config.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
+  it('should include Go collection conversion helpers when only path and header serialization need them', async () => {
+    const result = await new GoGenerator().generate({ ...baseConfig, language: 'go' }, advancedParameterSerializationSpec);
+    const apiFile = getGeneratedFile(result.files, 'api/resource.go');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile.content).toContain('SerializePathParameter(labels, PathParameterSpec{Name: "labels", Style: "label", Explode: true})');
+    expect(apiFile.content).toContain('func stringSliceToInterface(values []string) []interface{}');
+    expect(apiFile.content).toContain('func stringMapToInterface(values map[string]string) map[string]interface{}');
+    expect(apiFile.content).toContain('func intSliceToInterface(values []int) []interface{}');
+    expect(apiFile.content).toContain('func intMapToInterface(values map[string]int) map[string]interface{}');
+  });
+
+  it('should generate first-class SSE streaming support across SDK languages', async () => {
+    const aiConfig = {
+      ...baseConfig,
+      sdkType: 'ai' as const,
+      apiPrefix: '/v1',
+      name: 'SdkworkAI',
+    };
+
+    const tsResult = await new TypeScriptGenerator().generate({ ...aiConfig, language: 'typescript' }, eventStreamResponseSpec);
+    const tsApi = getGeneratedFile(tsResult.files, 'src/api/chat.ts');
+    const tsHttp = getGeneratedFile(tsResult.files, 'src/http/client.ts');
+    expect(tsResult.errors).toEqual([]);
+    expect(tsApi.content).toContain('async create(body: CreateChatCompletionRequest): Promise<AsyncIterable<ChatCompletionChunk>>');
+    expect(tsApi.content).toContain("this.client.streamJson<ChatCompletionChunk>(aiApiPath(`/chat/completions`)");
+    expect(tsApi.content).not.toContain('this.client.post<ChatCompletionChunk>');
+    expect(tsHttp.content).toContain('async *streamJson<T>(');
+    expect(tsHttp.content).toContain("Accept: 'text/event-stream'");
+    expect(tsHttp.content).toContain("if (data === '[DONE]')");
+    expect(tsHttp.content).toContain('JSON.parse(data) as T');
+
+    const cases = [
+      {
+        language: 'python',
+        result: await new PythonGenerator().generate({ ...aiConfig, language: 'python' }, eventStreamResponseSpec),
+        apiPath: 'sdkwork_ai_sdk/api/chat.py',
+        httpPath: 'sdkwork_ai_sdk/http_client.py',
+        expectedApi: [
+          'from typing import Any, Dict, Iterator, List, Optional',
+          'def create(self, body: CreateChatCompletionRequest) -> Iterator[ChatCompletionChunk]:',
+          "return self._client.stream_json(f\"/v1/chat/completions\", method='POST', json=body)",
+        ],
+        expectedHttp: [
+          'def stream_json(self, path: str, method: str = \'POST\'',
+          "headers={'Accept': 'text/event-stream'",
+          'for line in response.iter_lines(decode_unicode=True):',
+          "if data == '[DONE]':",
+          'yield json_module.loads(data)',
+        ],
+      },
+      {
+        language: 'go',
+        result: await new GoGenerator().generate({ ...aiConfig, language: 'go' }, eventStreamResponseSpec),
+        apiPath: 'api/chat.go',
+        httpPath: 'http/client.go',
+        expectedApi: [
+          'func (a *ChatApi) Create(body sdktypes.CreateChatCompletionRequest) (*sdkhttp.SSEStream[sdktypes.ChatCompletionChunk], error)',
+          'sdkhttp.Stream[sdktypes.ChatCompletionChunk](a.client, "POST", AiApiPath("/chat/completions"), body, nil, nil, "application/json")',
+        ],
+        expectedHttp: [
+          'type SSEStream[T any] struct',
+          'func Stream[T any](',
+          'req.Header.Set("Accept", "text/event-stream")',
+          'if data == "[DONE]"',
+          'json.Unmarshal([]byte(data), &event)',
+        ],
+      },
+      {
+        language: 'java',
+        result: await new JavaGenerator().generate({ ...aiConfig, language: 'java' }, eventStreamResponseSpec),
+        apiPath: 'src/main/java/com/sdkwork/ai/api/ChatApi.java',
+        httpPath: 'src/main/java/com/sdkwork/ai/http/HttpClient.java',
+        expectedApi: [
+          'public Iterable<ChatCompletionChunk> create(CreateChatCompletionRequest body) throws Exception',
+          'client.stream("POST", ApiPaths.aiPath("/chat/completions"), body, null, null, "application/json", new TypeReference<ChatCompletionChunk>() {})',
+        ],
+        expectedHttp: [
+          'public <T> Iterable<T> stream(',
+          '.addHeader("Accept", "text/event-stream")',
+          'if ("[DONE]".equals(data))',
+          'mapper.readValue(data, typeReference)',
+        ],
+      },
+      {
+        language: 'kotlin',
+        result: await new KotlinGenerator().generate({ ...aiConfig, language: 'kotlin' }, eventStreamResponseSpec),
+        apiPath: 'src/main/kotlin/com/sdkwork/ai/api/ChatApi.kt',
+        httpPath: 'src/main/kotlin/com/sdkwork/ai/http/HttpClient.kt',
+        expectedApi: [
+          'suspend fun create(body: CreateChatCompletionRequest): Sequence<ChatCompletionChunk>',
+          'client.stream("POST", ApiPaths.aiPath("/chat/completions"), body, null, null, "application/json", object : TypeReference<ChatCompletionChunk>() {})',
+        ],
+        expectedHttp: [
+          'fun <T> stream(',
+          '.addHeader("Accept", "text/event-stream")',
+          'if (data == "[DONE]")',
+          'mapper.readValue(data, typeReference)',
+        ],
+      },
+      {
+        language: 'dart',
+        result: await new DartGenerator().generate({ ...aiConfig, language: 'dart' }, eventStreamResponseSpec),
+        apiPath: 'lib/src/api/chat.dart',
+        httpPath: 'lib/src/http/client.dart',
+        expectedApi: [
+          'Stream<ChatCompletionChunk> create(CreateChatCompletionRequest body) {',
+          "_client.streamJson(ApiPaths.aiPath('/chat/completions')",
+          '.map((event) => ChatCompletionChunk.fromJson(event));',
+        ],
+        expectedHttp: [
+          'Stream<Map<String, dynamic>> streamJson(',
+          "'Accept': 'text/event-stream'",
+          "if (data == '[DONE]')",
+          'jsonDecode(data)',
+        ],
+      },
+      {
+        language: 'flutter',
+        result: await new FlutterGenerator().generate({ ...aiConfig, language: 'flutter' }, eventStreamResponseSpec),
+        apiPath: 'lib/src/api/chat.dart',
+        httpPath: 'lib/src/http/client.dart',
+        expectedApi: [
+          'Stream<ChatCompletionChunk> create(CreateChatCompletionRequest body) {',
+          "_client.streamJson(ApiPaths.aiPath('/chat/completions')",
+          '.map((event) => ChatCompletionChunk.fromJson(event));',
+        ],
+        expectedHttp: [
+          'Stream<Map<String, dynamic>> streamJson(',
+          "'Accept': 'text/event-stream'",
+          "if (data == '[DONE]')",
+          'jsonDecode(data)',
+        ],
+      },
+      {
+        language: 'swift',
+        result: await new SwiftGenerator().generate({ ...aiConfig, language: 'swift' }, eventStreamResponseSpec),
+        apiPath: 'Sources/API/ChatApi.swift',
+        httpPath: 'Sources/HTTP/HttpClient.swift',
+        expectedApi: [
+          'public func create(body: CreateChatCompletionRequest) throws -> AsyncThrowingStream<ChatCompletionChunk, Error>',
+          'client.stream("POST", ApiPaths.aiPath("/chat/completions"), body: body, params: nil, headers: nil, contentType: "application/json", responseType: ChatCompletionChunk.self)',
+        ],
+        expectedHttp: [
+          'public func stream<T: Decodable>(',
+          'request.setValue("text/event-stream", forHTTPHeaderField: "Accept")',
+          'if data == "[DONE]"',
+          'decoder.decode(T.self, from: Data(data.utf8))',
+        ],
+      },
+      {
+        language: 'csharp',
+        result: await new CSharpGenerator().generate({ ...aiConfig, language: 'csharp' }, eventStreamResponseSpec),
+        apiPath: 'Api/ChatApi.cs',
+        httpPath: 'Http/HttpClient.cs',
+        expectedApi: [
+          'public IAsyncEnumerable<Ai.Models.ChatCompletionChunk> CreateAsync(Ai.Models.CreateChatCompletionRequest body)',
+          '_client.StreamAsync<Ai.Models.ChatCompletionChunk>("POST", ApiPaths.AiPath("/chat/completions"), body, null, null, "application/json")',
+        ],
+        expectedHttp: [
+          'public async IAsyncEnumerable<T> StreamAsync<T>(',
+          'request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"))',
+          'if (data == "[DONE]")',
+          'JsonSerializer.Deserialize<T>(data)',
+        ],
+      },
+      {
+        language: 'rust',
+        result: await new RustGenerator().generate({ ...aiConfig, language: 'rust' }, eventStreamResponseSpec),
+        apiPath: 'src/api/chat.rs',
+        httpPath: 'src/http/client.rs',
+        expectedApi: [
+          'pub async fn create(&self, body: &CreateChatCompletionRequest) -> Result<SseStream<ChatCompletionChunk>, SdkworkError>',
+          'self.client.stream(Method::POST, &path, Some(body), None, None, Some("application/json")).await',
+        ],
+        expectedHttp: [
+          'pub struct SseStream<T>',
+          'pub async fn stream<T, B>(',
+          'merged_headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"))',
+          'if data == "[DONE]"',
+          'serde_json::from_str::<T>(&data)',
+        ],
+      },
+      {
+        language: 'php',
+        result: await new PhpGenerator().generate({ ...aiConfig, language: 'php' }, eventStreamResponseSpec),
+        apiPath: 'src/Api/Chat.php',
+        httpPath: 'src/Http/HttpClient.php',
+        expectedApi: [
+          'public function create(array|CreateChatCompletionRequest $body): \\Generator',
+          "$this->client->stream('POST', $path",
+          'ChatCompletionChunk::fromArray($event)',
+        ],
+        expectedHttp: [
+          'public function stream(string $method, string $path, array $options = []): \\Generator',
+          "'Accept' => 'text/event-stream'",
+          "preg_match('/\\r?\\n\\r?\\n/', $buffer",
+          "if ($data === '[DONE]')",
+          'json_decode($data, true)',
+        ],
+      },
+      {
+        language: 'ruby',
+        result: await new RubyGenerator().generate({ ...aiConfig, language: 'ruby' }, eventStreamResponseSpec),
+        apiPath: 'lib/sdkwork/ai_sdk/api/chat.rb',
+        httpPath: 'lib/sdkwork/ai_sdk/http/client.rb',
+        expectedApi: [
+          'def create(body: nil)',
+          '@client.stream(:post, path, **options)',
+          'Models::ChatCompletionChunk.from_hash(event)',
+        ],
+        expectedHttp: [
+          'def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil)',
+          "'Accept' => 'text/event-stream'",
+          'split(/\\r?\\n\\r?\\n/)',
+          'data = data_lines.join("\\n")',
+          "break if data == '[DONE]'",
+          'JSON.parse(data)',
+        ],
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect(testCase.result.errors, testCase.language).toEqual([]);
+      const apiFile = getGeneratedFile(testCase.result.files, testCase.apiPath);
+      const httpFile = getGeneratedFile(testCase.result.files, testCase.httpPath);
+      for (const expected of testCase.expectedApi) {
+        expect(apiFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+      for (const expected of testCase.expectedHttp) {
+        expect(httpFile.content, `${testCase.language}: ${expected}`).toContain(expected);
+      }
+    }
   });
 
   it('should sanitize unsafe path parameters in go java kotlin swift and csharp apis', async () => {
@@ -3999,7 +5023,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(goApi!.content).toContain('headers_ string');
     expect(goApi!.content).toContain('xTraceId *string');
     expect(goApi!.content).not.toContain('headers map[string]string');
-    expect(goApi!.content).toContain('fmt.Sprintf("/keyword-model/%s/%s/%s", class, userId, headers_)');
+    expect(goApi!.content).toContain('SerializePathParameter(class, PathParameterSpec{Name: "class", Style: "simple", Explode: false})');
+    expect(goApi!.content).toContain('SerializePathParameter(userId, PathParameterSpec{Name: "user-id", Style: "simple", Explode: false})');
+    expect(goApi!.content).toContain('SerializePathParameter(headers_, PathParameterSpec{Name: "headers", Style: "simple", Explode: false})');
 
     const javaGenerator = new JavaGenerator();
     const javaResult = await javaGenerator.generate({ ...baseConfig, language: 'java' }, pathParameterIdentifierSpec);
@@ -4011,7 +5037,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(javaApi!.content).toContain('String headers');
     expect(javaApi!.content).toContain('String xTraceId');
     expect(javaApi!.content).not.toContain('Map<String, String> headers');
-    expect(javaApi!.content).toContain('/keyword-model/" + class_ + "/" + userId + "/" + headers + "');
+    expect(javaApi!.content).toContain('serializePathParameter(class_, new PathParameterSpec("class", "simple", false))');
+    expect(javaApi!.content).toContain('serializePathParameter(userId, new PathParameterSpec("user-id", "simple", false))');
+    expect(javaApi!.content).toContain('serializePathParameter(headers, new PathParameterSpec("headers", "simple", false))');
 
     const kotlinGenerator = new KotlinGenerator();
     const kotlinResult = await kotlinGenerator.generate(
@@ -4026,7 +5054,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(kotlinApi!.content).toContain('headers: String');
     expect(kotlinApi!.content).toContain('xTraceId: String? = null');
     expect(kotlinApi!.content).not.toContain('headers: Map<String, String>? = null');
-    expect(kotlinApi!.content).toContain('"/keyword-model/$class_/$userId/$headers"');
+    expect(kotlinApi!.content).toContain('serializePathParameter(class_, PathParameterSpec("class", "simple", false))');
+    expect(kotlinApi!.content).toContain('serializePathParameter(userId, PathParameterSpec("user-id", "simple", false))');
+    expect(kotlinApi!.content).toContain('serializePathParameter(headers, PathParameterSpec("headers", "simple", false))');
 
     const swiftGenerator = new SwiftGenerator();
     const swiftResult = await swiftGenerator.generate(
@@ -4041,7 +5071,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(swiftApi!.content).toContain('headers: String');
     expect(swiftApi!.content).toContain('xTraceId: String? = nil');
     expect(swiftApi!.content).not.toContain('headers: [String: String]? = nil');
-    expect(swiftApi!.content).toContain('"/keyword-model/\\(class_)/\\(userId)/\\(headers)"');
+    expect(swiftApi!.content).toContain('serializePathParameter(class_, PathParameterSpec(name: "class", style: "simple", explode: false))');
+    expect(swiftApi!.content).toContain('serializePathParameter(userId, PathParameterSpec(name: "user-id", style: "simple", explode: false))');
+    expect(swiftApi!.content).toContain('serializePathParameter(headers, PathParameterSpec(name: "headers", style: "simple", explode: false))');
 
     const csharpGenerator = new CSharpGenerator();
     const csharpResult = await csharpGenerator.generate(
@@ -4056,7 +5088,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(csharpApi!.content).toContain('string headers');
     expect(csharpApi!.content).toContain('string? xTraceId = null');
     expect(csharpApi!.content).not.toContain('Dictionary<string, string>? headers = null');
-    expect(csharpApi!.content).toContain('$"/keyword-model/{class_}/{userId}/{headers}"');
+    expect(csharpApi!.content).toContain('SerializePathParameter(class_, new PathParameterSpec("class", "simple", false))');
+    expect(csharpApi!.content).toContain('SerializePathParameter(userId, new PathParameterSpec("user-id", "simple", false))');
+    expect(csharpApi!.content).toContain('SerializePathParameter(headers, new PathParameterSpec("headers", "simple", false))');
   });
 
   it('should sanitize unsafe path parameters in php ruby dart and flutter apis', async () => {
@@ -4072,9 +5106,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(phpApi!.content).toContain('string $headers');
     expect(phpApi!.content).toContain('?string $xTraceId = null');
     expect(phpApi!.content).not.toContain('array $headers = []');
-    expect(phpApi!.content).toContain("'class' => $class_");
-    expect(phpApi!.content).toContain("'user-id' => $userId");
-    expect(phpApi!.content).toContain("'headers' => $headers");
+    expect(phpApi!.content).toContain("'class' => $this->serializePathParameter($class_, new PathParameterSpec('class', 'simple', false))");
+    expect(phpApi!.content).toContain("'user-id' => $this->serializePathParameter($userId, new PathParameterSpec('user-id', 'simple', false))");
+    expect(phpApi!.content).toContain("'headers' => $this->serializePathParameter($headers, new PathParameterSpec('headers', 'simple', false))");
 
     const rubyGenerator = new RubyGenerator();
     const rubyResult = await rubyGenerator.generate({ ...baseConfig, language: 'ruby' }, pathParameterIdentifierSpec);
@@ -4084,7 +5118,9 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(rubyApi).toBeDefined();
     expect(rubyApi!.content).toContain('def get_keyword_model_by_path(class_, user_id, headers, x_trace_id: nil)');
-    expect(rubyApi!.content).toContain("class: class_, 'user-id': user_id, headers: headers");
+    expect(rubyApi!.content).toContain("class: serialize_path_parameter(class_, PathParameterSpec.new('class', 'simple', false))");
+    expect(rubyApi!.content).toContain("'user-id': serialize_path_parameter(user_id, PathParameterSpec.new('user-id', 'simple', false))");
+    expect(rubyApi!.content).toContain("headers: serialize_path_parameter(headers, PathParameterSpec.new('headers', 'simple', false))");
 
     const dartGenerator = new DartGenerator();
     const dartResult = await dartGenerator.generate({ ...baseConfig, language: 'dart' } as any, pathParameterIdentifierSpec);
@@ -4098,7 +5134,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(dartApi!.content).toContain('String headers');
     expect(dartApi!.content).toContain('String? xTraceId');
     expect(dartApi!.content).not.toContain('Map<String, String>? headers');
-    expect(dartApi!.content).toContain("'/keyword-model/$class_/$userId/$headers'");
+    expect(dartApi!.content).toContain("serializePathParameter(class_, const PathParameterSpec('class', 'simple', false))");
+    expect(dartApi!.content).toContain("serializePathParameter(userId, const PathParameterSpec('user-id', 'simple', false))");
+    expect(dartApi!.content).toContain("serializePathParameter(headers, const PathParameterSpec('headers', 'simple', false))");
 
     const flutterGenerator = new FlutterGenerator();
     const flutterResult = await flutterGenerator.generate(
@@ -4115,7 +5153,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(flutterApi!.content).toContain('String headers');
     expect(flutterApi!.content).toContain('String? xTraceId');
     expect(flutterApi!.content).not.toContain('Map<String, String>? headers');
-    expect(flutterApi!.content).toContain("'/keyword-model/$class_/$userId/$headers'");
+    expect(flutterApi!.content).toContain("serializePathParameter(class_, const PathParameterSpec('class', 'simple', false))");
+    expect(flutterApi!.content).toContain("serializePathParameter(userId, const PathParameterSpec('user-id', 'simple', false))");
+    expect(flutterApi!.content).toContain("serializePathParameter(headers, const PathParameterSpec('headers', 'simple', false))");
   });
 
   it('should sanitize unsafe path parameters in rust apis', async () => {
@@ -4131,7 +5171,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(rustApi!.content).toContain('headers_: &str');
     expect(rustApi!.content).toContain('x_trace_id: Option<&str>');
     expect(rustApi!.content).not.toContain('headers: Option<&RequestHeaders>');
-    expect(rustApi!.content).toContain('format!("/keyword-model/{}/{}/{}", class, user_id, headers_)');
+    expect(rustApi!.content).toContain('serialize_path_parameter(class, PathParameterSpec::new("class", "simple", false))');
+    expect(rustApi!.content).toContain('serialize_path_parameter(user_id, PathParameterSpec::new("user-id", "simple", false))');
+    expect(rustApi!.content).toContain('serialize_path_parameter(headers_, PathParameterSpec::new("headers", "simple", false))');
   });
 
   it('should handle advanced OpenAPI patterns without generation errors', async () => {
@@ -4345,6 +5387,30 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tenantApi!.content).not.toContain('tenantCreate');
   });
 
+  it('should preserve semantic action verbs before tag suffixes in method names', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, suffixVerbOperationIdSpec);
+    const skillApi = result.files.find((f) => f.path === 'src/api/skill.ts');
+    const appApi = result.files.find((f) => f.path === 'src/api/app.ts');
+
+    expect(skillApi).toBeDefined();
+    expect(skillApi!.content).toContain('async enableSkill(');
+    expect(skillApi!.content).toContain('async disableSkill(');
+    expect(skillApi!.content).toContain('async approveSkill(');
+    expect(skillApi!.content).toContain('async rejectSkill(');
+    expect(skillApi!.content).not.toContain('async enable(');
+    expect(skillApi!.content).not.toContain('async disable(');
+    expect(skillApi!.content).not.toContain('async approve(');
+    expect(skillApi!.content).not.toContain('async reject(');
+    expect(appApi).toBeDefined();
+    expect(appApi!.content).toContain('async fetchApp(');
+    expect(appApi!.content).toContain('async publishApp(');
+    expect(appApi!.content).toContain('async offlineApp(');
+    expect(appApi!.content).not.toContain('async fetch(');
+    expect(appApi!.content).not.toContain('async publish(');
+    expect(appApi!.content).not.toContain('async offline(');
+  });
+
   it('should simplify tag-derived client module names across languages', async () => {
     const goGenerator = new GoGenerator();
     const goResult = await goGenerator.generate(
@@ -4492,9 +5558,21 @@ describe('OpenAPI Security And Compliance', () => {
     const tsChatApi = tsResult.files.find((f) => f.path === 'src/api/chat.ts');
     const tsSdk = tsResult.files.find((f) => f.path === 'src/sdk.ts');
     expect(tsChatApi).toBeDefined();
-    expect(tsChatApi!.content).toContain('async createChatCompletion(');
-    expect(tsChatApi!.content).toContain('async getChatCompletion(');
-    expect(tsChatApi!.content).toContain('async listChatCompletionMessages(');
+    expect(tsChatApi!.content).toContain('public readonly completions: ChatCompletionsApi;');
+    expect(tsChatApi!.content).toContain('this.completions = new ChatCompletionsApi(client);');
+    expect(tsChatApi!.content).toContain('export class ChatCompletionsApi');
+    expect(tsChatApi!.content).toContain('public readonly messages: ChatCompletionsMessagesApi;');
+    expect(tsChatApi!.content).toContain('this.messages = new ChatCompletionsMessagesApi(client);');
+    expect(tsChatApi!.content).toContain('export class ChatCompletionsMessagesApi');
+    expect(tsChatApi!.content).toContain('async create(');
+    expect(tsChatApi!.content).toContain('async retrieve(');
+    expect(tsChatApi!.content).toContain('async list(');
+    expect(tsChatApi!.content).not.toContain('async createCompletion(');
+    expect(tsChatApi!.content).not.toContain('async retrieveCompletions(');
+    expect(tsChatApi!.content).not.toContain('async retrieveCompletionsMessages(');
+    expect(tsChatApi!.content).not.toContain('async createChatCompletion(');
+    expect(tsChatApi!.content).not.toContain('async getChatCompletion(');
+    expect(tsChatApi!.content).not.toContain('async listChatCompletionMessages(');
     expect(tsChatApi!.content).not.toContain('getManagedChatCompletion');
     expect(tsSdk).toBeDefined();
     expect(tsSdk!.content).toContain('public readonly chat: ChatApi;');
@@ -4527,10 +5605,129 @@ describe('OpenAPI Security And Compliance', () => {
       (f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatApi.java'
     );
     expect(javaChatApi).toBeDefined();
-    expect(javaChatApi!.content).toContain('createChatCompletion');
-    expect(javaChatApi!.content).toContain('getChatCompletion');
-    expect(javaChatApi!.content).toContain('listChatCompletionMessages');
+    expect(javaChatApi!.content).toContain(' create() throws Exception');
+    expect(javaChatApi!.content).toContain(' retrieve(String completionId) throws Exception');
+    expect(javaChatApi!.content).toContain(' listMessages(String completionId) throws Exception');
+    expect(javaChatApi!.content).not.toContain('createChatCompletion');
+    expect(javaChatApi!.content).not.toContain('getChatCompletion');
+    expect(javaChatApi!.content).not.toContain('listChatCompletionMessages');
     expect(javaChatApi!.content).not.toContain('getManagedChatCompletion');
+  });
+
+  it('should use OpenAI-style AI resource names and semantic operations across generated languages', async () => {
+    const cases = [
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'sdkwork_ai_sdk/client.py',
+        clientExpected: ['self.files: FilesApi', 'self.batches: BatchesApi', 'self.responses: ResponsesApi'],
+        clientForbidden: ['self.file:', 'self.batch:', 'self.response:'],
+        chatPath: 'sdkwork_ai_sdk/api/chat.py',
+        chatExpected: ['def create(self)', 'def retrieve(self, completion_id: str)', 'def list_messages(self, completion_id: str)'],
+        chatForbidden: ['create_chat_completion', 'get_chat_completion', 'list_chat_completion_messages'],
+      },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'sdk.go',
+        clientExpected: ['Files *api.FilesApi', 'Batches *api.BatchesApi', 'Responses *api.ResponsesApi'],
+        clientForbidden: ['File *api.FileApi', 'Batch *api.BatchApi', 'Response *api.ResponseApi'],
+        chatPath: 'api/chat.go',
+        chatExpected: ['func (a *ChatApi) Create(', 'func (a *ChatApi) Retrieve(completionId string)', 'func (a *ChatApi) ListMessages(completionId string)'],
+        chatForbidden: ['CreateChatCompletion', 'GetChatCompletion', 'ListChatCompletionMessages'],
+      },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'src/main/java/com/sdkwork/ai/SdkworkAiClient.java',
+        clientExpected: ['private FilesApi files;', 'private BatchesApi batches;', 'private ResponsesApi responses;', 'public FilesApi getFiles()'],
+        clientForbidden: ['private FileApi file;', 'private BatchApi batch;', 'private ResponseApi response;', 'public FileApi getFile()'],
+        chatPath: 'src/main/java/com/sdkwork/ai/api/ChatApi.java',
+        chatExpected: [' create() throws Exception', ' retrieve(String completionId) throws Exception', ' listMessages(String completionId) throws Exception'],
+        chatForbidden: ['createChatCompletion', 'getChatCompletion', 'listChatCompletionMessages'],
+      },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'src/main/kotlin/com/sdkwork/ai/SdkworkAiClient.kt',
+        clientExpected: ['files: FilesApi', 'batches: BatchesApi', 'responses: ResponsesApi'],
+        clientForbidden: ['file: FileApi', 'batch: BatchApi', 'response: ResponseApi'],
+        chatPath: 'src/main/kotlin/com/sdkwork/ai/api/ChatApi.kt',
+        chatExpected: ['fun create()', 'fun retrieve(completionId: String)', 'fun listMessages(completionId: String)'],
+        chatForbidden: ['createChatCompletion', 'getChatCompletion', 'listChatCompletionMessages'],
+      },
+      {
+        language: 'csharp' as const,
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'SdkworkAiClient.cs',
+        clientExpected: ['public FilesApi Files { get; }', 'public BatchesApi Batches { get; }', 'public ResponsesApi Responses { get; }'],
+        clientForbidden: ['public FileApi File { get; }', 'public BatchApi Batch { get; }', 'public ResponseApi Response { get; }'],
+        chatPath: 'Api/ChatApi.cs',
+        chatExpected: ['CreateAsync()', 'RetrieveAsync(string completionId)', 'ListMessagesAsync(string completionId)'],
+        chatForbidden: ['CreateChatCompletionAsync', 'GetChatCompletionAsync', 'ListChatCompletionMessagesAsync'],
+      },
+      {
+        language: 'rust' as const,
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'src/client.rs',
+        clientExpected: ['pub fn files(&self) -> FilesApi', 'pub fn batches(&self) -> BatchesApi', 'pub fn responses(&self) -> ResponsesApi'],
+        clientForbidden: ['pub fn file(&self) -> FileApi', 'pub fn batch(&self) -> BatchApi', 'pub fn response(&self) -> ResponseApi'],
+        chatPath: 'src/api/chat.rs',
+        chatExpected: ['pub async fn create(&self)', 'pub async fn retrieve(&self, completion_id: &str)', 'pub async fn list_messages(&self, completion_id: &str)'],
+        chatForbidden: ['create_chat_completion', 'get_chat_completion', 'list_chat_completion_messages'],
+      },
+      {
+        language: 'php' as const,
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'src/SdkworkAiClient.php',
+        clientExpected: ['public FilesApi $files;', 'public BatchesApi $batches;', 'public ResponsesApi $responses;'],
+        clientForbidden: ['public FileApi $file;', 'public BatchApi $batch;', 'public ResponseApi $response;'],
+        chatPath: 'src/Api/Chat.php',
+        chatExpected: ['public function create()', 'public function retrieve(string $completionId)', 'public function listMessages(string $completionId)'],
+        chatForbidden: ['createChatCompletion', 'getChatCompletion', 'listChatCompletionMessages'],
+      },
+      {
+        language: 'ruby' as const,
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        clientPath: 'lib/sdkwork/ai_sdk/client.rb',
+        clientExpected: ['attr_reader :http, :chat, :files, :batches, :responses'],
+        clientForbidden: [':file,', ':batch,', ':response,', '@file =', '@batch =', '@response ='],
+        chatPath: 'lib/sdkwork/ai_sdk/api/chat.rb',
+        chatExpected: ['def create', 'def retrieve(completion_id)', 'def list_messages(completion_id)'],
+        chatForbidden: ['create_chat_completion', 'get_chat_completion', 'list_chat_completion_messages'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, aiOpenAiResourceNamingSpec);
+      expect(result.errors).toEqual([]);
+
+      const clientFile = result.files.find((candidate) => candidate.path === testCase.clientPath);
+      expect(clientFile, `${testCase.language} missing client file ${testCase.clientPath}; generated files: ${result.files.map((file) => file.path).join(', ')}`).toBeDefined();
+      for (const expected of testCase.clientExpected) {
+        expect(clientFile!.content).toContain(expected);
+      }
+      for (const forbidden of testCase.clientForbidden) {
+        expect(clientFile!.content).not.toContain(forbidden);
+      }
+
+      const chatFile = result.files.find((candidate) => candidate.path === testCase.chatPath);
+      expect(chatFile, `${testCase.language} missing chat file ${testCase.chatPath}; generated files: ${result.files.map((file) => file.path).join(', ')}`).toBeDefined();
+      for (const expected of testCase.chatExpected) {
+        expect(chatFile!.content).toContain(expected);
+      }
+      for (const forbidden of testCase.chatForbidden) {
+        expect(chatFile!.content).not.toContain(forbidden);
+      }
+    }
   });
 
   it('should deduplicate legacy alias operations within the same ai domain', async () => {
@@ -4546,17 +5743,54 @@ describe('OpenAPI Security And Compliance', () => {
     );
 
     expect(result.errors).toEqual([]);
-    const batchApi = result.files.find((f) => f.path === 'src/api/batch.ts');
-    expect(batchApi).toBeDefined();
-    expect(batchApi!.content).toContain('aiApiPath(`/batches`)');
-    expect(batchApi!.content).not.toContain('aiApiPath(`/v1/batches`)');
-    expect(batchApi!.content).not.toContain('getListBatchesV1');
-    expect(batchApi!.content).not.toContain('createBatchesV1');
+    const batchesApi = result.files.find((f) => f.path === 'src/api/batches.ts');
+    expect(batchesApi).toBeDefined();
+    expect(batchesApi!.content).toContain('export class BatchesApi');
+    expect(batchesApi!.content).toContain('aiApiPath(`/batches`)');
+    expect(batchesApi!.content).not.toContain('aiApiPath(`/v1/batches`)');
+    expect(batchesApi!.content).not.toContain('getListBatchesV1');
+    expect(batchesApi!.content).not.toContain('createBatchesV1');
 
     const sdkFile = result.files.find((f) => f.path === 'src/sdk.ts');
     expect(sdkFile).toBeDefined();
-    expect(sdkFile!.content).toContain('public readonly batch: BatchApi;');
-    expect(sdkFile!.content).not.toContain('public readonly batche:');
+    expect(sdkFile!.content).toContain('public readonly batches: BatchesApi;');
+    expect(sdkFile!.content).not.toContain('public readonly batch:');
+
+    const crossLanguageCases = [
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        path: 'sdkwork_ai_sdk/api/batches.py',
+        expected: ['def list(self)', 'def create(self)'],
+        forbidden: ['def get_list', 'def post_create', '"/ai/v3/v1/batches"', '"/v1/batches"'],
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        path: 'api/batches.go',
+        expected: ['func (a *BatchesApi) List(', 'func (a *BatchesApi) Create('],
+        forbidden: ['GetList', 'PostCreate', 'AiApiPath("/v1/batches")'],
+      },
+      {
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
+        path: 'src/main/java/com/sdkwork/ai/api/BatchesApi.java',
+        expected: [' list() throws Exception', ' create() throws Exception'],
+        forbidden: ['getList', 'postCreate', 'ApiPaths.aiPath("/v1/batches")'],
+      },
+    ];
+
+    for (const testCase of crossLanguageCases) {
+      const crossResult = await testCase.generator.generate(testCase.config, aiAliasDedupSpec);
+      expect(crossResult.errors).toEqual([]);
+      const apiFile = getGeneratedFile(crossResult.files, testCase.path);
+      for (const expected of testCase.expected) {
+        expect(apiFile.content).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(apiFile.content).not.toContain(forbidden);
+      }
+    }
   });
 
   it('should place types export condition before import and require in generated package.json', async () => {
@@ -4572,6 +5806,36 @@ describe('OpenAPI Security And Compliance', () => {
     const exportConditionKeys = Object.keys(packageJson.exports?.['.'] ?? {});
 
     expect(exportConditionKeys).toEqual(['types', 'import', 'require']);
+  });
+
+  it('should generate TypeScript SDK package builds through the custom Rollup runtime', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, mockSpec);
+    const packageJsonFile = getGeneratedFile(result.files, 'package.json');
+    const buildRuntimeFile = result.files.find((file) => file.path === 'custom/build-runtime.mjs');
+
+    expect(result.errors).toEqual([]);
+    expect(buildRuntimeFile).toBeDefined();
+    expect(buildRuntimeFile?.ownership).toBe('scaffold');
+    expect(buildRuntimeFile?.overwriteStrategy).toBe('if-missing');
+    expect(buildRuntimeFile?.content).toContain("import { rollup } from 'rollup';");
+    expect(result.files.some((file) => file.path === 'vite.config.ts')).toBe(false);
+
+    const packageJson = JSON.parse(packageJsonFile.content) as {
+      scripts?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts?.build).toBe('node custom/build-runtime.mjs');
+    expect(packageJson.scripts?.dev).toBe('node custom/build-runtime.mjs');
+    expect(packageJson.scripts?.prepublishOnly).toBe('npm run build');
+    expect(packageJson.devDependencies).toMatchObject({
+      '@types/node': '^20.0.0',
+      typescript: '^5.3.0',
+      rollup: '^4.0.0',
+    });
+    expect(packageJson.devDependencies).not.toHaveProperty('vite');
+    expect(packageJson.devDependencies).not.toHaveProperty('vite-plugin-dts');
   });
 
   it('should use unified sdkwork-prefixed client names', async () => {
@@ -6054,6 +7318,64 @@ describe('OpenAPI Security And Compliance', () => {
     expect(getGeneratedFile(goResult.files, 'types/user.go').content).toContain('Metadata StringMap');
     expect(getGeneratedFile(goResult.files, 'sdk_smoke_test.go').content).toContain(
       'body := sdktypes.StringAlias("value")',
+    );
+  });
+
+  it('should generate TypeScript recursive JSON object schemas as interfaces', async () => {
+    const typeScriptGenerator = new TypeScriptGenerator();
+    const typeScriptResult = await typeScriptGenerator.generate(
+      { ...baseConfig, language: 'typescript' },
+      {
+        openapi: '3.0.0',
+        info: { title: 'Recursive JSON API', version: '1.0.0' },
+        paths: {
+          '/metadata': {
+            get: {
+              operationId: 'getMetadata',
+              tags: ['Metadata'],
+              responses: {
+                '200': {
+                  description: 'Metadata',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/JsonObject' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            JsonObject: {
+              type: 'object',
+              additionalProperties: { $ref: '#/components/schemas/JsonValue' },
+            },
+            JsonValue: {
+              oneOf: [
+                { type: 'string' },
+                { type: 'number' },
+                { type: 'boolean' },
+                { type: 'array', items: { $ref: '#/components/schemas/JsonValue' } },
+                { $ref: '#/components/schemas/JsonObject' },
+                { type: 'null' },
+              ],
+            },
+          },
+        },
+      },
+    );
+
+    expect(typeScriptResult.errors).toEqual([]);
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/json-object.ts').content).toContain(
+      'export interface JsonObject {',
+    );
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/json-object.ts').content).toContain(
+      '[key: string]: JsonValue;',
+    );
+    expect(getGeneratedFile(typeScriptResult.files, 'src/types/json-value.ts').content).toContain(
+      'JsonValue[] | JsonObject | null',
     );
   });
 

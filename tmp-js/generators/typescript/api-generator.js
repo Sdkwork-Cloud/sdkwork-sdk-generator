@@ -1,9 +1,10 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { TYPESCRIPT_CONFIG, getTypeScriptType } from './config.js';
 import { buildTypeScriptTagMetadata } from './tag-metadata.js';
-import { resolveTypeScriptMethodNames } from './usage-planner.js';
+import { buildTypeScriptResourceTree, resolveTypeScriptMethodNames } from './usage-planner.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 const TYPESCRIPT_RESERVED_WORDS = new Set([
     'abstract',
@@ -84,7 +85,7 @@ export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
-        const tagMetadataList = buildTypeScriptTagMetadata(tags);
+        const tagMetadataList = buildTypeScriptTagMetadata(tags, config);
         const tagMetadataMap = new Map(tagMetadataList.map((meta) => [meta.tag, meta]));
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => TYPESCRIPT_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
@@ -103,19 +104,18 @@ export class ApiGenerator {
     generateApiFile(metadata, operations, config, knownModels) {
         const className = metadata.className;
         const fileName = metadata.fileName;
-        const methodNames = this.resolveMethodNames(operations, metadata.tag);
         const referencedModels = new Set();
-        const methods = operations
-            .map((op) => {
-            const generated = this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels);
-            generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
-            return generated.content;
-        })
-            .join('\n\n');
+        const resourceTree = config.sdkType === 'ai'
+            ? buildTypeScriptResourceTree(metadata.tag, operations, metadata, config)
+            : undefined;
+        const methods = resourceTree
+            ? this.generateResourceClasses(resourceTree, config, knownModels, referencedModels)
+            : this.generateFlatApiClass(metadata, operations, config, knownModels, referencedModels);
         const needsRequestHeaderHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
         });
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
         const needsQuerySerializationHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
@@ -136,19 +136,7 @@ import type { HttpClient } from '../http/client';
 ${needsQueryParamsImport ? "import type { QueryParams } from '../types/common';" : ''}
 ${typeImports}
 
-export class ${className} {
-  private client: HttpClient;
-  
-  constructor(client: HttpClient) { 
-    this.client = client; 
-  }
-
 ${methods}
-}
-
-export function create${className}(client: HttpClient): ${className} {
-  return new ${className}(client);
-}
 
 function appendQueryString(path: string, rawQueryString: string): string {
   const query = rawQueryString.replace(/^\\?+/, '');
@@ -158,12 +146,77 @@ function appendQueryString(path: string, rawQueryString: string): string {
   return path.includes('?') ? \`\${path}&\${query}\` : \`\${path}?\${query}\`;
 }
 
+${needsPathSerializationHelpers ? this.generatePathSerializationHelpers() : ''}
 ${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
 ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 `),
             language: 'typescript',
             description: `${metadata.tag} API module`,
         };
+    }
+    generateFlatApiClass(metadata, operations, config, knownModels, referencedModels) {
+        const methodNames = this.resolveMethodNames(operations, metadata.tag, config);
+        const methods = operations
+            .map((op) => {
+            const generated = this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels);
+            generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
+            return generated.content;
+        })
+            .join('\n\n');
+        return `export class ${metadata.className} {
+  private client: HttpClient;
+  
+  constructor(client: HttpClient) { 
+    this.client = client; 
+  }
+
+${methods}
+}
+
+export function create${metadata.className}(client: HttpClient): ${metadata.className} {
+  return new ${metadata.className}(client);
+}`;
+    }
+    generateResourceClasses(root, config, knownModels, referencedModels) {
+        const classes = this.flattenResourceNodes(root)
+            .reverse()
+            .map((node) => this.generateResourceClass(node, config, knownModels, referencedModels))
+            .join('\n\n');
+        return `${classes}
+
+export function create${root.className}(client: HttpClient): ${root.className} {
+  return new ${root.className}(client);
+}`;
+    }
+    generateResourceClass(node, config, knownModels, referencedModels) {
+        const methodNames = this.resolveMethodNames(node.operations, node.propertyName, config, node.resourcePathSegments);
+        const childProperties = node.children
+            .map((child) => `  public readonly ${child.propertyName}: ${child.className};`)
+            .join('\n');
+        const childInitializers = node.children
+            .map((child) => `    this.${child.propertyName} = new ${child.className}(client);`)
+            .join('\n');
+        const methods = node.operations
+            .map((op) => {
+            const generated = this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels);
+            generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
+            return generated.content;
+        })
+            .join('\n\n');
+        return `export class ${node.className} {
+  private client: HttpClient;${childProperties ? `\n${childProperties}` : ''}
+  
+  constructor(client: HttpClient) { 
+    this.client = client;${childInitializers ? `\n${childInitializers}` : ''} 
+  }
+${methods ? `\n\n${methods}` : ''}
+}`;
+    }
+    flattenResourceNodes(root) {
+        return [
+            root,
+            ...root.children.flatMap((child) => this.flattenResourceNodes(child)),
+        ];
     }
     generateMethod(op, config, methodName, knownModels) {
         const rawPathParams = this.extractPathParams(op.path);
@@ -172,6 +225,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const pathOpenApiParams = allParameters.filter((param) => param?.in === 'path');
         const method = String(op.method || '').toLowerCase();
         const httpMethod = String(op.httpMethod || op.method || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const supportsRequestBody = supportsRequestBodyByDefault(method);
@@ -193,7 +247,9 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `, '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
             : '';
-        const responseSchema = this.extractResponseSchema(op);
+        const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const isEventStreamResponse = Boolean(eventStreamInfo);
+        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const responseType = responseSchema
             ? getTypeScriptType(responseSchema, TYPESCRIPT_CONFIG, knownModels)
             : this.inferFallbackResponseType(op);
@@ -210,10 +266,19 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             hasRawQueryString ? 'rawQueryString' : '',
             hasHeaders ? 'requestHeaders' : '',
         ]);
-        const pathParams = rawPathParams.map((rawName) => ({
-            rawName,
-            safeName: pathParamNames.get(rawName) || rawName,
-        }));
+        const pathParams = rawPathParams.map((rawName) => {
+            const parameter = pathOpenApiParams.find((candidate) => candidate?.name === rawName);
+            const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+            return {
+                rawName,
+                safeName: pathParamNames.get(rawName) || rawName,
+                type: parameter?.schema
+                    ? getTypeScriptType(parameter.schema, TYPESCRIPT_CONFIG, knownModels)
+                    : 'string | number',
+                style: serialization.style,
+                explode: serialization.explode,
+            };
+        });
         const parameterReservedNames = [
             ...pathParams.map((param) => param.safeName),
             hasBody ? 'body' : '',
@@ -224,8 +289,8 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const queryBindings = hasExplicitQuerySerialization
             ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
             : [];
-        const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-        const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+        const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+        const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
             ...parameterReservedNames,
             ...queryBindings.map((binding) => binding.safeName),
             ...headerBindings.map((binding) => binding.safeName),
@@ -236,7 +301,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
         const params = [];
         if (pathParams.length) {
-            params.push(...pathParams.map((param) => `${param.safeName}: string | number`));
+            params.push(...pathParams.map((param) => `${param.safeName}: ${param.type}`));
         }
         if (hasBody && requestType && requestBodyRequired) {
             params.push(requestBodyRequired ? `body: ${requestType}` : `body?: ${requestType}`);
@@ -254,8 +319,11 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
         const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
         const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName) => {
-            const safeName = pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, TYPESCRIPT_RESERVED_WORDS);
-            return `\${${safeName}}`;
+            const binding = pathParams.find((param) => param.rawName === paramName);
+            const safeName = binding?.safeName || pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, TYPESCRIPT_RESERVED_WORDS);
+            const style = binding?.style || 'simple';
+            const explode = binding?.explode ? 'true' : 'false';
+            return `\${serializePathParameter(${safeName}, { name: '${this.escapeSingleQuoted(paramName)}', style: '${this.escapeSingleQuoted(style)}', explode: ${explode} })}`;
         });
         const pathExpression = `${config.sdkType}ApiPath(\`${pathTemplate}\`)`;
         const requestPathExpression = hasRawQueryString
@@ -432,6 +500,21 @@ ${this.renderNamedParameterRecord(cookieBindings)}
     );
 `
             : '';
+        if (isEventStreamResponse) {
+            const streamOptions = [
+                `method: '${toHttpMethodLiteral(httpMethod)}' as any`,
+                hasBody ? 'body' : '',
+                hasQuery && !hasExplicitQuerySerialization ? 'params' : '',
+                hasHeaders ? 'headers: requestHeaders' : '',
+                hasBody && requestBodyInfo?.mediaType ? `contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '',
+            ].filter(Boolean).join(', ');
+            return {
+                content: `${docComment}async ${methodName}(${params.join(', ')}): Promise<AsyncIterable<${responseType}>> {
+${queryBlock}${requestHeaderBlock}    return this.client.streamJson<${responseType}>(${requestPathExpression}, { ${streamOptions} });
+  }`,
+                referencedModels,
+            };
+        }
         return {
             content: `${docComment}async ${methodName}(${params.join(', ')}): Promise<${responseType}> {
 ${queryBlock}${requestHeaderBlock}    return ${call};
@@ -447,6 +530,17 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
                 style: serialization.style,
                 explode: serialization.explode,
                 allowReserved: serialization.allowReserved,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    createHeaderParameterBindings(parameters, knownModels, reservedNames) {
+        return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
                 contentType: serialization.contentType,
             };
         });
@@ -485,7 +579,15 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
             return '      {}';
         }
         const lines = bindings.map((binding) => {
-            return `        ${this.formatObjectKey(String(binding.parameter?.name || binding.safeName))}: ${binding.safeName},`;
+            const parts = [
+                `value: ${binding.safeName}`,
+                `style: '${this.escapeSingleQuoted(binding.style)}'`,
+                `explode: ${binding.explode ? 'true' : 'false'}`,
+            ];
+            if (binding.contentType) {
+                parts.push(`contentType: '${this.escapeSingleQuoted(binding.contentType)}'`);
+            }
+            return `        ${this.formatObjectKey(String(binding.parameter?.name || binding.safeName))}: { ${parts.join(', ')} },`;
         });
         return ['      {', ...lines, '      }'].join('\n');
     }
@@ -663,15 +765,88 @@ function encodeQueryValue(value: string, allowReserved: boolean): string {
     .replace(/%3D/gi, '=');
 }`;
     }
+    generatePathSerializationHelpers() {
+        return `interface PathParameterSpec {
+  name: string;
+  style: string;
+  explode: boolean;
+}
+
+function serializePathParameter(value: unknown, spec: PathParameterSpec): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  const style = spec.style || 'simple';
+  if (Array.isArray(value)) {
+    return serializePathArray(spec.name, value, style, spec.explode);
+  }
+  if (typeof value === 'object') {
+    return serializePathObject(spec.name, value as Record<string, unknown>, style, spec.explode);
+  }
+  return pathPrefix(spec.name, style, false) + encodePathValue(serializePathPrimitive(value));
+}
+
+function serializePathArray(name: string, values: unknown[], style: string, explode: boolean): string {
+  const serialized = values
+    .filter((item) => item !== undefined && item !== null)
+    .map((item) => encodePathValue(serializePathPrimitive(item)));
+  if (serialized.length === 0) {
+    return pathPrefix(name, style, false);
+  }
+  if (style === 'matrix') {
+    return explode
+      ? serialized.map((item) => \`;\${name}=\${item}\`).join('')
+      : \`;\${name}=\${serialized.join(',')}\`;
+  }
+  return pathPrefix(name, style, false) + serialized.join(explode ? '.' : ',');
+}
+
+function serializePathObject(name: string, value: Record<string, unknown>, style: string, explode: boolean): string {
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined && entryValue !== null);
+  if (entries.length === 0) {
+    return pathPrefix(name, style, true);
+  }
+  if (style === 'matrix') {
+    return explode
+      ? entries.map(([key, entryValue]) => \`;\${encodePathValue(key)}=\${encodePathValue(serializePathPrimitive(entryValue))}\`).join('')
+      : \`;\${name}=\${entries.flatMap(([key, entryValue]) => [encodePathValue(key), encodePathValue(serializePathPrimitive(entryValue))]).join(',')}\`;
+  }
+  const serialized = explode
+    ? entries.map(([key, entryValue]) => \`\${encodePathValue(key)}=\${encodePathValue(serializePathPrimitive(entryValue))}\`).join(style === 'label' ? '.' : ',')
+    : entries.flatMap(([key, entryValue]) => [encodePathValue(key), encodePathValue(serializePathPrimitive(entryValue))]).join(',');
+  return pathPrefix(name, style, true) + serialized;
+}
+
+function pathPrefix(name: string, style: string, _objectValue: boolean): string {
+  if (style === 'label') return '.';
+  if (style === 'matrix') return \`;\${name}\`;
+  return '';
+}
+
+function encodePathValue(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function serializePathPrimitive(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
+}`;
+    }
     generateRequestHeaderHelpers() {
         return `function buildRequestHeaders(
-  headers: Record<string, unknown | undefined>,
-  cookies: Record<string, unknown | undefined> = {},
+  headers: Record<string, HeaderParameterSpec | undefined>,
+  cookies: Record<string, HeaderParameterSpec | undefined> = {},
 ): Record<string, string> | undefined {
   const requestHeaders: Record<string, string> = {};
 
-  for (const [name, value] of Object.entries(headers)) {
-    const serialized = serializeParameterValue(value);
+  for (const [name, parameter] of Object.entries(headers)) {
+    const serialized = serializeParameterValue(parameter);
     if (serialized !== undefined) {
       requestHeaders[name] = serialized;
     }
@@ -687,10 +862,17 @@ function encodeQueryValue(value: string, allowReserved: boolean): string {
   return Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined;
 }
 
-function buildCookieHeader(cookies: Record<string, unknown | undefined>): string | undefined {
+interface HeaderParameterSpec {
+  value: unknown;
+  style: string;
+  explode: boolean;
+  contentType?: string;
+}
+
+function buildCookieHeader(cookies: Record<string, HeaderParameterSpec | undefined>): string | undefined {
   const pairs: string[] = [];
-  for (const [name, value] of Object.entries(cookies)) {
-    const serialized = serializeParameterValue(value);
+  for (const [name, parameter] of Object.entries(cookies)) {
+    const serialized = serializeParameterValue(parameter);
     if (serialized !== undefined) {
       pairs.push(\`\${encodeURIComponent(name)}=\${encodeURIComponent(serialized)}\`);
     }
@@ -698,21 +880,37 @@ function buildCookieHeader(cookies: Record<string, unknown | undefined>): string
   return pairs.length > 0 ? pairs.join('; ') : undefined;
 }
 
-function serializeParameterValue(value: unknown): string | undefined {
+function serializeParameterValue(parameter: HeaderParameterSpec | undefined): string | undefined {
+  const value = parameter?.value;
   if (value === undefined || value === null) {
     return undefined;
+  }
+  if (parameter?.contentType) {
+    return JSON.stringify(value);
   }
   if (value instanceof Date) {
     return value.toISOString();
   }
   if (Array.isArray(value)) {
-    return value
-      .map((item) => serializeParameterValue(item))
-      .filter((item): item is string => item !== undefined)
-      .join(',');
+    return value.map((item) => serializeHeaderPrimitive(item)).join(',');
   }
-  if (typeof value === 'object') {
-    return JSON.stringify(value);
+  if (typeof value === 'object' && value !== null) {
+    return serializeHeaderObject(value as Record<string, unknown>, parameter?.explode === true);
+  }
+  return serializeHeaderPrimitive(value);
+}
+
+function serializeHeaderObject(value: Record<string, unknown>, explode: boolean): string {
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== undefined && entryValue !== null);
+  if (explode) {
+    return entries.map(([key, entryValue]) => \`\${key}=\${serializeHeaderPrimitive(entryValue)}\`).join(',');
+  }
+  return entries.flatMap(([key, entryValue]) => [key, serializeHeaderPrimitive(entryValue)]).join(',');
+}
+
+function serializeHeaderPrimitive(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
   }
   return String(value);
 }`;
@@ -799,8 +997,8 @@ function serializeParameterValue(value: unknown): string | undefined {
     collectReferencedModels(schema, knownModels, refs) {
         collectSchemaReferences(schema, TYPESCRIPT_CONFIG.namingConventions.modelName, knownModels, refs);
     }
-    resolveMethodNames(operations, tag) {
-        return resolveTypeScriptMethodNames(tag, operations);
+    resolveMethodNames(operations, tag, config, resourcePathSegments) {
+        return resolveTypeScriptMethodNames(tag, operations, config, resourcePathSegments);
     }
     extractPathParams(path) {
         const matches = path.match(/\{([^}]+)\}/g) || [];

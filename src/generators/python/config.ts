@@ -1,6 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const PYTHON_CONFIG: LanguageConfig = {
   language: 'python',
@@ -75,7 +75,14 @@ const PYTHON_RESERVED_WORDS = new Set([
 ]);
 
 function toPascalCase(str: string): string {
-  return str.replace(/[-_\s]+(.)?/g, (_, c) => c ? c.toUpperCase() : '').replace(/^(.)/, c => c.toUpperCase());
+  return str
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[^a-zA-Z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join('');
 }
 
 function toSnakeCase(str: string): string {
@@ -102,7 +109,7 @@ export function getPythonType(schema: any, config: LanguageConfig): string {
   }
 
   if (schema.$ref) {
-    const refName = schema.$ref.split('/').pop();
+    const refName = getSchemaReferenceName(schema.$ref);
     return config.namingConventions.modelName(refName);
   }
 

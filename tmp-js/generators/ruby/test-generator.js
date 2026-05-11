@@ -3,7 +3,7 @@ import { getRubyModuleSegments, getRubyRootRequirePath } from './config.js';
 import { RubyUsagePlanner, resolveRubyExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new RubyUsagePlanner(ctx, getRubyModuleSegments(config).join('::'));
+        const planner = new RubyUsagePlanner(ctx, getRubyModuleSegments(config).join('::'), config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Ruby generateTests requires at least one API operation to build a smoke test.');

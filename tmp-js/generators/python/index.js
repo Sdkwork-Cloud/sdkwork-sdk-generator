@@ -5,7 +5,7 @@ import { ApiGenerator } from './api-generator.js';
 import { HttpClientGenerator } from './http-generator.js';
 import { BuildConfigGenerator } from './build-config-generator.js';
 import { TestGenerator } from './test-generator.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { generatePublishBinScripts } from '../../framework/publish.js';
@@ -42,8 +42,8 @@ export class PythonGenerator extends BaseGenerator {
         const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
         const packageRoot = getPythonPackageRoot(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const planner = new PythonUsagePlanner(ctx);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
+        const planner = new PythonUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartSnippet = quickStartPlan
             ? renderPythonUsageSnippet(quickStartPlan, 'readme')

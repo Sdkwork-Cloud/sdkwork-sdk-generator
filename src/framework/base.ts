@@ -21,6 +21,7 @@ import {
 import {
   parseLocalJsonPointerRef,
   resolveLocalJsonPointerReference,
+  getSchemaReferenceName,
   normalizeSchemaTypeValue,
   resolveSchemaType,
   toLocalJsonPointerRef,
@@ -744,7 +745,7 @@ export abstract class BaseGenerator {
     if (typeof ref !== 'string' || !ref.startsWith('#/components/schemas/')) {
       return '';
     }
-    return ref.split('/').pop() || '';
+    return getSchemaReferenceName(ref);
   }
 
   private resolveOperationGroup(
@@ -1054,14 +1055,13 @@ export abstract class BaseGenerator {
 
     if (typeof input === 'object' && input !== null && '$ref' in input) {
       const ref = (input as { $ref: string }).$ref;
-      if (!ref.startsWith('#/')) {
+      const segments = parseLocalJsonPointerRef(ref);
+      if (!segments) {
         return undefined;
       }
-
-      const refPath = ref.slice(2).split('/');
       let current: any = spec as any;
 
-      for (const segment of refPath) {
+      for (const segment of segments) {
         if (!current || typeof current !== 'object' || !(segment in current)) {
           throw new Error(`Unresolved OpenAPI reference: ${ref}`);
         }
@@ -1710,7 +1710,7 @@ export abstract class BaseGenerator {
   protected mapType(schema: any): string {
     const mapping = this.languageConfig.typeMapping;
     if (schema.$ref) {
-      return this.toPascalCase(schema.$ref.split('/').pop() || '');
+      return this.toPascalCase(getSchemaReferenceName(schema.$ref));
     }
     if (schema.allOf) {
       return schema.allOf.map((s: any) => this.mapType(s)).join(' & ');

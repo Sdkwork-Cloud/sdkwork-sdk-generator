@@ -10,7 +10,7 @@ export class ReadmeGenerator {
         const clientName = resolveSdkClientName(config);
         const commonPkg = resolveCSharpCommonPackage(config);
         const tags = Object.keys(ctx.apiGroups);
-        const planner = new CSharpUsagePlanner(ctx);
+        const planner = new CSharpUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartSnippet = quickStartPlan
             ? renderCSharpUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })

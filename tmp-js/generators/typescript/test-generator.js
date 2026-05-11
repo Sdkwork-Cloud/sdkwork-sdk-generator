@@ -2,7 +2,7 @@ import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { TypeScriptUsagePlanner, renderTypeScriptUsageSnippet, resolveTypeScriptExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new TypeScriptUsagePlanner(ctx);
+        const planner = new TypeScriptUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('TypeScript generateTests requires at least one API operation to build a smoke test.');

@@ -1,14 +1,16 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
 const JAVA_JSON_CONTENT_TYPE = 'application/json';
 export class JavaUsagePlanner {
-    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES) {
+    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES, config) {
         this.ctx = ctx;
-        this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+        this.config = config;
+        this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
         this.preferredModules = preferredModules;
         this.knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => JAVA_CONFIG.namingConventions.modelName(schemaName)));
     }
@@ -30,7 +32,7 @@ export class JavaUsagePlanner {
     }
     buildPlan(tag, operation) {
         const operations = this.ctx.apiGroups[tag]?.operations || [];
-        const methodName = resolveJavaMethodNames(tag, operations).get(operation) || 'operation';
+        const methodName = resolveJavaMethodNames(tag, operations, this.config).get(operation) || 'operation';
         const moduleName = this.getModuleName(tag);
         const transportMethod = String(operation.method || '').toLowerCase();
         const variables = [];
@@ -366,9 +368,13 @@ export class JavaUsagePlanner {
         return this.knownModels.has(typeName);
     }
 }
-export function resolveJavaMethodNames(tag, operations) {
+export function resolveJavaMethodNames(tag, operations, config) {
     if (!Array.isArray(operations) || operations.length === 0) {
         return new Map();
+    }
+    const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, JAVA_CONFIG, 'camel');
+    if (openAIStyleNames) {
+        return openAIStyleNames;
     }
     return resolveScopedMethodNames(operations, (operation) => generateJavaOperationName(operation.method, operation.path, operation, tag));
 }
@@ -882,7 +888,7 @@ function resolveSchema(ctx, schema) {
         return schema;
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         return ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);

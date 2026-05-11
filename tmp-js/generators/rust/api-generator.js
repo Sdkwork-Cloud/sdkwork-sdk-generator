@@ -1,7 +1,9 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { resolveRustApiNames, sanitizeRustRawIdentifier } from './identifiers.js';
@@ -9,7 +11,7 @@ export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiNames = resolveRustApiNames(tags, resolvedTagNames);
         const knownModels = new Set(Object.keys(ctx.schemas).map((schemaName) => RUST_CONFIG.namingConventions.modelName(schemaName)));
         for (const tag of tags) {
@@ -26,7 +28,9 @@ export class ApiGenerator {
         return files;
     }
     generateApiFile(apiName, operations, config, knownModels) {
-        const methodNames = resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, apiName.tag));
+        operations = selectCanonicalOpenAIStyleOperations(apiName.tag, operations, config);
+        const methodNames = resolveOpenAIStyleMethodNames(apiName.tag, operations, config, RUST_CONFIG, 'snake')
+            || resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, apiName.tag));
         const referencedModels = new Set();
         const typeImports = new Set();
         const methods = operations.map((op) => {
@@ -46,6 +50,7 @@ export class ApiGenerator {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
         });
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
         const needsQuerySerializationHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
@@ -56,6 +61,7 @@ export class ApiGenerator {
                 || allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
         });
         const needsCustomMethod = operations.some((op) => !['get', 'post', 'put', 'patch', 'delete'].includes(String(op.method || '').toLowerCase()));
+        const needsEventStream = operations.some((op) => Boolean(extractEventStreamResponseInfo(op)));
         const modelImports = referencedModels.size > 0
             ? `use crate::models::{${Array.from(referencedModels).sort().join(', ')}};\n`
             : '';
@@ -64,8 +70,8 @@ export class ApiGenerator {
             path: `src/api/${apiName.moduleName}.rs`,
             content: this.format(`use std::sync::Arc;
 
-${needsCustomMethod ? 'use reqwest::Method;\n\n' : ''}${typeImports.size > 0 ? `use crate::api::base::{${Array.from(typeImports).sort().join(', ')}};\n` : ''}use crate::api::paths::${pathFunction};
-${needsAppendQueryString ? 'use crate::api::paths::append_query_string;\n' : ''}use crate::http::{SdkworkError, SdkworkHttpClient};
+${needsCustomMethod || needsEventStream ? 'use reqwest::Method;\n\n' : ''}${typeImports.size > 0 ? `use crate::api::base::{${Array.from(typeImports).sort().join(', ')}};\n` : ''}use crate::api::paths::${pathFunction};
+${needsAppendQueryString ? 'use crate::api::paths::append_query_string;\n' : ''}use crate::http::{SdkworkError, SdkworkHttpClient${needsEventStream ? ', SseStream' : ''}};
 ${modelImports}
 #[derive(Clone)]
 pub struct ${apiName.structName} {
@@ -80,6 +86,7 @@ impl ${apiName.structName} {
 ${this.indent(methods, 4)}
 
 }
+${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}`),
             language: 'rust',
@@ -93,6 +100,7 @@ ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()
         const queryStringParams = allParameters.filter((param) => param?.in === 'querystring');
         const headerParams = allParameters.filter((param) => param?.in === 'header');
         const cookieParams = allParameters.filter((param) => param?.in === 'cookie');
+        const pathOpenApiParams = allParameters.filter((param) => param?.in === 'path');
         const hasQuery = queryParams.length > 0;
         const hasRawQueryString = queryStringParams.length > 0;
         const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -103,7 +111,9 @@ ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()
         const requestBodySchema = requestBodyInfo?.schema;
         const hasBody = Boolean(requestBodySchema);
         const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
-        const responseSchema = this.extractResponseSchema(op);
+        const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const isEventStreamResponse = Boolean(eventStreamInfo);
+        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const responseType = responseSchema
             ? getRustType(responseSchema, RUST_CONFIG)
             : this.inferFallbackResponseType(op);
@@ -121,10 +131,17 @@ ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()
             hasHeaders ? 'headers' : '',
             hasHeaders ? 'request_headers' : '',
         ]);
-        const pathParams = rawPathParams.map((rawName) => ({
-            rawName,
-            safeName: pathParamNames.get(rawName) || sanitizeRustIdentifier(rawName),
-        }));
+        const pathParams = rawPathParams.map((rawName) => {
+            const parameter = pathOpenApiParams.find((candidate) => candidate?.name === rawName);
+            const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+            return {
+                rawName,
+                safeName: pathParamNames.get(rawName) || sanitizeRustIdentifier(rawName),
+                type: parameter?.schema ? this.getRustParameterType(parameter.schema) : '&str',
+                style: serialization.style,
+                explode: serialization.explode,
+            };
+        });
         const parameterReservedNames = [
             ...pathParams.map((param) => param.safeName),
             hasBody ? 'body' : '',
@@ -136,8 +153,8 @@ ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()
         const queryBindings = hasExplicitQuerySerialization
             ? this.createQueryParameterBindings(queryParams, parameterReservedNames)
             : [];
-        const headerBindings = this.createNamedParameterBindings(headerParams, parameterReservedNames);
-        const cookieBindings = this.createNamedParameterBindings(cookieParams, [
+        const headerBindings = this.createHeaderParameterBindings(headerParams, parameterReservedNames);
+        const cookieBindings = this.createHeaderParameterBindings(cookieParams, [
             ...parameterReservedNames,
             ...queryBindings.map((binding) => binding.safeName),
             ...headerBindings.map((binding) => binding.safeName),
@@ -149,8 +166,8 @@ ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()
         const signatureParams = [];
         const formatArgs = [];
         for (const pathParam of pathParams) {
-            signatureParams.push(`${pathParam.safeName}: &str`);
-            formatArgs.push(pathParam.safeName);
+            signatureParams.push(`${pathParam.safeName}: ${pathParam.type}`);
+            formatArgs.push(`serialize_path_parameter(${pathParam.safeName}, PathParameterSpec::new(${this.formatRustString(pathParam.rawName)}, ${this.formatRustString(pathParam.style)}, ${pathParam.explode ? 'true' : 'false'}))`);
         }
         if (hasBody) {
             const requestType = getRustType(requestBodySchema, RUST_CONFIG);
@@ -220,6 +237,15 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
     ]);
 `
             : '';
+        if (isEventStreamResponse) {
+            return {
+                content: `${docComment}pub async fn ${normalizedMethodName}(&self${params}) -> Result<SseStream<${responseType}>, SdkworkError> {
+${queryBlock}    let path = ${requestPathExpression};
+${requestHeaderBlock}    self.client.stream(Method::${toHttpMethodLiteral(httpMethod)}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await
+}`,
+                referencedModels,
+            };
+        }
         return {
             content: `${docComment}pub async fn ${normalizedMethodName}(&self${params}) -> Result<${responseType}, SdkworkError> {
 ${queryBlock}    let path = ${requestPathExpression};
@@ -254,6 +280,34 @@ ${requestHeaderBlock}    ${clientCall}
             };
         });
     }
+    createHeaderParameterBindings(parameters, reservedNames) {
+        return this.createNamedParameterBindings(parameters, reservedNames).map((binding) => {
+            const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+            return {
+                ...binding,
+                style: serialization.style,
+                explode: serialization.explode,
+                contentType: serialization.contentType,
+            };
+        });
+    }
+    getRustParameterType(schema) {
+        const type = getRustType(schema, RUST_CONFIG);
+        if (type === 'String') {
+            return '&str';
+        }
+        if (type === 'serde_json::Value') {
+            return '&serde_json::Value';
+        }
+        if (type === 'i64' || type === 'f64' || type === 'bool') {
+            return type;
+        }
+        const vectorMatch = type.match(/^Vec<(.+)>$/);
+        if (vectorMatch) {
+            return `&[${vectorMatch[1]}]`;
+        }
+        return `&${type}`;
+    }
     getNamedParameterType(parameter) {
         const contentSchema = extractOpenApiParameterContentSchema(parameter);
         const schema = contentSchema || parameter?.schema;
@@ -287,9 +341,8 @@ ${requestHeaderBlock}    ${clientCall}
             return `${indent}&[]`;
         }
         const lines = bindings.map((binding) => {
-            const value = binding.required
-                ? `serialize_parameter_value(&${binding.safeName})`
-                : `${binding.safeName}.as_ref().and_then(serialize_parameter_value)`;
+            const headerBinding = binding;
+            const value = `HeaderParameterSpec::new(${binding.safeName}, ${this.formatRustString(headerBinding.style)}, ${headerBinding.explode ? 'true' : 'false'}, ${headerBinding.contentType ? `Some(${this.formatRustString(headerBinding.contentType)})` : 'None'})`;
             return `${indent}    (${this.formatRustString(String(binding.parameter?.name || binding.safeName))}, ${value}),`;
         });
         return [`${indent}&[`, ...lines, `${indent}]`].join('\n');
@@ -455,12 +508,134 @@ fn encode_query_value(value: &str, allow_reserved: bool) -> String {
     encoded
 }`;
     }
+    generatePathSerializationHelpers() {
+        return `struct PathParameterSpec<'a> {
+    name: &'a str,
+    style: &'a str,
+    explode: bool,
+}
+
+impl<'a> PathParameterSpec<'a> {
+    fn new(name: &'a str, style: &'a str, explode: bool) -> Self {
+        Self { name, style, explode }
+    }
+}
+
+fn serialize_path_parameter<T: serde::Serialize>(value: T, spec: PathParameterSpec<'_>) -> String {
+    let value = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
+    if value.is_null() {
+        return String::new();
+    }
+    let style = if spec.style.is_empty() { "simple" } else { spec.style };
+    match value {
+        serde_json::Value::Array(values) => serialize_path_array(spec.name, &values, style, spec.explode),
+        serde_json::Value::Object(values) => serialize_path_object(spec.name, &values, style, spec.explode),
+        value => format!("{}{}", path_primitive_prefix(spec.name, style), percent_encode(&primitive_to_string(&value))),
+    }
+}
+
+fn serialize_path_array(name: &str, values: &[serde_json::Value], style: &str, explode: bool) -> String {
+    let serialized = values
+        .iter()
+        .filter(|value| !value.is_null())
+        .map(|value| percent_encode(&primitive_to_string(value)))
+        .collect::<Vec<_>>();
+    if serialized.is_empty() {
+        return path_prefix(name, style);
+    }
+    if style == "matrix" {
+        if explode {
+            return serialized.iter().map(|item| format!(";{}={}", name, item)).collect::<Vec<_>>().join("");
+        }
+        return format!(";{}={}", name, serialized.join(","));
+    }
+    let separator = if explode { "." } else { "," };
+    format!("{}{}", path_prefix(name, style), serialized.join(separator))
+}
+
+fn serialize_path_object(
+    name: &str,
+    values: &serde_json::Map<String, serde_json::Value>,
+    style: &str,
+    explode: bool,
+) -> String {
+    let mut entries = Vec::new();
+    let mut exploded = Vec::new();
+    for (key, value) in values {
+        if value.is_null() {
+            continue;
+        }
+        let escaped_key = percent_encode(key);
+        let escaped_value = percent_encode(&primitive_to_string(value));
+        if explode {
+            if style == "matrix" {
+                exploded.push(format!(";{}={}", escaped_key, escaped_value));
+            } else {
+                exploded.push(format!("{}={}", escaped_key, escaped_value));
+            }
+        } else {
+            entries.push(escaped_key);
+            entries.push(escaped_value);
+        }
+    }
+    if style == "matrix" {
+        if explode {
+            return exploded.join("");
+        }
+        return format!(";{}={}", name, entries.join(","));
+    }
+    if explode {
+        let separator = if style == "label" { "." } else { "," };
+        return format!("{}{}", path_prefix(name, style), exploded.join(separator));
+    }
+    format!("{}{}", path_prefix(name, style), entries.join(","))
+}
+
+fn path_prefix(name: &str, style: &str) -> String {
+    match style {
+        "label" => ".".to_string(),
+        "matrix" => format!(";{}", name),
+        _ => String::new(),
+    }
+}
+
+fn path_primitive_prefix(name: &str, style: &str) -> String {
+    if style == "matrix" {
+        format!(";{}=", name)
+    } else {
+        path_prefix(name, style)
+    }
+}`;
+    }
     generateRequestHeaderHelpers() {
-        return `fn build_request_headers(headers: &[(&str, Option<String>)], cookies: &[(&str, Option<String>)]) -> Option<RequestHeaders> {
+        return `struct HeaderParameterSpec {
+    value: serde_json::Value,
+    style: &'static str,
+    explode: bool,
+    content_type: Option<&'static str>,
+}
+
+impl HeaderParameterSpec {
+    fn new<T: serde::Serialize>(
+        value: T,
+        style: &'static str,
+        explode: bool,
+        content_type: Option<&'static str>,
+    ) -> Self {
+        Self {
+            value: serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
+            style,
+            explode,
+            content_type,
+        }
+    }
+}
+
+fn build_request_headers(headers: &[(&str, HeaderParameterSpec)], cookies: &[(&str, HeaderParameterSpec)]) -> Option<RequestHeaders> {
     let mut request_headers = RequestHeaders::new();
-    for (name, value) in headers {
-        if let Some(value) = value {
-            request_headers.insert((*name).to_string(), value.clone());
+    for (name, parameter) in headers {
+        if let Some(value) = serialize_header_parameter(parameter) {
+            request_headers.insert((*name).to_string(), value);
         }
     }
 
@@ -482,23 +657,27 @@ fn encode_query_value(value: &str, allow_reserved: bool) -> String {
     }
 }
 
-fn build_cookie_header(cookies: &[(&str, Option<String>)]) -> String {
+fn build_cookie_header(cookies: &[(&str, HeaderParameterSpec)]) -> String {
     cookies
         .iter()
         .filter_map(|(name, value)| {
-            value
-                .as_ref()
-                .map(|value| format!("{}={}", percent_encode(name), percent_encode(value)))
+            serialize_header_parameter(value)
+                .map(|value| format!("{}={}", percent_encode(name), percent_encode(&value)))
         })
         .collect::<Vec<_>>()
         .join("; ")
 }
 
-fn serialize_parameter_value<T: serde::Serialize>(value: &T) -> Option<String> {
-    let value = serde_json::to_value(value).ok()?;
-    match value {
+fn serialize_header_parameter(parameter: &HeaderParameterSpec) -> Option<String> {
+    if parameter.value.is_null() {
+        return None;
+    }
+    if parameter.content_type.is_some() {
+        return Some(parameter.value.to_string());
+    }
+    match &parameter.value {
         serde_json::Value::Null => None,
-        serde_json::Value::String(value) => Some(value),
+        serde_json::Value::String(value) => Some(value.clone()),
         serde_json::Value::Number(value) => Some(value.to_string()),
         serde_json::Value::Bool(value) => Some(value.to_string()),
         serde_json::Value::Array(values) => {
@@ -515,7 +694,15 @@ fn serialize_parameter_value<T: serde::Serialize>(value: &T) -> Option<String> {
         serde_json::Value::Object(values) => {
             let serialized = values
                 .iter()
-                .filter_map(|(key, value)| serialize_json_value(value).map(|serialized| format!("{}={}", key, serialized)))
+                .filter_map(|(key, value)| {
+                    serialize_json_value(value).map(|serialized| {
+                        if parameter.explode {
+                            format!("{}={}", key, serialized)
+                        } else {
+                            format!("{},{}", key, serialized)
+                        }
+                    })
+                })
                 .collect::<Vec<_>>();
             if serialized.is_empty() {
                 None

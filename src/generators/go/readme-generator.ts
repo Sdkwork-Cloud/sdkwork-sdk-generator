@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import {
   buildLanguageReadmeTitle,
   buildMutuallyExclusiveAuthSection,
@@ -16,8 +16,8 @@ export class ReadmeGenerator {
     const clientName = resolveSdkClientName(config);
     const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
-    const planner = new GoUsagePlanner(ctx);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
+    const planner = new GoUsagePlanner(ctx, undefined, config);
     const quickStartPlan = planner.selectQuickStartPlan();
     const quickStartSnippet = quickStartPlan
       ? renderGoUsageSnippet(quickStartPlan, 'readme')

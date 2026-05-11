@@ -10,11 +10,18 @@ const REMOVABLE_TAG_SUFFIXES = new Set([
 ]);
 const METHOD_VERB_PARTS = new Set([
     'get',
+    'fetch',
     'list',
     'create',
     'update',
     'patch',
     'delete',
+    'enable',
+    'disable',
+    'approve',
+    'reject',
+    'publish',
+    'offline',
     'head',
     'options',
     'trace',

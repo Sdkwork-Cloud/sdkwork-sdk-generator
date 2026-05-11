@@ -12,7 +12,7 @@ import {
 
 export class TestGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
-    const planner = new CSharpUsagePlanner(ctx);
+    const planner = new CSharpUsagePlanner(ctx, undefined, config);
     const plan = planner.selectQuickStartPlan();
     if (!plan) {
       throw new Error('C# generateTests requires at least one API operation to build a smoke test.');

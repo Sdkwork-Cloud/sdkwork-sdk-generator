@@ -3,7 +3,7 @@ import { getPhpNamespace } from './config.js';
 import { PhpUsagePlanner, resolvePhpExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new PhpUsagePlanner(ctx);
+        const planner = new PhpUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('PHP generateTests requires at least one API operation to build a smoke test.');

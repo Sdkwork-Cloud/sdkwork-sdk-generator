@@ -1,4 +1,4 @@
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -8,7 +8,7 @@ export class HttpClientGenerator {
         const identity = resolveJvmSdkIdentity(config);
         const clientName = resolveSdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         const commonPkg = resolveJvmCommonPackage(config);
@@ -34,6 +34,9 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
 class HttpClient(
@@ -220,6 +223,45 @@ class HttpClient(
                 throw RuntimeException("HTTP ${'$'}{response.code()}: ${'$'}{response.body()?.string() ?: ""}")
             }
             return parseResponse(response.body()?.string())
+        }
+    }
+
+    fun <T> stream(
+        method: String,
+        path: String,
+        body: Any? = null,
+        params: Map<String, Any>? = null,
+        requestHeaders: Map<String, String>? = null,
+        contentType: String? = null,
+        typeReference: TypeReference<T>
+    ): Sequence<T> {
+        return sequence {
+            val requestBody = if (body == null) null else createRequestBody(body, contentType)
+            val request = Request.Builder()
+                .url(buildUrl(path, params))
+                .headers(mergeHeaders(requestHeaders))
+                .addHeader("Accept", "text/event-stream")
+                .method(method, requestBody)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw RuntimeException("HTTP ${'$'}{response.code()}: ${'$'}{response.body()?.string() ?: ""}")
+                }
+                BufferedReader(InputStreamReader(response.body()?.byteStream(), StandardCharsets.UTF_8)).use { reader ->
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isBlank() || line.startsWith(":") || !line.startsWith("data:")) {
+                            continue
+                        }
+                        val data = line.removePrefix("data:").trim()
+                        if (data == "[DONE]") {
+                            break
+                        }
+                        yield(mapper.readValue(data, typeReference))
+                    }
+                }
+            }
         }
     }
 

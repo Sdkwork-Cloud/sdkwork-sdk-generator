@@ -3,7 +3,7 @@ import { getFlutterPackageName } from './config.js';
 import { FlutterUsagePlanner, resolveFlutterExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new FlutterUsagePlanner(ctx);
+        const planner = new FlutterUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Flutter generateTests requires at least one API operation to build a smoke test.');

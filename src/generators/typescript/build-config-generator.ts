@@ -1,14 +1,13 @@
 import type { GeneratedFile } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveTypeScriptCommonPackage } from '../../framework/common-package.js';
-import { resolveTypeScriptLibraryName } from '../../framework/sdk-identity.js';
 
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
     return [
       this.generatePackageJson(config),
       this.generateTsConfig(),
-      this.generateViteConfig(config),
+      this.generateBuildRuntimeScript(),
     ];
   }
 
@@ -19,8 +18,8 @@ export class BuildConfigGenerator {
     const inferredDescription = /sdk$/i.test(trimmedName) ? trimmedName : `${trimmedName} SDK`;
     
     const scripts: Record<string, string> = {
-      build: 'tsc --emitDeclarationOnly && vite build',
-      dev: 'vite build --watch',
+      build: 'node custom/build-runtime.mjs',
+      dev: 'node custom/build-runtime.mjs',
       prepublishOnly: 'npm run build',
     };
 
@@ -53,8 +52,7 @@ export class BuildConfigGenerator {
       devDependencies: {
         '@types/node': '^20.0.0',
         typescript: '^5.3.0',
-        vite: '^7.0.0',
-        'vite-plugin-dts': '^4.0.0',
+        rollup: '^4.0.0',
       },
       keywords: [
         'sdk',
@@ -103,44 +101,159 @@ export class BuildConfigGenerator {
     };
   }
 
-  private generateViteConfig(config: GeneratorConfig): GeneratedFile {
-    const libName = resolveTypeScriptLibraryName(config);
-    const commonPkg = resolveTypeScriptCommonPackage(config);
-
+  private generateBuildRuntimeScript(): GeneratedFile {
     return {
-      path: 'vite.config.ts',
-      content: this.format(`import { defineConfig } from 'vite';
-import dts from 'vite-plugin-dts';
-import { resolve } from 'path';
+      path: 'custom/build-runtime.mjs',
+      content: this.format(`#!/usr/bin/env node
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import ts from 'typescript';
+import { rollup } from 'rollup';
 
-export default defineConfig({
-  build: {
-    lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
-      name: '${libName}',
-      formats: ['es', 'cjs'],
-      fileName: (format) => \`index.\${format === 'es' ? 'js' : 'cjs'}\`,
+const projectDir = process.cwd();
+const srcDir = path.join(projectDir, 'src');
+const distDir = path.join(projectDir, 'dist');
+const tempDir = path.join(projectDir, '.sdkwork', 'build-runtime');
+const tempEsmDir = path.join(tempDir, 'esm');
+
+async function main() {
+  await fs.rm(distDir, { recursive: true, force: true });
+  await fs.rm(tempDir, { recursive: true, force: true });
+  await fs.mkdir(distDir, { recursive: true });
+
+  emitDeclarations();
+  emitRuntimeModules();
+  await bundleRuntime('es', path.join(distDir, 'index.js'));
+  await bundleRuntime('cjs', path.join(distDir, 'index.cjs'));
+
+  await fs.rm(tempDir, { recursive: true, force: true });
+}
+
+function loadConfig(overrides) {
+  const configPath = ts.findConfigFile(projectDir, ts.sys.fileExists, 'tsconfig.json');
+  if (!configPath) {
+    throw new Error(\`tsconfig.json not found under \${projectDir}\`);
+  }
+
+  const configFile = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (configFile.error) {
+    throw new Error(formatDiagnostics([configFile.error]));
+  }
+
+  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, projectDir, overrides, configPath);
+  if (parsed.errors.length > 0) {
+    throw new Error(formatDiagnostics(parsed.errors));
+  }
+
+  return parsed;
+}
+
+function emitDeclarations() {
+  const parsed = loadConfig({
+    declaration: true,
+    declarationMap: true,
+    emitDeclarationOnly: true,
+    noEmit: false,
+    noEmitOnError: true,
+    outDir: distDir,
+    rootDir: srcDir,
+    sourceMap: false,
+  });
+  emitProgram(parsed);
+}
+
+function emitRuntimeModules() {
+  const parsed = loadConfig({
+    declaration: false,
+    declarationMap: false,
+    emitDeclarationOnly: false,
+    module: ts.ModuleKind.ESNext,
+    noEmit: false,
+    noEmitOnError: true,
+    outDir: tempEsmDir,
+    rootDir: srcDir,
+    sourceMap: false,
+  });
+  emitProgram(parsed);
+}
+
+function emitProgram(parsed) {
+  const program = ts.createProgram(parsed.fileNames, parsed.options);
+  const emitResult = program.emit();
+  const diagnostics = ts.getPreEmitDiagnostics(program).concat(emitResult.diagnostics);
+  if (diagnostics.length > 0) {
+    throw new Error(formatDiagnostics(diagnostics));
+  }
+}
+
+async function bundleRuntime(format, file) {
+  const bundle = await rollup({
+    input: path.join(tempEsmDir, 'index.js'),
+    external: (source) => source.startsWith('@sdkwork/'),
+    plugins: [relativeExtensionResolver()],
+    onwarn(warning, warn) {
+      if (warning.code === 'EMPTY_BUNDLE') {
+        throw new Error(warning.message);
+      }
+      warn(warning);
     },
-    rollupOptions: {
-      external: ['${commonPkg.importPath}'],
-      output: {
-        globals: {
-          '${commonPkg.importPath}': '${commonPkg.viteGlobalName}',
-        },
-      },
+  });
+
+  try {
+    await bundle.write({
+      file,
+      format,
+      exports: 'named',
+      interop: 'auto',
+      sourcemap: false,
+    });
+  } finally {
+    await bundle.close();
+  }
+}
+
+function relativeExtensionResolver() {
+  return {
+    name: 'relative-extension-resolver',
+    async resolveId(source, importer) {
+      if (!importer || !source.startsWith('.')) {
+        return null;
+      }
+
+      const base = path.resolve(path.dirname(importer), source);
+      for (const candidate of [base, \`\${base}.js\`, path.join(base, 'index.js')]) {
+        try {
+          const stat = await fs.stat(candidate);
+          if (stat.isFile()) {
+            return candidate;
+          }
+        } catch {
+          // Try the next candidate.
+        }
+      }
+
+      return null;
     },
-    sourcemap: true,
-  },
-  plugins: [
-    dts({ 
-      include: ['src'],
-      outDir: 'dist',
-    }),
-  ],
+  };
+}
+
+function formatDiagnostics(diagnostics) {
+  return ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+    getCanonicalFileName: (fileName) => fileName,
+    getCurrentDirectory: () => projectDir,
+    getNewLine: () => '\\n',
+  });
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 });
 `),
       language: 'typescript',
-      description: 'Vite build configuration',
+      description: 'TypeScript runtime build script',
+      ownership: 'scaffold',
+      overwriteStrategy: 'if-missing',
     };
   }
 

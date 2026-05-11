@@ -4,12 +4,13 @@ import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 import {
   extractOpenApiParameterContentSchema,
@@ -31,12 +32,18 @@ interface QueryParameterBinding extends NamedParameterBinding {
   contentType?: string;
 }
 
+interface HeaderParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  contentType?: string;
+}
+
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const files: GeneratedFile[] = [];
     const identity = resolveJvmSdkIdentity(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const knownModels = new Set<string>(
       Object.keys(ctx.schemas).map((schemaName) => JAVA_CONFIG.namingConventions.modelName(schemaName))
     );
@@ -61,13 +68,16 @@ export class ApiGenerator {
     config: GeneratorConfig,
     knownModels: Set<string>
   ): GeneratedFile {
+    operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
     const className = `${JAVA_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-    const methodNames = resolveScopedMethodNames(operations, (op) =>
-      this.generateOperationId(op.method, op.path, op, tag)
-    );
+    const methodNames = resolveOpenAIStyleMethodNames(tag, operations, config, JAVA_CONFIG, 'camel')
+      || resolveScopedMethodNames(operations, (op) =>
+        this.generateOperationId(op.method, op.path, op, tag)
+      );
     const methods = operations
       .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
       .join('\n\n');
+    const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
     const needsRequestHeaderHelpers = operations.some((op) => {
       const allParameters = op.allParameters || op.parameters || [];
       return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
@@ -95,6 +105,7 @@ public class ${className} {
     }
 
 ${methods}
+${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 }
@@ -111,6 +122,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
     const headerParams = allParameters.filter((param: any) => param?.in === 'header');
     const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const pathOpenApiParams = allParameters.filter((param: any) => param?.in === 'path');
     const hasQuery = queryParams.length > 0;
     const hasRawQueryString = queryStringParams.length > 0;
     const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -127,7 +139,9 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const requestType = requestBodySchema
       ? getJavaType(requestBodySchema, JAVA_CONFIG)
       : 'Object';
-    const responseSchema = this.extractResponseSchema(op);
+    const eventStreamInfo = extractEventStreamResponseInfo(op);
+    const isEventStreamResponse = Boolean(eventStreamInfo);
+    const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const responseType = responseSchema
       ? getJavaType(responseSchema, JAVA_CONFIG)
       : this.inferFallbackResponseType(op);
@@ -142,10 +156,17 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         hasHeaders ? 'requestHeaders' : '',
       ]
     );
-    const pathParams = rawPathParams.map((rawName) => ({
-      rawName,
-      safeName: pathParamNames.get(rawName) || rawName,
-    }));
+    const pathParams = rawPathParams.map((rawName) => {
+      const parameter = pathOpenApiParams.find((candidate: any) => candidate?.name === rawName);
+      const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+      return {
+        rawName,
+        safeName: pathParamNames.get(rawName) || rawName,
+        type: parameter?.schema ? this.ensureKnownType(getJavaType(parameter.schema, JAVA_CONFIG), knownModels) : 'String',
+        style: serialization.style,
+        explode: serialization.explode,
+      };
+    });
     const parameterReservedNames = [
       ...pathParams.map((param) => param.safeName),
       hasBody ? 'body' : '',
@@ -156,8 +177,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryBindings = hasExplicitQuerySerialization
       ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
       : [];
-    const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-    const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+    const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+    const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
       ...parameterReservedNames,
       ...queryBindings.map((binding) => binding.safeName),
       ...headerBindings.map((binding) => binding.safeName),
@@ -169,7 +190,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 
     const params: string[] = [];
     if (pathParams.length) {
-      params.push(...pathParams.map((param) => `String ${param.safeName}`));
+      params.push(...pathParams.map((param) => `${param.type} ${param.safeName}`));
     }
     if (hasBody && Boolean(op.requestBody?.required)) {
       params.push(`${requestType} body`);
@@ -190,8 +211,11 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
-      const safeName = pathParamNames.get(paramName) || JAVA_CONFIG.namingConventions.propertyName(paramName);
-      return `" + ${safeName} + "`;
+      const param = pathParams.find((candidate) => candidate.rawName === paramName);
+      const safeName = param?.safeName || pathParamNames.get(paramName) || JAVA_CONFIG.namingConventions.propertyName(paramName);
+      const style = param?.style || 'simple';
+      const explode = param?.explode ?? false;
+      return `" + serializePathParameter(${safeName}, new PathParameterSpec(${this.formatJavaString(paramName)}, ${this.formatJavaString(style)}, ${explode ? 'true' : 'false'})) + "`;
     });
     const pathCall = `ApiPaths.${JAVA_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
     const requestPathCall = hasRawQueryString
@@ -326,8 +350,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
     const requestHeaderBlock = hasHeaders
       ? `        Map<String, String> requestHeaders = buildRequestHeaders(
-${this.renderNamedParameterMap(headerBindings, 16)},
-${this.renderNamedParameterMap(cookieBindings, 16)}
+${this.renderHeaderParameterMap(headerBindings, 16)},
+${this.renderHeaderParameterMap(cookieBindings, 16)}
         );
 `
       : '';
@@ -337,6 +361,24 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
         ));
 `
       : '';
+
+    if (isEventStreamResponse) {
+      const castType = this.ensureKnownType(responseType, knownModels);
+      const streamArgs = [
+        this.formatJavaString(toHttpMethodLiteral(httpMethod)),
+        requestPathCall,
+        hasBody ? 'body' : 'null',
+        hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null',
+        hasHeaders ? 'requestHeaders' : 'null',
+        hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null',
+        `new TypeReference<${castType}>() {}`,
+      ].join(', ');
+
+      return `${docComment}    public Iterable<${responseType}> ${methodName}(${params.join(', ')}) throws Exception {
+${queryBlock}${requestHeaderBlock}        return client.stream(${streamArgs});
+    }`;
+    }
+
     if (responseType === 'Void') {
       return `${docComment}    public Void ${methodName}(${params.join(', ')}) throws Exception {
 ${queryBlock}${requestHeaderBlock}        ${call};
@@ -363,6 +405,22 @@ ${queryBlock}${requestHeaderBlock}        Object raw = ${call};
         style: serialization.style,
         explode: serialization.explode,
         allowReserved: serialization.allowReserved,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private createHeaderParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): HeaderParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
         contentType: serialization.contentType,
       };
     });
@@ -407,6 +465,22 @@ ${queryBlock}${requestHeaderBlock}        Object raw = ${call};
     }
     const entries = bindings.map((binding) => {
       return `${this.formatJavaString(String(binding.parameter?.name || binding.safeName))}, ${binding.safeName}`;
+    });
+    return `${indent}Map.of(${entries.join(', ')})`;
+  }
+
+  private renderHeaderParameterMap(bindings: HeaderParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}Map.of()`;
+    }
+    const entries = bindings.map((binding) => {
+      return `${this.formatJavaString(String(binding.parameter?.name || binding.safeName))}, new HeaderParameterSpec(${[
+        binding.safeName,
+        this.formatJavaString(binding.style),
+        binding.explode ? 'true' : 'false',
+        binding.contentType ? this.formatJavaString(binding.contentType) : 'null',
+      ].join(', ')})`;
     });
     return `${indent}Map.of(${entries.join(', ')})`;
   }
@@ -526,15 +600,113 @@ ${queryBlock}${requestHeaderBlock}        Object raw = ${call};
     }`;
   }
 
-  private generateRequestHeaderHelpers(): string {
-    return `    private static Map<String, String> buildRequestHeaders(Map<String, ?> headers, Map<String, ?> cookies) {
-        Map<String, String> requestHeaders = new java.util.LinkedHashMap<>();
-        headers.forEach((name, value) -> {
-            String serialized = serializeParameterValue(value);
-            if (serialized != null) {
-                requestHeaders.put(name, serialized);
+  private generatePathSerializationHelpers(): string {
+    return `    private record PathParameterSpec(String name, String style, boolean explode) {}
+
+    private static String serializePathParameter(Object value, PathParameterSpec spec) {
+        if (value == null) {
+            return "";
+        }
+        String style = spec.style() == null || spec.style().isBlank() ? "simple" : spec.style();
+        if (value instanceof Iterable<?> iterable) {
+            return serializePathArray(spec.name(), iterable, style, spec.explode());
+        }
+        if (value instanceof Map<?, ?> map) {
+            return serializePathObject(spec.name(), map, style, spec.explode());
+        }
+        return pathPrimitivePrefix(spec.name(), style) + pathEncode(String.valueOf(value));
+    }
+
+    private static String serializePathArray(String name, Iterable<?> values, String style, boolean explode) {
+        List<String> serialized = new java.util.ArrayList<>();
+        for (Object item : values) {
+            if (item != null) {
+                serialized.add(pathEncode(String.valueOf(item)));
+            }
+        }
+        if (serialized.isEmpty()) {
+            return pathPrefix(name, style);
+        }
+        if ("matrix".equals(style)) {
+            if (explode) {
+                List<String> parts = new java.util.ArrayList<>();
+                for (String item : serialized) {
+                    parts.add(";" + name + "=" + item);
+                }
+                return String.join("", parts);
+            }
+            return ";" + name + "=" + String.join(",", serialized);
+        }
+        String separator = explode ? "." : ",";
+        return pathPrefix(name, style) + String.join(separator, serialized);
+    }
+
+    private static String serializePathObject(String name, Map<?, ?> values, String style, boolean explode) {
+        List<String> entries = new java.util.ArrayList<>();
+        List<String> exploded = new java.util.ArrayList<>();
+        values.forEach((key, value) -> {
+            if (value == null) {
+                return;
+            }
+            String escapedKey = pathEncode(String.valueOf(key));
+            String escapedValue = pathEncode(String.valueOf(value));
+            if (explode) {
+                if ("matrix".equals(style)) {
+                    exploded.add(";" + escapedKey + "=" + escapedValue);
+                } else {
+                    exploded.add(escapedKey + "=" + escapedValue);
+                }
+            } else {
+                entries.add(escapedKey);
+                entries.add(escapedValue);
             }
         });
+        if ("matrix".equals(style)) {
+            if (explode) {
+                return String.join("", exploded);
+            }
+            return ";" + name + "=" + String.join(",", entries);
+        }
+        if (explode) {
+            String separator = "label".equals(style) ? "." : ",";
+            return pathPrefix(name, style) + String.join(separator, exploded);
+        }
+        return pathPrefix(name, style) + String.join(",", entries);
+    }
+
+    private static String pathPrefix(String name, String style) {
+        if ("label".equals(style)) {
+            return ".";
+        }
+        if ("matrix".equals(style)) {
+            return ";" + name;
+        }
+        return "";
+    }
+
+    private static String pathPrimitivePrefix(String name, String style) {
+        if ("matrix".equals(style)) {
+            return ";" + name + "=";
+        }
+        return pathPrefix(name, style);
+    }
+
+    private static String pathEncode(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
+    }`;
+  }
+
+  private generateRequestHeaderHelpers(): string {
+    return `    private record HeaderParameterSpec(Object value, String style, boolean explode, String contentType) {}
+
+    private static Map<String, String> buildRequestHeaders(Map<String, HeaderParameterSpec> headers, Map<String, HeaderParameterSpec> cookies) throws Exception {
+        Map<String, String> requestHeaders = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, HeaderParameterSpec> entry : headers.entrySet()) {
+            String serialized = serializeParameterValue(entry.getValue());
+            if (serialized != null) {
+                requestHeaders.put(entry.getKey(), serialized);
+            }
+        }
 
         String cookieHeader = buildCookieHeader(cookies);
         if (cookieHeader != null && !cookieHeader.isEmpty()) {
@@ -544,29 +716,47 @@ ${queryBlock}${requestHeaderBlock}        Object raw = ${call};
         return requestHeaders.isEmpty() ? null : requestHeaders;
     }
 
-    private static String buildCookieHeader(Map<String, ?> cookies) {
+    private static String buildCookieHeader(Map<String, HeaderParameterSpec> cookies) throws Exception {
         java.util.List<String> pairs = new java.util.ArrayList<>();
-        cookies.forEach((name, value) -> {
-            String serialized = serializeParameterValue(value);
+        for (Map.Entry<String, HeaderParameterSpec> entry : cookies.entrySet()) {
+            String serialized = serializeParameterValue(entry.getValue());
             if (serialized != null) {
-                pairs.add(urlEncode(name) + "=" + urlEncode(serialized));
+                pairs.add(urlEncode(entry.getKey()) + "=" + urlEncode(serialized));
             }
-        });
+        }
         return String.join("; ", pairs);
     }
 
-    private static String serializeParameterValue(Object value) {
-        if (value == null) {
+    private static String serializeParameterValue(HeaderParameterSpec parameter) throws Exception {
+        if (parameter == null || parameter.value() == null) {
             return null;
+        }
+        Object value = parameter.value();
+        if (parameter.contentType() != null && !parameter.contentType().isBlank()) {
+            return headerObjectMapper().writeValueAsString(value);
         }
         if (value instanceof Iterable<?> iterable) {
             java.util.List<String> values = new java.util.ArrayList<>();
             for (Object item : iterable) {
-                String serialized = serializeParameterValue(item);
-                if (serialized != null) {
-                    values.add(serialized);
+                if (item != null) {
+                    values.add(String.valueOf(item));
                 }
             }
+            return String.join(",", values);
+        }
+        if (value instanceof Map<?, ?> map) {
+            java.util.List<String> values = new java.util.ArrayList<>();
+            map.forEach((key, item) -> {
+                if (item == null) {
+                    return;
+                }
+                if (parameter.explode()) {
+                    values.add(String.valueOf(key) + "=" + String.valueOf(item));
+                } else {
+                    values.add(String.valueOf(key));
+                    values.add(String.valueOf(item));
+                }
+            });
             return String.join(",", values);
         }
         return String.valueOf(value);
@@ -574,6 +764,10 @@ ${queryBlock}${requestHeaderBlock}        Object raw = ${call};
 
     private static String urlEncode(String value) {
         return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static com.fasterxml.jackson.databind.ObjectMapper headerObjectMapper() {
+        return new com.fasterxml.jackson.databind.ObjectMapper();
     }`;
   }
 

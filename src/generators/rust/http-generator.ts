@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { resolveRustApiNames, type RustApiName } from './identifiers.js';
 
@@ -8,7 +8,7 @@ export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiNames = resolveRustApiNames(tags, resolvedTagNames);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
@@ -28,11 +28,11 @@ export class HttpClientGenerator {
   ): GeneratedFile {
     return {
       path: 'src/http/client.rs',
-      content: this.format(`use std::collections::HashMap;
+      content: this.format(`use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use reqwest::multipart::Form;
 use reqwest::{Client, Method, Response};
 use serde::Serialize;
@@ -84,6 +84,16 @@ pub struct SdkworkHttpClient {
     base_url: String,
     client: Client,
     headers: Arc<RwLock<RequestHeaders>>,
+}
+
+pub struct SseStream<T> {
+    events: VecDeque<Result<T, SdkworkError>>,
+}
+
+impl<T> SseStream<T> {
+    pub fn next(&mut self) -> Option<Result<T, SdkworkError>> {
+        self.events.pop_front()
+    }
 }
 
 impl SdkworkHttpClient {
@@ -219,6 +229,58 @@ impl SdkworkHttpClient {
         B: Serialize + ?Sized,
     {
         self.request(method, path, query, body, headers, content_type).await
+    }
+
+    pub async fn stream<T, B>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&B>,
+        query: Option<&QueryParams>,
+        headers: Option<&RequestHeaders>,
+        content_type: Option<&str>,
+    ) -> Result<SseStream<T>, SdkworkError>
+    where
+        T: DeserializeOwned,
+        B: Serialize + ?Sized,
+    {
+        let mut request = self.client.request(method, self.build_url(path));
+        if let Some(query_values) = query {
+            request = request.query(&normalize_query(query_values));
+        }
+
+        let mut merged_headers = self.merge_headers(headers)?;
+        merged_headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        request = request.headers(merged_headers);
+
+        if let Some(payload) = body {
+            request = apply_body(request, payload, content_type)?;
+        }
+
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+        if !status.is_success() {
+            return Err(SdkworkError::HttpStatus {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let mut events = VecDeque::new();
+        for line in body.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with(':') || !line.starts_with("data:") {
+                continue;
+            }
+            let data = line.trim_start_matches("data:").trim().to_string();
+            if data == "[DONE]" {
+                break;
+            }
+            events.push_back(serde_json::from_str::<T>(&data).map_err(SdkworkError::from));
+        }
+
+        Ok(SseStream { events })
     }
 
     async fn request<T, B>(
@@ -388,7 +450,7 @@ where
       path: 'src/http/mod.rs',
       content: this.format(`pub mod client;
 
-pub use client::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, SdkworkHttpClient};`),
+pub use client::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, SdkworkHttpClient, SseStream};`),
       language: 'rust',
       description: 'Rust HTTP module exports',
     };

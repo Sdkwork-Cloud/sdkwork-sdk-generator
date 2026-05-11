@@ -2,7 +2,7 @@ import { normalizeReadmeFile } from './readme.js';
 import { buildSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.js';
 import { normalizeOperationId, normalizeTagName } from './naming.js';
 import { findUnexpectedPathItemOperationFields, normalizeOpenApiPathItemOperations, } from './http-methods.js';
-import { parseLocalJsonPointerRef, resolveLocalJsonPointerReference, normalizeSchemaTypeValue, resolveSchemaType, toLocalJsonPointerRef, } from './schema.js';
+import { parseLocalJsonPointerRef, resolveLocalJsonPointerReference, getSchemaReferenceName, normalizeSchemaTypeValue, resolveSchemaType, toLocalJsonPointerRef, } from './schema.js';
 export * from './types.js';
 export class BaseGenerator {
     constructor(languageConfig) {
@@ -479,7 +479,7 @@ export class BaseGenerator {
         if (typeof ref !== 'string' || !ref.startsWith('#/components/schemas/')) {
             return '';
         }
-        return ref.split('/').pop() || '';
+        return getSchemaReferenceName(ref);
     }
     resolveOperationGroup(operation, path) {
         const rawTag = typeof operation.tags?.[0] === 'string' ? operation.tags[0].trim() : '';
@@ -730,12 +730,12 @@ export class BaseGenerator {
         }
         if (typeof input === 'object' && input !== null && '$ref' in input) {
             const ref = input.$ref;
-            if (!ref.startsWith('#/')) {
+            const segments = parseLocalJsonPointerRef(ref);
+            if (!segments) {
                 return undefined;
             }
-            const refPath = ref.slice(2).split('/');
             let current = spec;
-            for (const segment of refPath) {
+            for (const segment of segments) {
                 if (!current || typeof current !== 'object' || !(segment in current)) {
                     throw new Error(`Unresolved OpenAPI reference: ${ref}`);
                 }
@@ -1250,7 +1250,7 @@ export class BaseGenerator {
     mapType(schema) {
         const mapping = this.languageConfig.typeMapping;
         if (schema.$ref) {
-            return this.toPascalCase(schema.$ref.split('/').pop() || '');
+            return this.toPascalCase(getSchemaReferenceName(schema.$ref));
         }
         if (schema.allOf) {
             return schema.allOf.map((s) => this.mapType(s)).join(' & ');

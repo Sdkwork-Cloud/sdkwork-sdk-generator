@@ -1,14 +1,16 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { getRubyType, RUBY_CONFIG } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
 export class RubyUsagePlanner {
-    constructor(ctx, modulePrefix) {
+    constructor(ctx, modulePrefix, config) {
         this.ctx = ctx;
         this.modulePrefix = modulePrefix;
-        this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+        this.config = config;
+        this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
     }
     getModuleProperty(tag) {
         const resolved = this.resolvedTagNames.get(tag) || tag;
@@ -26,7 +28,7 @@ export class RubyUsagePlanner {
         if (operations.length === 0) {
             return undefined;
         }
-        const methodNames = resolveRubyMethodNames(tag, operations);
+        const methodNames = resolveRubyMethodNames(tag, operations, this.config);
         const operation = operations
             .map((candidate, index) => ({ candidate, index, score: this.scoreOperation(candidate) }))
             .sort((left, right) => (left.score - right.score) || (left.index - right.index))[0]?.candidate;
@@ -184,7 +186,11 @@ export class RubyUsagePlanner {
         return sampleScalarValue(this.ctx, fallbackName, resolved, depth, mediaType);
     }
 }
-export function resolveRubyMethodNames(tag, operations) {
+export function resolveRubyMethodNames(tag, operations, config) {
+    const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, RUBY_CONFIG, 'snake');
+    if (openAIStyleNames) {
+        return openAIStyleNames;
+    }
     return resolveScopedMethodNames(operations, (operation) => {
         if (operation.operationId) {
             const normalized = normalizeOperationId(operation.operationId);
@@ -401,7 +407,7 @@ function resolveSchema(ctx, schema) {
     if (!schema || typeof schema !== 'object')
         return schema;
     if (schema.$ref) {
-        const refName = String(schema.$ref).split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         return ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);

@@ -4,12 +4,13 @@ import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { KOTLIN_CONFIG, getKotlinType } from './config.js';
 import {
   extractOpenApiParameterContentSchema,
@@ -31,12 +32,18 @@ interface QueryParameterBinding extends NamedParameterBinding {
   contentType?: string;
 }
 
+interface HeaderParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  contentType?: string;
+}
+
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const files: GeneratedFile[] = [];
     const identity = resolveJvmSdkIdentity(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const knownModels = new Set<string>(
       Object.keys(ctx.schemas).map((schemaName) => KOTLIN_CONFIG.namingConventions.modelName(schemaName))
     );
@@ -61,13 +68,16 @@ export class ApiGenerator {
     config: GeneratorConfig,
     knownModels: Set<string>
   ): GeneratedFile {
+    operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
     const className = `${KOTLIN_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
-    const methodNames = resolveScopedMethodNames(operations, (op) =>
-      this.generateOperationId(op.method, op.path, op, tag)
-    );
+    const methodNames = resolveOpenAIStyleMethodNames(tag, operations, config, KOTLIN_CONFIG, 'camel')
+      || resolveScopedMethodNames(operations, (op) =>
+        this.generateOperationId(op.method, op.path, op, tag)
+      );
     const methods = operations
       .map((op) => this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels))
       .join('\n\n');
+    const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
     const needsRequestHeaderHelpers = operations.some((op) => {
       const allParameters = op.allParameters || op.parameters || [];
       return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
@@ -90,6 +100,7 @@ import ${identity.packageRoot}.http.HttpClient
 class ${className}(private val client: HttpClient) {
 
 ${methods}
+${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 }
@@ -106,6 +117,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
     const headerParams = allParameters.filter((param: any) => param?.in === 'header');
     const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const pathOpenApiParams = allParameters.filter((param: any) => param?.in === 'path');
     const hasQuery = queryParams.length > 0;
     const hasRawQueryString = queryStringParams.length > 0;
     const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -123,7 +135,9 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const requestType = requestBodySchema
       ? this.ensureKnownType(getKotlinType(requestBodySchema, KOTLIN_CONFIG), knownModels)
       : 'Any';
-    const responseSchema = this.extractResponseSchema(op);
+    const eventStreamInfo = extractEventStreamResponseInfo(op);
+    const isEventStreamResponse = Boolean(eventStreamInfo);
+    const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const responseType = responseSchema
       ? this.ensureKnownType(getKotlinType(responseSchema, KOTLIN_CONFIG), knownModels)
       : this.inferFallbackResponseType(op);
@@ -138,10 +152,17 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         hasHeaders ? 'requestHeaders' : '',
       ]
     );
-    const pathParams = rawPathParams.map((rawName) => ({
-      rawName,
-      safeName: pathParamNames.get(rawName) || rawName,
-    }));
+    const pathParams = rawPathParams.map((rawName) => {
+      const parameter = pathOpenApiParams.find((candidate: any) => candidate?.name === rawName);
+      const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+      return {
+        rawName,
+        safeName: pathParamNames.get(rawName) || rawName,
+        type: parameter?.schema ? this.ensureKnownType(getKotlinType(parameter.schema, KOTLIN_CONFIG), knownModels) : 'String',
+        style: serialization.style,
+        explode: serialization.explode,
+      };
+    });
     const parameterReservedNames = [
       ...pathParams.map((param) => param.safeName),
       hasBody ? 'body' : '',
@@ -152,8 +173,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryBindings = hasExplicitQuerySerialization
       ? this.createQueryParameterBindings(queryParams, knownModels, parameterReservedNames)
       : [];
-    const headerBindings = this.createNamedParameterBindings(headerParams, knownModels, parameterReservedNames);
-    const cookieBindings = this.createNamedParameterBindings(cookieParams, knownModels, [
+    const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, parameterReservedNames);
+    const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, [
       ...parameterReservedNames,
       ...queryBindings.map((binding) => binding.safeName),
       ...headerBindings.map((binding) => binding.safeName),
@@ -165,7 +186,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 
     const params: string[] = [];
     if (pathParams.length) {
-      params.push(...pathParams.map((param) => `${param.safeName}: String`));
+      params.push(...pathParams.map((param) => `${param.safeName}: ${param.type}`));
     }
     if (hasBody && requestBodyRequired) {
       if (requestBodyRequired) {
@@ -190,8 +211,11 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
-      const safeName = pathParamNames.get(paramName) || KOTLIN_CONFIG.namingConventions.propertyName(paramName);
-      return `$${safeName}`;
+      const param = pathParams.find((candidate) => candidate.rawName === paramName);
+      const safeName = param?.safeName || pathParamNames.get(paramName) || KOTLIN_CONFIG.namingConventions.propertyName(paramName);
+      const style = param?.style || 'simple';
+      const explode = param?.explode ?? false;
+      return `\${serializePathParameter(${safeName}, PathParameterSpec(${this.formatKotlinString(paramName)}, ${this.formatKotlinString(style)}, ${explode ? 'true' : 'false'}))}`;
     });
     const pathCall = `ApiPaths.${KOTLIN_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
     const requestPathCall = hasRawQueryString
@@ -326,8 +350,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
     const requestHeaderBlock = hasHeaders
       ? `        val requestHeaders = buildRequestHeaders(
-${this.renderNamedParameterMap(headerBindings, 12)},
-${this.renderNamedParameterMap(cookieBindings, 12)}
+${this.renderHeaderParameterMap(headerBindings, 12)},
+${this.renderHeaderParameterMap(cookieBindings, 12)}
         )
 `
       : '';
@@ -337,6 +361,23 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
         ))
 `
       : '';
+
+    if (isEventStreamResponse) {
+      const streamArgs = [
+        `"${toHttpMethodLiteral(httpMethod)}"`,
+        requestPathCall,
+        hasBody ? 'body' : 'null',
+        hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null',
+        hasHeaders ? 'requestHeaders' : 'null',
+        hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null',
+        `object : TypeReference<${responseType}>() {}`,
+      ].join(', ');
+
+      return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): Sequence<${responseType}> {
+${queryBlock}${requestHeaderBlock}        return client.stream(${streamArgs})
+    }`;
+    }
+
     if (responseType === 'Unit') {
       return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): Unit {
 ${queryBlock}${requestHeaderBlock}        ${call}
@@ -367,6 +408,22 @@ ${queryBlock}${requestHeaderBlock}        val raw = ${call}
         style: serialization.style,
         explode: serialization.explode,
         allowReserved: serialization.allowReserved,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private createHeaderParameterBindings(
+    parameters: any[],
+    knownModels: Set<string>,
+    reservedNames: Iterable<string>
+  ): HeaderParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, knownModels, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
         contentType: serialization.contentType,
       };
     });
@@ -417,6 +474,22 @@ ${queryBlock}${requestHeaderBlock}        val raw = ${call}
     }
     const lines = bindings.map((binding) => {
       return `${indent}    ${this.formatKotlinString(String(binding.parameter?.name || binding.safeName))} to ${binding.safeName},`;
+    });
+    return [`${indent}mapOf(`, ...lines, `${indent})`].join('\n');
+  }
+
+  private renderHeaderParameterMap(bindings: HeaderParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}emptyMap()`;
+    }
+    const lines = bindings.map((binding) => {
+      return `${indent}    ${this.formatKotlinString(String(binding.parameter?.name || binding.safeName))} to HeaderParameterSpec(${[
+        binding.safeName,
+        this.formatKotlinString(binding.style),
+        binding.explode ? 'true' : 'false',
+        binding.contentType ? this.formatKotlinString(binding.contentType) : 'null',
+      ].join(', ')}),`;
     });
     return [`${indent}mapOf(`, ...lines, `${indent})`].join('\n');
   }
@@ -543,11 +616,87 @@ ${queryBlock}${requestHeaderBlock}        val raw = ${call}
     }`;
   }
 
+  private generatePathSerializationHelpers(): string {
+    return `    private data class PathParameterSpec(val name: String, val style: String, val explode: Boolean)
+
+    private fun serializePathParameter(value: Any?, spec: PathParameterSpec): String {
+        if (value == null) return ""
+        val style = spec.style.ifBlank { "simple" }
+        return when (value) {
+            is Iterable<*> -> serializePathArray(spec.name, value, style, spec.explode)
+            is Map<*, *> -> serializePathObject(spec.name, value, style, spec.explode)
+            else -> pathPrimitivePrefix(spec.name, style) + pathEncode(value.toString())
+        }
+    }
+
+    private fun serializePathArray(name: String, values: Iterable<*>, style: String, explode: Boolean): String {
+        val serialized = values.mapNotNull { it?.toString()?.let(::pathEncode) }
+        if (serialized.isEmpty()) return pathPrefix(name, style)
+        if (style == "matrix") {
+            if (explode) {
+                return serialized.joinToString("") { ";$name=$it" }
+            }
+            return ";$name=" + serialized.joinToString(",")
+        }
+        val separator = if (explode) "." else ","
+        return pathPrefix(name, style) + serialized.joinToString(separator)
+    }
+
+    private fun serializePathObject(name: String, values: Map<*, *>, style: String, explode: Boolean): String {
+        val entries = mutableListOf<String>()
+        val exploded = mutableListOf<String>()
+        values.forEach { (key, value) ->
+            if (value == null) return@forEach
+            val escapedKey = pathEncode(key.toString())
+            val escapedValue = pathEncode(value.toString())
+            if (explode) {
+                if (style == "matrix") {
+                    exploded += ";$escapedKey=$escapedValue"
+                } else {
+                    exploded += "$escapedKey=$escapedValue"
+                }
+            } else {
+                entries += escapedKey
+                entries += escapedValue
+            }
+        }
+        if (style == "matrix") {
+            if (explode) return exploded.joinToString("")
+            return ";$name=" + entries.joinToString(",")
+        }
+        if (explode) {
+            val separator = if (style == "label") "." else ","
+            return pathPrefix(name, style) + exploded.joinToString(separator)
+        }
+        return pathPrefix(name, style) + entries.joinToString(",")
+    }
+
+    private fun pathPrefix(name: String, style: String): String {
+        return when (style) {
+            "label" -> "."
+            "matrix" -> ";$name"
+            else -> ""
+        }
+    }
+
+    private fun pathPrimitivePrefix(name: String, style: String): String {
+        return if (style == "matrix") ";$name=" else pathPrefix(name, style)
+    }
+
+    private fun pathEncode(value: String): String {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20")
+    }`;
+  }
+
   private generateRequestHeaderHelpers(): string {
-    return `    private fun buildRequestHeaders(headers: Map<String, Any?>, cookies: Map<String, Any?>): Map<String, String>? {
+    return `    private data class HeaderParameterSpec(val value: Any?, val style: String, val explode: Boolean, val contentType: String?)
+
+    private val headerObjectMapper = ObjectMapper().registerKotlinModule()
+
+    private fun buildRequestHeaders(headers: Map<String, HeaderParameterSpec>, cookies: Map<String, HeaderParameterSpec>): Map<String, String>? {
         val requestHeaders = linkedMapOf<String, String>()
-        headers.forEach { (name, value) ->
-            serializeParameterValue(value)?.let { requestHeaders[name] = it }
+        headers.forEach { (name, parameter) ->
+            serializeParameterValue(parameter)?.let { requestHeaders[name] = it }
         }
 
         val cookieHeader = buildCookieHeader(cookies)
@@ -558,19 +707,31 @@ ${queryBlock}${requestHeaderBlock}        val raw = ${call}
         return requestHeaders.takeIf { it.isNotEmpty() }
     }
 
-    private fun buildCookieHeader(cookies: Map<String, Any?>): String {
-        return cookies.mapNotNull { (name, value) ->
-            serializeParameterValue(value)?.let {
+    private fun buildCookieHeader(cookies: Map<String, HeaderParameterSpec>): String {
+        return cookies.mapNotNull { (name, parameter) ->
+            serializeParameterValue(parameter)?.let {
                 java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8) + "=" +
                     java.net.URLEncoder.encode(it, java.nio.charset.StandardCharsets.UTF_8)
             }
         }.joinToString("; ")
     }
 
-    private fun serializeParameterValue(value: Any?): String? {
+    private fun serializeParameterValue(parameter: HeaderParameterSpec?): String? {
+        val value = parameter?.value ?: return null
+        if (!parameter.contentType.isNullOrBlank()) {
+            return headerObjectMapper.writeValueAsString(value)
+        }
         return when (value) {
-            null -> null
-            is Iterable<*> -> value.mapNotNull { serializeParameterValue(it) }.joinToString(",")
+            is Iterable<*> -> value.mapNotNull { it?.toString() }.joinToString(",")
+            is Map<*, *> -> value.mapNotNull { (key, item) ->
+                if (item == null) {
+                    null
+                } else if (parameter.explode) {
+                    "$key=$item"
+                } else {
+                    listOf(key.toString(), item.toString()).joinToString(",")
+                }
+            }.joinToString(",")
             else -> value.toString()
         }
     }`;

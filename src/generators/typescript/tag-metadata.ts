@@ -1,4 +1,6 @@
 import { TYPESCRIPT_CONFIG } from './config.js';
+import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveOpenAIStyleResourceName } from '../../framework/openai-surface.js';
 
 export interface TypeScriptApiTagMetadata {
   tag: string;
@@ -39,6 +41,10 @@ function simplifyTagFileName(fileName: string): string {
   return segments.join('-') || fileName || 'default';
 }
 
+function resolveResourceSurfaceName(simplified: string, config?: GeneratorConfig): string {
+  return resolveOpenAIStyleResourceName(simplified, config);
+}
+
 function toPascalCase(value: string): string {
   const normalized = value
     .split(/[^a-zA-Z0-9]+/)
@@ -59,29 +65,30 @@ function toCamelCase(value: string): string {
   return /^[A-Za-z_]/.test(camel) ? camel : `api${pascal}`;
 }
 
-export function buildTypeScriptTagMetadata(tags: string[]): TypeScriptApiTagMetadata[] {
+export function buildTypeScriptTagMetadata(tags: string[], config?: GeneratorConfig): TypeScriptApiTagMetadata[] {
   const usedClassNames = new Set<string>();
   const usedPropertyNames = new Set<string>();
 
   return tags.map((tag) => {
     const fileName = TYPESCRIPT_CONFIG.namingConventions.fileName(tag);
     const simplified = simplifyTagFileName(fileName);
+    const surfaceName = resolveResourceSurfaceName(simplified, config);
 
-    const className = dedupeName(`${toPascalCase(simplified)}Api`, usedClassNames);
+    const className = dedupeName(`${toPascalCase(surfaceName)}Api`, usedClassNames);
     usedClassNames.add(className);
 
-    const clientPropertyName = dedupeName(toCamelCase(simplified), usedPropertyNames);
+    const clientPropertyName = dedupeName(toCamelCase(surfaceName), usedPropertyNames);
     usedPropertyNames.add(clientPropertyName);
 
     return {
       tag,
-      fileName,
+      fileName: config?.sdkType === 'ai' ? surfaceName : fileName,
       className,
       clientPropertyName,
     };
   });
 }
 
-export function buildTypeScriptTagMetadataMap(tags: string[]): Map<string, TypeScriptApiTagMetadata> {
-  return new Map(buildTypeScriptTagMetadata(tags).map((meta) => [meta.tag, meta]));
+export function buildTypeScriptTagMetadataMap(tags: string[], config?: GeneratorConfig): Map<string, TypeScriptApiTagMetadata> {
+  return new Map(buildTypeScriptTagMetadata(tags, config).map((meta) => [meta.tag, meta]));
 }

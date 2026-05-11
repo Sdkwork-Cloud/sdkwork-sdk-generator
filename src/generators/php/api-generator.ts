@@ -4,16 +4,17 @@ import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
-import { resolveMediaTypeSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, resolveMediaTypeSchema } from '../../framework/schema.js';
 import {
   extractOpenApiParameterContentSchema,
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
+import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { PHP_CONFIG, getPhpNamespace, getPhpType } from './config.js';
 
 interface NamedParameterBinding {
@@ -30,10 +31,16 @@ interface QueryParameterBinding extends NamedParameterBinding {
   contentType?: string;
 }
 
+interface HeaderParameterBinding extends NamedParameterBinding {
+  style: string;
+  explode: boolean;
+  contentType?: string;
+}
+
 export class ApiGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const files: GeneratedFile[] = [this.generateBaseApi(config)];
 
     for (const tag of tags) {
@@ -71,6 +78,84 @@ abstract class BaseApi
         }
 
         return $path;
+    }
+
+    protected function serializePathParameter(mixed $value, PathParameterSpec $spec): string
+    {
+        if ($value === null) {
+            return '';
+        }
+        $style = trim($spec->style) !== '' ? $spec->style : 'simple';
+        if (is_array($value)) {
+            return array_is_list($value)
+                ? $this->serializePathArray($spec->name, $value, $style, $spec->explode)
+                : $this->serializePathObject($spec->name, $value, $style, $spec->explode);
+        }
+
+        return $this->pathPrimitivePrefix($spec->name, $style) . rawurlencode((string) $value);
+    }
+
+    private function serializePathArray(string $name, array $values, string $style, bool $explode): string
+    {
+        $serialized = [];
+        foreach ($values as $item) {
+            if ($item !== null) {
+                $serialized[] = rawurlencode((string) $item);
+            }
+        }
+        if ($serialized === []) {
+            return $this->pathPrefix($name, $style);
+        }
+        if ($style === 'matrix') {
+            if ($explode) {
+                return implode('', array_map(static fn($item) => ';' . $name . '=' . $item, $serialized));
+            }
+            return ';' . $name . '=' . implode(',', $serialized);
+        }
+        return $this->pathPrefix($name, $style) . implode($explode ? '.' : ',', $serialized);
+    }
+
+    private function serializePathObject(string $name, array $values, string $style, bool $explode): string
+    {
+        $entries = [];
+        $exploded = [];
+        foreach ($values as $key => $item) {
+            if ($item === null) {
+                continue;
+            }
+            $escapedKey = rawurlencode((string) $key);
+            $escapedValue = rawurlencode((string) $item);
+            if ($explode) {
+                $exploded[] = $style === 'matrix'
+                    ? ';' . $escapedKey . '=' . $escapedValue
+                    : $escapedKey . '=' . $escapedValue;
+            } else {
+                $entries[] = $escapedKey;
+                $entries[] = $escapedValue;
+            }
+        }
+        if ($style === 'matrix') {
+            return $explode ? implode('', $exploded) : ';' . $name . '=' . implode(',', $entries);
+        }
+        if ($explode) {
+            return $this->pathPrefix($name, $style) . implode($style === 'label' ? '.' : ',', $exploded);
+        }
+
+        return $this->pathPrefix($name, $style) . implode(',', $entries);
+    }
+
+    private function pathPrefix(string $name, string $style): string
+    {
+        return match ($style) {
+            'label' => '.',
+            'matrix' => ';' . $name,
+            default => '',
+        };
+    }
+
+    private function pathPrimitivePrefix(string $name, string $style): string
+    {
+        return $style === 'matrix' ? ';' . $name . '=' : $this->pathPrefix($name, $style);
     }
 
     protected function appendQueryString(string $path, string $rawQueryString): string
@@ -188,6 +273,27 @@ final class QueryParameterSpec
     ) {
     }
 }
+
+final class PathParameterSpec
+{
+    public function __construct(
+        public string $name,
+        public string $style,
+        public bool $explode,
+    ) {
+    }
+}
+
+final class HeaderParameterSpec
+{
+    public function __construct(
+        public mixed $value,
+        public string $style,
+        public bool $explode,
+        public ?string $contentType,
+    ) {
+    }
+}
 `),
       language: 'php',
       description: 'Base API helpers',
@@ -200,13 +306,15 @@ final class QueryParameterSpec
     operations: any[],
     config: GeneratorConfig
   ): GeneratedFile {
+    operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
     const baseNamespace = getPhpNamespace(config);
     const namespace = `${baseNamespace}\\Api`;
     const className = `${PHP_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
     const fileName = PHP_CONFIG.namingConventions.fileName(resolvedTagName);
-    const scopedMethodNames = resolveScopedMethodNames(operations, (op) =>
-      this.generateOperationId(op.method, op.path, op, tag)
-    );
+    const scopedMethodNames = resolveOpenAIStyleMethodNames(tag, operations, config, PHP_CONFIG, 'camel')
+      || resolveScopedMethodNames(operations, (op) =>
+        this.generateOperationId(op.method, op.path, op, tag)
+      );
     const methodNames = new Map<any, string>();
     const referencedModels = new Set<string>();
 
@@ -253,6 +361,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryStringParams = allParameters.filter((param: any) => param?.in === 'querystring');
     const headerParams = allParameters.filter((param: any) => param?.in === 'header');
     const cookieParams = allParameters.filter((param: any) => param?.in === 'cookie');
+    const pathOpenApiParams = allParameters.filter((param: any) => param?.in === 'path');
     const hasQuery = queryParams.length > 0;
     const hasRawQueryString = queryStringParams.length > 0;
     const hasHeaders = headerParams.length > 0 || cookieParams.length > 0;
@@ -263,8 +372,9 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const requestBodySchema = requestBodyInfo?.schema;
     const requestBodyRequired = Boolean(hasBody && op?.requestBody?.required);
     const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
-    const responseSchema = this.extractResponseSchema(op);
-    const returnType = this.resolveReturnType(op, responseSchema);
+    const eventStreamInfo = extractEventStreamResponseInfo(op);
+    const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+    const returnType = eventStreamInfo ? '\\Generator' : this.resolveReturnType(op, responseSchema);
     const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const params: string[] = [];
     const pathParamNames = createUniqueIdentifierMap(
@@ -279,10 +389,17 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         hasBody ? 'payload' : '',
       ]
     );
-    const pathParams = rawPathParams.map((rawName) => ({
-      rawName,
-      safeName: pathParamNames.get(rawName) || rawName,
-    }));
+    const pathParams = rawPathParams.map((rawName) => {
+      const parameter = pathOpenApiParams.find((candidate: any) => candidate?.name === rawName);
+      const serialization = resolveOpenApiParameterSerialization(parameter || { name: rawName, in: 'path' });
+      return {
+        rawName,
+        safeName: pathParamNames.get(rawName) || rawName,
+        type: parameter?.schema ? this.getPhpParameterType(parameter.schema) : 'string',
+        style: serialization.style,
+        explode: serialization.explode,
+      };
+    });
     const parameterReservedNames = [
       ...pathParams.map((param) => param.safeName),
       hasBody ? 'body' : '',
@@ -295,8 +412,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryBindings = hasExplicitQuerySerialization
       ? this.createQueryParameterBindings(queryParams, parameterReservedNames)
       : [];
-    const headerBindings = this.createNamedParameterBindings(headerParams, parameterReservedNames);
-    const cookieBindings = this.createNamedParameterBindings(cookieParams, [
+    const headerBindings = this.createHeaderParameterBindings(headerParams, parameterReservedNames);
+    const cookieBindings = this.createHeaderParameterBindings(cookieParams, [
       ...parameterReservedNames,
       ...queryBindings.map((binding) => binding.safeName),
       ...headerBindings.map((binding) => binding.safeName),
@@ -307,7 +424,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const optionalHeaderBindings = [...headerBindings, ...cookieBindings].filter((binding) => !binding.required);
 
     for (const pathParam of pathParams) {
-      params.push(`string $${pathParam.safeName}`);
+      params.push(`${pathParam.type} $${pathParam.safeName}`);
     }
     if (hasBody && requestBodyRequired) {
       params.push(this.resolveBodyParameterSignature(requestBodySchema, requestBodyRequired));
@@ -329,7 +446,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const normalizedPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const requestPath = this.withApiPrefix(config.apiPrefix, normalizedPath);
     const pathLine = pathParams.length > 0
-      ? `        $path = $this->interpolatePath('${escapePhpString(requestPath)}', [${pathParams.map((param) => `'${param.rawName}' => $${param.safeName}`).join(', ')}]);`
+      ? `        $path = $this->interpolatePath('${escapePhpString(requestPath)}', [${pathParams.map((param) => `'${param.rawName}' => $this->serializePathParameter($${param.safeName}, new PathParameterSpec('${escapePhpString(param.rawName)}', '${escapePhpString(param.style)}', ${param.explode ? 'true' : 'false'}))`).join(', ')}]);`
       : `        $path = '${escapePhpString(requestPath)}';`;
     const rawQueryStringLine = hasRawQueryString
       ? `        $path = $this->appendQueryString($path, $rawQueryString);`
@@ -345,18 +462,22 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
       : '';
     const requestHeaderLine = hasHeaders
       ? `        $requestHeaders = $this->buildRequestHeaders(
-${this.renderNamedParameterArray(headerBindings, 12)},
-${this.renderNamedParameterArray(cookieBindings, 12)}
+${this.renderHeaderParameterArray(headerBindings, 12)},
+${this.renderHeaderParameterArray(cookieBindings, 12)}
         );`
       : '';
     const requestOptions = this.buildRequestOptions(hasQuery && !hasExplicitQuerySerialization, hasHeaders, hasBody, requestBodyMediaType);
     const requestMethod = toHttpMethodLiteral(httpMethod);
-    const requestLine = returnType === 'void'
-      ? `        $this->client->request('${requestMethod}', $path, ${requestOptions});`
-      : `        $result = $this->client->request('${requestMethod}', $path, ${requestOptions});`;
-    const returnLine = returnType === 'void'
-      ? '        return;'
-      : `        return ${this.deserializeResponseExpression(responseSchema, '$result')};`;
+    const requestLine = eventStreamInfo
+      ? `        foreach ($this->client->stream('${requestMethod}', $path, ${requestOptions}) as $event) {`
+      : returnType === 'void'
+        ? `        $this->client->request('${requestMethod}', $path, ${requestOptions});`
+        : `        $result = $this->client->request('${requestMethod}', $path, ${requestOptions});`;
+    const returnLine = eventStreamInfo
+      ? `            yield ${this.deserializeResponseExpression(responseSchema, '$event')};\n        }`
+      : returnType === 'void'
+        ? '        return;'
+        : `        return ${this.deserializeResponseExpression(responseSchema, '$result')};`;
     const docComment = op.summary
       ? `    /** ${sanitizeDocComment(op.summary)} */\n`
       : '';
@@ -371,7 +492,7 @@ ${returnLine}
 
   private resolveBodyParameterSignature(schema: any, required: boolean): string {
     if (schema?.$ref) {
-      const modelName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return required ? `array|${modelName} $body` : `array|${modelName}|null $body = null`;
     }
 
@@ -419,6 +540,26 @@ ${returnLine}
     });
   }
 
+  private createHeaderParameterBindings(parameters: any[], reservedNames: Iterable<string>): HeaderParameterBinding[] {
+    return this.createNamedParameterBindings(parameters, reservedNames).map((binding) => {
+      const serialization = resolveOpenApiParameterSerialization(binding.parameter);
+      return {
+        ...binding,
+        style: serialization.style,
+        explode: serialization.explode,
+        contentType: serialization.contentType,
+      };
+    });
+  }
+
+  private getPhpParameterType(schema: any): string {
+    const type = getPhpType(schema, PHP_CONFIG);
+    if (type === 'array') {
+      return 'array';
+    }
+    return isTypedPhpScalar(type) ? type : 'mixed';
+  }
+
   private getNamedParameterType(parameter: any): string {
     const type = getPhpType(extractOpenApiParameterContentSchema(parameter) || parameter?.schema, PHP_CONFIG);
     if (type === 'array') {
@@ -449,6 +590,17 @@ ${returnLine}
     return [`${indent}[`, ...lines, `${indent}]`].join('\n');
   }
 
+  private renderHeaderParameterArray(bindings: HeaderParameterBinding[], indentation: number): string {
+    const indent = ' '.repeat(indentation);
+    if (bindings.length === 0) {
+      return `${indent}[]`;
+    }
+    const lines = bindings.map((binding) => {
+      return `${indent}    '${escapePhpString(String(binding.parameter?.name || binding.safeName))}' => new HeaderParameterSpec($${binding.safeName}, '${escapePhpString(binding.style)}', ${binding.explode ? 'true' : 'false'}, ${binding.contentType ? `'${escapePhpString(binding.contentType)}'` : 'null'}),`;
+    });
+    return [`${indent}[`, ...lines, `${indent}]`].join('\n');
+  }
+
   private renderQueryParameterSpecs(bindings: QueryParameterBinding[], indentation: number): string {
     const indent = ' '.repeat(indentation);
     return bindings.map((binding) => {
@@ -469,7 +621,7 @@ ${returnLine}
     }
 
     if (responseSchema.$ref) {
-      return `?${PHP_CONFIG.namingConventions.modelName(responseSchema.$ref.split('/').pop() || 'Model')}`;
+      return `?${PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(responseSchema.$ref) || 'Model')}`;
     }
 
     const baseType = getPhpType(responseSchema, PHP_CONFIG);
@@ -491,7 +643,7 @@ ${returnLine}
     }
 
     if (schema.$ref) {
-      const modelName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return `${bodyExpr} instanceof ${modelName} ? ${bodyExpr}->toArray() : ${bodyExpr}`;
     }
 
@@ -520,7 +672,7 @@ ${returnLine}
 
   private serializeArrayItemExpression(schema: any, itemExpr: string): string {
     if (schema?.$ref) {
-      const modelName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return `${itemExpr} instanceof ${modelName} ? ${itemExpr}->toArray() : ${itemExpr}`;
     }
 
@@ -551,7 +703,7 @@ ${returnLine}
     }
 
     if (schema.$ref) {
-      const modelName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return `is_array(${resultExpr}) ? ${modelName}::fromArray(${resultExpr}) : null`;
     }
 
@@ -582,7 +734,7 @@ ${returnLine}
 
   private deserializeArrayItemExpression(schema: any, itemExpr: string): string {
     if (schema?.$ref) {
-      const modelName = PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const modelName = PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return `is_array(${itemExpr}) ? ${modelName}::fromArray(${itemExpr}) : ${itemExpr}`;
     }
 
@@ -647,8 +799,8 @@ ${lines.map((line) => `            ${line}`).join('\n')}
     return `    private function buildRequestHeaders(array $headers, array $cookies): array
     {
         $requestHeaders = [];
-        foreach ($headers as $name => $value) {
-            $serialized = $this->serializeParameterValue($value);
+        foreach ($headers as $name => $parameter) {
+            $serialized = $this->serializeParameterValue($parameter);
             if ($serialized !== null) {
                 $requestHeaders[(string) $name] = $serialized;
             }
@@ -667,8 +819,8 @@ ${lines.map((line) => `            ${line}`).join('\n')}
     private function buildCookieHeader(array $cookies): string
     {
         $pairs = [];
-        foreach ($cookies as $name => $value) {
-            $serialized = $this->serializeParameterValue($value);
+        foreach ($cookies as $name => $parameter) {
+            $serialized = $this->serializeParameterValue($parameter);
             if ($serialized !== null) {
                 $pairs[] = rawurlencode((string) $name) . '=' . rawurlencode($serialized);
             }
@@ -677,13 +829,31 @@ ${lines.map((line) => `            ${line}`).join('\n')}
         return implode('; ', $pairs);
     }
 
-    private function serializeParameterValue(mixed $value): ?string
+    private function serializeParameterValue(?HeaderParameterSpec $parameter): ?string
     {
+        $value = $parameter?->value;
         if ($value === null) {
             return null;
         }
+        if ($parameter->contentType !== null && trim($parameter->contentType) !== '') {
+            return (string) json_encode($value, JSON_UNESCAPED_SLASHES);
+        }
         if (is_array($value)) {
-            return implode(',', array_filter(array_map(fn($item) => $this->serializeParameterValue($item), $value), fn($item) => $item !== null));
+            $serialized = [];
+            foreach ($value as $key => $item) {
+                if ($item === null) {
+                    continue;
+                }
+                if (!array_is_list($value) && $parameter->explode) {
+                    $serialized[] = (string) $key . '=' . (string) $item;
+                } elseif (!array_is_list($value)) {
+                    $serialized[] = (string) $key;
+                    $serialized[] = (string) $item;
+                } else {
+                    $serialized[] = (string) $item;
+                }
+            }
+            return implode(',', $serialized);
         }
         if ($value instanceof \\Stringable) {
             return (string) $value;
@@ -707,7 +877,7 @@ ${lines.map((line) => `            ${line}`).join('\n')}
     }
 
     if (schema.$ref) {
-      models.add(PHP_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model'));
+      models.add(PHP_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model'));
       return;
     }
 

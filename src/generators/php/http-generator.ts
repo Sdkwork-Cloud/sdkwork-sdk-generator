@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { PHP_CONFIG, getPhpNamespace } from './config.js';
 
@@ -8,7 +8,7 @@ export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
 
@@ -156,6 +156,58 @@ final class HttpClient
         return $body;
     }
 
+    public function stream(string $method, string $path, array $options = []): \\Generator
+    {
+        $requestOptions = [
+            'stream' => true,
+        ];
+        $requestOptions['headers'] = array_merge(
+            $this->buildAuthHeaders(),
+            $this->headers,
+            ['Accept' => 'text/event-stream'],
+            $options['headers'] ?? []
+        );
+
+        if (!empty($options['query'])) {
+            $requestOptions['query'] = $options['query'];
+        }
+        if (array_key_exists('json', $options)) {
+            $requestOptions['json'] = $options['json'];
+        }
+        if (!empty($options['form_params'])) {
+            $requestOptions['form_params'] = $options['form_params'];
+        }
+        if (!empty($options['multipart'])) {
+            $requestOptions['multipart'] = $this->normalizeMultipart($options['multipart']);
+        }
+
+        try {
+            $response = $this->client->request($method, $path, $requestOptions);
+        } catch (GuzzleException $exception) {
+            throw new RuntimeException('SDK stream failed: ' . $exception->getMessage(), (int) $exception->getCode(), $exception);
+        }
+
+        $buffer = '';
+        while (!$response->getBody()->eof()) {
+            $buffer .= $response->getBody()->read(8192);
+            while (preg_match('/\\r?\\n\\r?\\n/', $buffer, $matches, PREG_OFFSET_CAPTURE)) {
+                $position = $matches[0][1];
+                $delimiterLength = strlen($matches[0][0]);
+                $rawEvent = substr($buffer, 0, $position);
+                $buffer = substr($buffer, $position + $delimiterLength);
+                foreach ($this->parseSseEvent($rawEvent) as $event) {
+                    yield $event;
+                }
+            }
+        }
+
+        if (trim($buffer) !== '') {
+            foreach ($this->parseSseEvent($buffer) as $event) {
+                yield $event;
+            }
+        }
+    }
+
     private function buildAuthHeaders(): array
     {
         $headers = [];
@@ -196,6 +248,32 @@ final class HttpClient
         }
 
         return $parts;
+    }
+
+    private function parseSseEvent(string $rawEvent): array
+    {
+        $dataLines = [];
+        foreach (preg_split('/\\r?\\n/', $rawEvent) ?: [] as $line) {
+            if (str_starts_with($line, 'data:')) {
+                $dataLines[] = ltrim(substr($line, 5));
+            }
+        }
+
+        if ($dataLines === []) {
+            return [];
+        }
+
+        $data = implode("\\n", $dataLines);
+        if ($data === '[DONE]') {
+            return [];
+        }
+
+        $decoded = json_decode($data, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return [];
+        }
+
+        return [$decoded];
     }
 
     private function formatBearer(string $value): string

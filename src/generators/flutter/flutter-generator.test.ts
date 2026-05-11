@@ -276,7 +276,7 @@ describe('Flutter generator regressions', () => {
     expect(apiFile!.content).toContain('final map = sdkworkResponseAsMap(response);');
     expect(apiFile!.content).toContain('PlusApiResultUserProfileVO.fromJson(map);');
     expect(apiFile!.content).not.toContain('return response is PlusApiResultUserProfileVO ? response : null;');
-    expect(apiFile!.content).toContain("ApiPaths.appPath('/user/$userId')");
+    expect(apiFile!.content).toContain("ApiPaths.appPath('/user/\${serializePathParameter(userId, const PathParameterSpec('userId', 'simple', false))}')");
     expect(apiFile!.content).not.toContain("ApiPaths.appPath('/user/${userId}')");
     expect(apiFile!.content).toContain('final payload = body.toJson();');
     expect(apiFile!.content).not.toContain('final payload = body?.toJson();');

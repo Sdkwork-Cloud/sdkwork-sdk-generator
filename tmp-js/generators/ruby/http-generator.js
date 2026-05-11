@@ -1,4 +1,4 @@
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { getRubyModuleSegments, getRubyRootRequirePath, RUBY_CONFIG } from './config.js';
 export class HttpClientGenerator {
@@ -6,7 +6,7 @@ export class HttpClientGenerator {
         const clientName = resolveSdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const schemas = Object.keys(ctx.schemas);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         return [
@@ -119,6 +119,37 @@ end`)),
     parse_response(response)
   rescue Faraday::Error => e
     raise RuntimeError, "SDK request failed: #{e.message}"
+  end
+
+  def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil)
+    response = @connection.run_request(method.to_sym, path, nil, build_headers({ 'Accept' => 'text/event-stream' }.merge(headers || {}))) do |request|
+      request.params.update(query) unless query.nil? || query.empty?
+
+      if multipart
+        request.body = normalize_multipart(multipart)
+        request.headers['Content-Type'] = 'multipart/form-data'
+      elsif form
+        request.body = form
+        request.headers['Content-Type'] = 'application/x-www-form-urlencoded'
+      elsif !json.nil?
+        request.body = JSON.generate(json)
+        request.headers['Content-Type'] = 'application/json'
+      end
+    end
+
+    Enumerator.new do |yielder|
+      response.body.to_s.split(/\\r?\\n\\r?\\n/).each do |raw_event|
+        data_lines = raw_event.each_line.filter_map { |line| line.start_with?('data:') ? line.sub(/^data:\\s*/, '').strip : nil }
+        next if data_lines.empty?
+
+        data = data_lines.join("\\n")
+        break if data == '[DONE]'
+
+        yielder << JSON.parse(data)
+      end
+    end
+  rescue Faraday::Error => e
+    raise RuntimeError, "SDK stream failed: #{e.message}"
   end
 
   private

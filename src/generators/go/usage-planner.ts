@@ -1,12 +1,12 @@
-import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import type { ApiParameter, ApiSchema, GeneratedApiOperation, GeneratorConfig, SchemaContext } from '../../framework/types.js';
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { GO_CONFIG, getGoType } from './config.js';
 
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
@@ -94,8 +94,9 @@ export class GoUsagePlanner {
   constructor(
     private readonly ctx: SchemaContext,
     preferredModules: string[] = DEFAULT_PREFERRED_MODULES,
+    private readonly config?: GeneratorConfig,
   ) {
-    this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+    this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
     this.preferredModules = preferredModules;
     this.knownModels = new Set(
       Object.keys(ctx.schemas).map((schemaName) => GO_CONFIG.namingConventions.modelName(schemaName)),
@@ -123,7 +124,7 @@ export class GoUsagePlanner {
 
   private buildPlan(tag: string, operation: GeneratedApiOperation): GoUsagePlan {
     const operations = this.ctx.apiGroups[tag]?.operations || [];
-    const methodName = resolveGoMethodNames(tag, operations).get(operation) || 'Operation';
+    const methodName = resolveGoMethodNames(tag, operations, this.config).get(operation) || 'Operation';
     const moduleName = this.getModuleName(tag);
     const transportMethod = String(operation.method || '').toLowerCase();
     const variables: GoUsageVariable[] = [];
@@ -520,7 +521,7 @@ export class GoUsagePlanner {
       return schema;
     }
     if (schema.$ref) {
-      const refName = schema.$ref.split('/').pop() || '';
+      const refName = getSchemaReferenceName(schema.$ref);
       return this.ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);
@@ -622,9 +623,15 @@ export class GoUsagePlanner {
 export function resolveGoMethodNames(
   tag: string,
   operations: GeneratedApiOperation[],
+  config?: GeneratorConfig,
 ): Map<GeneratedApiOperation, string> {
   if (!Array.isArray(operations) || operations.length === 0) {
     return new Map<GeneratedApiOperation, string>();
+  }
+
+  const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, GO_CONFIG, 'pascal');
+  if (openAIStyleNames) {
+    return openAIStyleNames;
   }
 
   return resolveScopedMethodNames(operations, (operation) => generateGoOperationName(

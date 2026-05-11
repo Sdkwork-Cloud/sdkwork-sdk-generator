@@ -44,7 +44,7 @@ export interface QueryListForm {
   orderDirection?: 'asc' | 'desc';
 }
 
-export type { Page, PageResult, RequestConfig, RequestOptions, QueryParams } from '${commonPkg.importPath}';
+export type { Page, RequestConfig, RequestOptions, QueryParams } from '${commonPkg.importPath}';
 export { DEFAULT_TIMEOUT, SUCCESS_CODES } from '${commonPkg.importPath}';
 import type { AuthTokenManager, AuthMode, AuthTokens } from '${commonPkg.importPath}';
 export type { AuthTokenManager, AuthMode, AuthTokens };
@@ -91,9 +91,7 @@ export interface ${configName} {
             const type = getTypeScriptType(propSchema, TYPESCRIPT_CONFIG, knownModels);
             return `${desc}${this.toPropertyKey(propName)}${optional}: ${type};`;
         }).join('\n  ');
-        const modelDeclaration = Object.keys(props).length > 0
-            ? `${modelSchema.description ? `/** ${modelSchema.description} */\n` : ''}export interface ${modelName} {\n  ${fields}\n}`
-            : `${modelSchema.description ? `/** ${modelSchema.description} */\n` : ''}export type ${modelName} = ${getTypeScriptType(modelSchema, TYPESCRIPT_CONFIG, knownModels)};`;
+        const modelDeclaration = this.renderModelDeclaration(modelName, modelSchema, props, fields, knownModels, schemas);
         const content = importBlock ? `${importBlock}\n\n${modelDeclaration}` : modelDeclaration;
         return {
             path: `src/types/${fileName}.ts`,
@@ -101,6 +99,60 @@ export interface ${configName} {
             language: 'typescript',
             description: `${modelName} model definition`,
         };
+    }
+    renderModelDeclaration(modelName, modelSchema, props, fields, knownModels, schemas) {
+        const description = modelSchema.description ? `/** ${modelSchema.description} */\n` : '';
+        if (Object.keys(props).length > 0) {
+            return `${description}export interface ${modelName} {\n  ${fields}\n}`;
+        }
+        if (this.isClosedEmptyObjectSchema(modelSchema)) {
+            return `${description}export interface ${modelName} {}`;
+        }
+        if (modelSchema.additionalProperties && this.needsRecursiveIndexSignature(modelName, modelSchema, knownModels, schemas)) {
+            const valueType = modelSchema.additionalProperties === true
+                ? 'unknown'
+                : getTypeScriptType(modelSchema.additionalProperties, TYPESCRIPT_CONFIG, knownModels);
+            return `${description}export interface ${modelName} {\n  [key: string]: ${valueType};\n}`;
+        }
+        return `${description}export type ${modelName} = ${getTypeScriptType(modelSchema, TYPESCRIPT_CONFIG, knownModels)};`;
+    }
+    isClosedEmptyObjectSchema(modelSchema) {
+        if (!modelSchema || typeof modelSchema !== 'object') {
+            return false;
+        }
+        const hasNoProperties = !modelSchema.properties || Object.keys(modelSchema.properties).length === 0;
+        return modelSchema.type === 'object' && hasNoProperties && modelSchema.additionalProperties === false;
+    }
+    needsRecursiveIndexSignature(modelName, modelSchema, knownModels, schemas) {
+        if (!modelSchema.additionalProperties || typeof modelSchema.additionalProperties !== 'object') {
+            return false;
+        }
+        return this.schemaReferencesModel(modelSchema.additionalProperties, modelName, knownModels, schemas, new Set());
+    }
+    schemaReferencesModel(schema, modelName, knownModels, schemas, visitedModels) {
+        const refs = collectSchemaReferences(schema, TYPESCRIPT_CONFIG.namingConventions.modelName, knownModels);
+        if (refs.has(modelName)) {
+            return true;
+        }
+        for (const refModel of refs) {
+            if (visitedModels.has(refModel)) {
+                continue;
+            }
+            visitedModels.add(refModel);
+            const refSchema = this.schemaForModelName(refModel, schemas);
+            if (refSchema && this.schemaReferencesModel(refSchema, modelName, knownModels, schemas, visitedModels)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    schemaForModelName(modelName, schemas) {
+        for (const [schemaName, schema] of Object.entries(schemas)) {
+            if (TYPESCRIPT_CONFIG.namingConventions.modelName(schemaName) === modelName) {
+                return schema;
+            }
+        }
+        return undefined;
     }
     toPropertyKey(name) {
         if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {

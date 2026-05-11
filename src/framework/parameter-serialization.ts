@@ -12,9 +12,21 @@ export function resolveOpenApiParameterSerialization(parameter: any): OpenApiPar
   return {
     style,
     explode: resolveOpenApiParameterExplode(parameter, style),
-    allowReserved: Boolean(parameter?.allowReserved),
+    allowReserved: parameter?.in === 'query' ? Boolean(parameter?.allowReserved) : false,
     contentType: pickOpenApiParameterContentType(parameter),
   };
+}
+
+export function requiresExplicitOpenApiParameterSerialization(parameter: any): boolean {
+  if (!parameter || typeof parameter !== 'object') {
+    return false;
+  }
+
+  return parameter.in === 'path'
+    || parameter.in === 'query'
+    || parameter.in === 'header'
+    || parameter.in === 'cookie'
+    || parameter.in === 'querystring';
 }
 
 export function requiresExplicitOpenApiQuerySerialization(parameter: any): boolean {

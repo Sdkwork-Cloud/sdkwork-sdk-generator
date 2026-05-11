@@ -1,6 +1,6 @@
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
-import { getConstSchemaInfo, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const PHP_CONFIG = {
     language: 'php',
     displayName: 'PHP',
@@ -131,7 +131,7 @@ export function getPhpType(schema, config) {
         return 'mixed';
     }
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop();
+        const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName || 'Model');
     }
     const composed = pickComposedSchema(schema);

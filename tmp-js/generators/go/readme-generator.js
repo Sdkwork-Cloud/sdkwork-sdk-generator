@@ -1,4 +1,4 @@
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GO_CONFIG } from './config.js';
@@ -8,8 +8,8 @@ export class ReadmeGenerator {
         const clientName = resolveSdkClientName(config);
         const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
         const tags = Object.keys(ctx.apiGroups);
-        const resolvedTagNames = resolveSimplifiedTagNames(tags);
-        const planner = new GoUsagePlanner(ctx);
+        const resolvedTagNames = resolveSdkTagNames(tags, config);
+        const planner = new GoUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartSnippet = quickStartPlan
             ? renderGoUsageSnippet(quickStartPlan, 'readme')

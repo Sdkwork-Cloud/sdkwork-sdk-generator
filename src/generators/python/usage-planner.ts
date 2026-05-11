@@ -1,12 +1,12 @@
-import type { ApiParameter, ApiSchema, GeneratedApiOperation, SchemaContext } from '../../framework/types.js';
+import type { ApiParameter, ApiSchema, GeneratedApiOperation, GeneratorConfig, SchemaContext } from '../../framework/types.js';
 import { createUniqueIdentifierMap, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
-  resolveSimplifiedTagNames,
   stripTagPrefixFromOperationId,
 } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { PYTHON_CONFIG } from './config.js';
 
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
@@ -85,8 +85,9 @@ export class PythonUsagePlanner {
   constructor(
     private readonly ctx: SchemaContext,
     preferredModules: string[] = DEFAULT_PREFERRED_MODULES,
+    private readonly config?: GeneratorConfig,
   ) {
-    this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+    this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
     this.preferredModules = preferredModules;
   }
 
@@ -111,7 +112,7 @@ export class PythonUsagePlanner {
 
   private buildPlan(tag: string, operation: GeneratedApiOperation): PythonUsagePlan {
     const operations = this.ctx.apiGroups[tag]?.operations || [];
-    const methodName = resolvePythonMethodNames(tag, operations).get(operation) || 'operation';
+    const methodName = resolvePythonMethodNames(tag, operations, this.config).get(operation) || 'operation';
     const moduleName = this.getModuleName(tag);
     const transportMethod = String(operation.method || '').toLowerCase();
     const variables: PythonUsageVariable[] = [];
@@ -295,9 +296,15 @@ export class PythonUsagePlanner {
 export function resolvePythonMethodNames(
   tag: string,
   operations: GeneratedApiOperation[],
+  config?: GeneratorConfig,
 ): Map<GeneratedApiOperation, string> {
   if (!Array.isArray(operations) || operations.length === 0) {
     return new Map<GeneratedApiOperation, string>();
+  }
+
+  const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, PYTHON_CONFIG, 'snake');
+  if (openAIStyleNames) {
+    return openAIStyleNames;
   }
 
   return resolveScopedMethodNames(operations, (operation) => generatePythonOperationName(
@@ -554,7 +561,7 @@ function resolveSchema(ctx: SchemaContext, schema: ApiSchema | undefined): ApiSc
     return schema;
   }
   if (schema.$ref) {
-    const refName = String(schema.$ref).split('/').pop() || '';
+    const refName = getSchemaReferenceName(schema.$ref);
     return ctx.schemas[refName] || schema;
   }
   const composed = pickComposedSchema(schema);

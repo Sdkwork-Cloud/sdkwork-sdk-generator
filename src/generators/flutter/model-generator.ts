@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveModelSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, resolveModelSchema } from '../../framework/schema.js';
 import { FLUTTER_CONFIG, getFlutterType } from './config.js';
 
 export class ModelGenerator {
@@ -107,7 +107,7 @@ ${toJsonBody}
     }
 
     if (schema.$ref) {
-      const refName = FLUTTER_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? currentModelName : refName;
       return `(() {
         final map = _sdkworkAsMap(${valueExpr});
@@ -175,7 +175,7 @@ ${toJsonBody}
 
   private deserializeArrayItemExpression(schema: any, itemExpr: string, currentModelName: string): string {
     if (schema?.$ref) {
-      const refName = FLUTTER_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? currentModelName : refName;
       return `(() {
         final map = _sdkworkAsMap(${itemExpr});
@@ -291,7 +291,7 @@ ${toJsonBody}
 
   private resolveMapValueType(schema: any, currentModelName: string): string {
     if (schema?.$ref) {
-      const refName = FLUTTER_CONFIG.namingConventions.modelName(schema.$ref.split('/').pop() || 'Model');
+      const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return refName === currentModelName ? currentModelName : refName;
     }
     return getFlutterType(schema, FLUTTER_CONFIG);

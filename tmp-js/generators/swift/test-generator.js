@@ -4,7 +4,7 @@ import { resolveSwiftPackageTargetName, resolveSwiftTestTargetName } from './bui
 import { SwiftUsagePlanner, renderSwiftUsageSnippet, resolveSwiftExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new SwiftUsagePlanner(ctx);
+        const planner = new SwiftUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Swift generateTests requires at least one API operation to build a smoke test.');

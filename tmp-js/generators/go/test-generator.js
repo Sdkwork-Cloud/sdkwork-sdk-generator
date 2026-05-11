@@ -2,7 +2,7 @@ import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GoUsagePlanner, renderGoUsageSnippet, resolveGoExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
     generate(ctx, config) {
-        const planner = new GoUsagePlanner(ctx);
+        const planner = new GoUsagePlanner(ctx, undefined, config);
         const plan = planner.selectQuickStartPlan();
         if (!plan) {
             throw new Error('Go generateTests requires at least one API operation to build a smoke test.');

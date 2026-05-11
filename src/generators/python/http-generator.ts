@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { resolveSimplifiedTagNames } from '../../framework/naming.js';
+import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { PYTHON_CONFIG, getPythonPackageRoot } from './config.js';
 import { resolvePythonCommonPackage } from '../../framework/common-package.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
@@ -9,7 +9,7 @@ export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const resolvedTagNames = resolveSimplifiedTagNames(tags);
+    const resolvedTagNames = resolveSdkTagNames(tags, config);
     const packageRoot = getPythonPackageRoot(config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
@@ -32,7 +32,9 @@ export class HttpClientGenerator {
 
     return {
       path: `${packageRoot}/http_client.py`,
-      content: this.format(`from ${commonRoot}.core.types import SdkConfig as CommonSdkConfig
+      content: this.format(`import json as json_module
+
+from ${commonRoot}.core.types import SdkConfig as CommonSdkConfig
 from ${commonRoot}.http import BaseHttpClient
 
 SdkConfig = CommonSdkConfig
@@ -91,6 +93,28 @@ class HttpClient(BaseHttpClient):
         if self._session is not None:
             self._session.headers[key] = value
         return self
+
+    def stream_json(self, path: str, method: str = 'POST', params=None, data=None, json=None, headers=None):
+        response = self._get_session().request(
+            method=method,
+            url=f"{self.base_url}{path}",
+            params=params,
+            data=data,
+            json=json,
+            headers={'Accept': 'text/event-stream', **(headers or {})},
+            timeout=self.timeout / 1000,
+            stream=True,
+        )
+        response.raise_for_status()
+        for line in response.iter_lines(decode_unicode=True):
+            if not line or line.startswith(':'):
+                continue
+            if not line.startswith('data:'):
+                continue
+            data = line[5:].strip()
+            if data == '[DONE]':
+                break
+            yield json_module.loads(data)
 `),
       language: 'python',
       description: 'HTTP client wrapper based on sdkwork-common',

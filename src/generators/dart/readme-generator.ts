@@ -15,7 +15,7 @@ export class ReadmeGenerator {
     const clientName = resolveSdkClientName(config);
     const packageName = getDartPackageName(config);
     const tags = Object.keys(ctx.apiGroups);
-    const planner = new DartUsagePlanner(ctx);
+    const planner = new DartUsagePlanner(ctx, undefined, config);
     const quickStartPlan = planner.selectQuickStartPlan();
     const quickStartSnippet = quickStartPlan
       ? renderDartUsageSnippet(quickStartPlan, 'readme', { assignResult: quickStartPlan.hasReturnValue })

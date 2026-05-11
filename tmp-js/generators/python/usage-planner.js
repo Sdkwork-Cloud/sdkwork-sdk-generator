@@ -1,6 +1,7 @@
 import { createUniqueIdentifierMap, toSafeSnakeIdentifier } from '../../framework/identifiers.js';
-import { getArrayItemSchema, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
-import { normalizeOperationId, resolveScopedMethodNames, resolveSimplifiedTagNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { getArrayItemSchema, getSchemaReferenceName, pickComposedSchema, resolveMediaTypeSchema, resolveSchemaType } from '../../framework/schema.js';
+import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
+import { resolveOpenAIStyleMethodNames, resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { PYTHON_CONFIG } from './config.js';
 const BODY_METHODS = new Set(['post', 'put', 'patch']);
 const DEFAULT_PREFERRED_MODULES = ['tenant', 'user', 'app', 'auth', 'workspace'];
@@ -44,9 +45,10 @@ const PYTHON_RESERVED_WORDS = new Set([
     'yield',
 ]);
 export class PythonUsagePlanner {
-    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES) {
+    constructor(ctx, preferredModules = DEFAULT_PREFERRED_MODULES, config) {
         this.ctx = ctx;
-        this.resolvedTagNames = resolveSimplifiedTagNames(Object.keys(ctx.apiGroups));
+        this.config = config;
+        this.resolvedTagNames = resolveSdkTagNames(Object.keys(ctx.apiGroups), config);
         this.preferredModules = preferredModules;
     }
     getModuleName(tag) {
@@ -67,7 +69,7 @@ export class PythonUsagePlanner {
     }
     buildPlan(tag, operation) {
         const operations = this.ctx.apiGroups[tag]?.operations || [];
-        const methodName = resolvePythonMethodNames(tag, operations).get(operation) || 'operation';
+        const methodName = resolvePythonMethodNames(tag, operations, this.config).get(operation) || 'operation';
         const moduleName = this.getModuleName(tag);
         const transportMethod = String(operation.method || '').toLowerCase();
         const variables = [];
@@ -217,9 +219,13 @@ export class PythonUsagePlanner {
         return score;
     }
 }
-export function resolvePythonMethodNames(tag, operations) {
+export function resolvePythonMethodNames(tag, operations, config) {
     if (!Array.isArray(operations) || operations.length === 0) {
         return new Map();
+    }
+    const openAIStyleNames = resolveOpenAIStyleMethodNames(tag, operations, config, PYTHON_CONFIG, 'snake');
+    if (openAIStyleNames) {
+        return openAIStyleNames;
     }
     return resolveScopedMethodNames(operations, (operation) => generatePythonOperationName(operation.method, operation.path, operation, tag));
 }
@@ -417,7 +423,7 @@ function resolveSchema(ctx, schema) {
         return schema;
     }
     if (schema.$ref) {
-        const refName = String(schema.$ref).split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         return ctx.schemas[refName] || schema;
     }
     const composed = pickComposedSchema(schema);

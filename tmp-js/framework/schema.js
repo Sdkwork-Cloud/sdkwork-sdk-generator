@@ -157,7 +157,7 @@ export function collectSchemaReferences(schema, naming, knownModels, refs = new 
     }
     visited.add(schema);
     if (schema.$ref) {
-        const refName = schema.$ref.split('/').pop() || '';
+        const refName = getSchemaReferenceName(schema.$ref);
         const modelName = naming(refName);
         if (!knownModels || knownModels.has(modelName)) {
             refs.add(modelName);
@@ -207,6 +207,19 @@ export function parseLocalJsonPointerRef(ref) {
         .slice(2)
         .split('/')
         .map(decodeJsonPointerSegment);
+}
+export function getSchemaReferenceName(ref) {
+    const segments = parseLocalJsonPointerRef(ref);
+    if (segments && segments.length > 0) {
+        return segments[segments.length - 1] || '';
+    }
+    if (!ref) {
+        return '';
+    }
+    const normalizedRef = String(ref);
+    const slashIndex = normalizedRef.lastIndexOf('/');
+    const lastSegment = slashIndex >= 0 ? normalizedRef.slice(slashIndex + 1) : normalizedRef;
+    return decodeJsonPointerSegment(lastSegment);
 }
 export function toLocalJsonPointerRef(segments) {
     if (segments.length === 0) {
