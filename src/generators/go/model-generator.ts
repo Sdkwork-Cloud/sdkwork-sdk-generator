@@ -31,7 +31,7 @@ type BasePlusVO struct {
 }
 
 type QueryListForm struct {
-    Keyword      string      \`json:"keyword"\`
+    Q           string      \`json:"q"\`
     Status       interface{} \`json:"status"\`
     StartTime    string      \`json:"startTime"\`
     EndTime      string      \`json:"endTime"\`

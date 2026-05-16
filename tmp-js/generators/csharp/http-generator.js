@@ -94,10 +94,10 @@ namespace ${namespace}.Http
                 _client.DefaultRequestHeaders.Authorization = null;
             }
 
-            if (!ApiKeyHeader.Equals("Access-Token", StringComparison.OrdinalIgnoreCase)
-                && _client.DefaultRequestHeaders.Contains("Access-Token"))
+            if (!ApiKeyHeader.Equals("Sdkwork-Access-Token", StringComparison.OrdinalIgnoreCase)
+                && _client.DefaultRequestHeaders.Contains("Sdkwork-Access-Token"))
             {
-                _client.DefaultRequestHeaders.Remove("Access-Token");
+                _client.DefaultRequestHeaders.Remove("Sdkwork-Access-Token");
             }
         }
 
@@ -114,16 +114,16 @@ namespace ${namespace}.Http
 
         public void SetAccessToken(string token)
         {
-            if (!ApiKeyHeader.Equals("Access-Token", StringComparison.OrdinalIgnoreCase)
+            if (!ApiKeyHeader.Equals("Sdkwork-Access-Token", StringComparison.OrdinalIgnoreCase)
                 && _client.DefaultRequestHeaders.Contains(ApiKeyHeader))
             {
                 _client.DefaultRequestHeaders.Remove(ApiKeyHeader);
             }
-            if (_client.DefaultRequestHeaders.Contains("Access-Token"))
+            if (_client.DefaultRequestHeaders.Contains("Sdkwork-Access-Token"))
             {
-                _client.DefaultRequestHeaders.Remove("Access-Token");
+                _client.DefaultRequestHeaders.Remove("Sdkwork-Access-Token");
             }
-            _client.DefaultRequestHeaders.TryAddWithoutValidation("Access-Token", token);
+            _client.DefaultRequestHeaders.TryAddWithoutValidation("Sdkwork-Access-Token", token);
         }
 
         public void SetHeader(string key, string value)

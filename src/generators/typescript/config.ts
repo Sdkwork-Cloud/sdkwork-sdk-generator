@@ -137,6 +137,7 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
   }
   
   if (type === 'string') {
+    if (format === 'binary') return nullable ? 'Blob | null' : 'Blob';
     if (format === 'date') return 'string';
     if (format === 'date-time') return 'string';
     if (format === 'uuid') return 'string';

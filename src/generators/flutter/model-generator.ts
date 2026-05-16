@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { getSchemaReferenceName, resolveModelSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
 import { FLUTTER_CONFIG, getFlutterType } from './config.js';
 
 export class ModelGenerator {
@@ -106,6 +106,11 @@ ${toJsonBody}
       return valueExpr;
     }
 
+    const normalizedSchema = this.normalizeDeserializationSchema(schema);
+    if (normalizedSchema !== schema) {
+      return this.deserializeExpression(normalizedSchema, valueExpr, currentModelName);
+    }
+
     if (schema.$ref) {
       const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? currentModelName : refName;
@@ -137,6 +142,11 @@ ${toJsonBody}
     if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
       const valueType = this.resolveMapValueType(schema.additionalProperties, currentModelName);
       const itemExpr = this.deserializeArrayItemExpression(schema.additionalProperties, 'item', currentModelName);
+      const assignment = valueType === 'dynamic'
+        ? '          result[key] = deserialized;'
+        : `          if (deserialized is ${valueType}) {
+            result[key] = deserialized;
+          }`;
       return `(() {
         final map = _sdkworkAsMap(${valueExpr});
         if (map == null) {
@@ -145,9 +155,7 @@ ${toJsonBody}
         final result = <String, ${valueType}>{};
         map.forEach((key, item) {
           final deserialized = ${itemExpr};
-          if (deserialized is ${valueType}) {
-            result[key] = deserialized;
-          }
+${assignment}
         });
         return result;
       })()`;
@@ -174,6 +182,11 @@ ${toJsonBody}
   }
 
   private deserializeArrayItemExpression(schema: any, itemExpr: string, currentModelName: string): string {
+    const normalizedSchema = this.normalizeDeserializationSchema(schema);
+    if (normalizedSchema !== schema) {
+      return this.deserializeArrayItemExpression(normalizedSchema, itemExpr, currentModelName);
+    }
+
     if (schema?.$ref) {
       const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       const refTarget = refName === currentModelName ? currentModelName : refName;
@@ -205,6 +218,11 @@ ${toJsonBody}
     if (schema?.additionalProperties && typeof schema.additionalProperties === 'object') {
       const mapValueType = this.resolveMapValueType(schema.additionalProperties, currentModelName);
       const nestedExpr = this.deserializeArrayItemExpression(schema.additionalProperties, 'nestedItem', currentModelName);
+      const assignment = mapValueType === 'dynamic'
+        ? '          result[key] = deserialized;'
+        : `          if (deserialized is ${mapValueType}) {
+            result[key] = deserialized;
+          }`;
       return `(() {
         final map = _sdkworkAsMap(${itemExpr});
         if (map == null) {
@@ -213,9 +231,7 @@ ${toJsonBody}
         final result = <String, ${mapValueType}>{};
         map.forEach((key, nestedItem) {
           final deserialized = ${nestedExpr};
-          if (deserialized is ${mapValueType}) {
-            result[key] = deserialized;
-          }
+${assignment}
         });
         return result;
       })()`;
@@ -246,6 +262,11 @@ ${toJsonBody}
       return valueExpr;
     }
 
+    const normalizedSchema = this.normalizeDeserializationSchema(schema);
+    if (normalizedSchema !== schema) {
+      return this.serializeExpression(normalizedSchema, valueExpr, currentModelName);
+    }
+
     if (schema.$ref) {
       return `${valueExpr}?.toJson()`;
     }
@@ -268,6 +289,11 @@ ${toJsonBody}
   }
 
   private serializeArrayItemExpression(schema: any, itemExpr: string, currentModelName: string): string {
+    const normalizedSchema = this.normalizeDeserializationSchema(schema);
+    if (normalizedSchema !== schema) {
+      return this.serializeArrayItemExpression(normalizedSchema, itemExpr, currentModelName);
+    }
+
     if (schema?.$ref) {
       return `${itemExpr}.toJson()`;
     }
@@ -290,11 +316,29 @@ ${toJsonBody}
   }
 
   private resolveMapValueType(schema: any, currentModelName: string): string {
+    const normalizedSchema = this.normalizeDeserializationSchema(schema);
+    if (normalizedSchema !== schema) {
+      return this.resolveMapValueType(normalizedSchema, currentModelName);
+    }
+
     if (schema?.$ref) {
       const refName = FLUTTER_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
       return refName === currentModelName ? currentModelName : refName;
     }
     return getFlutterType(schema, FLUTTER_CONFIG);
+  }
+
+  private normalizeDeserializationSchema(schema: any): any {
+    if (!schema || typeof schema !== 'object') {
+      return schema;
+    }
+
+    const resolvedSchema = resolveModelSchema(schema);
+    if (resolvedSchema && resolvedSchema !== schema && JSON.stringify(resolvedSchema) !== JSON.stringify(schema)) {
+      return resolvedSchema;
+    }
+
+    return pickComposedSchema(schema) || schema;
   }
 
   private format(content: string): string {

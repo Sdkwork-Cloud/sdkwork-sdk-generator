@@ -36,7 +36,7 @@ export interface BasePlusEntity extends BasePlusVO {
 }
 
 export interface QueryListForm {
-  keyword?: string;
+  q?: string;
   status?: string | number;
   startTime?: string;
   endTime?: string;

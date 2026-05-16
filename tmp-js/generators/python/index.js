@@ -71,7 +71,7 @@ client.set_auth_token("your-auth-token")
 client.set_access_token("your-access-token")
 # Sends:
 # Authorization: Bearer <authToken>
-# Access-Token: <accessToken>`,
+# Sdkwork-Access-Token: <accessToken>`,
             apiKeyCall: 'set_api_key(...)',
             authTokenCall: 'set_auth_token(...)',
             accessTokenCall: 'set_access_token(...)',

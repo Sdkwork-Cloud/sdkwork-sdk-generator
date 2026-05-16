@@ -40,6 +40,7 @@ export class ApiGenerator {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
         });
+        const needsUrlEncodeHelper = needsQuerySerializationHelpers || needsRequestHeaderHelpers;
         return {
             path: `src/main/java/${identity.packagePath}/api/${className}.java`,
             content: this.format(`package ${identity.packageRoot}.api;
@@ -61,6 +62,7 @@ ${methods}
 ${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
+${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
 }
 `),
             language: 'java',
@@ -700,12 +702,13 @@ ${queryBlock}${requestHeaderBlock}        Object raw = ${call};
         return String.valueOf(value);
     }
 
-    private static String urlEncode(String value) {
-        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
-    }
-
     private static com.fasterxml.jackson.databind.ObjectMapper headerObjectMapper() {
         return new com.fasterxml.jackson.databind.ObjectMapper();
+    }`;
+    }
+    generateUrlEncodeHelper() {
+        return `    private static String urlEncode(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
     }`;
     }
     generateOperationId(method, path, op, tag) {

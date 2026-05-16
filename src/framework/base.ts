@@ -255,6 +255,7 @@ export abstract class BaseGenerator {
     const apiGroups: Record<string, ApiOperationGroup> = {};
     const operationRegistry = new Map<string, { index: number; score: number }>();
     const paths = spec.paths || {};
+    const nestedResourceSurfaceTags = this.resolveNestedResourceSurfaceTags(spec);
     
     for (const [path, pathItem] of Object.entries(paths)) {
       const item = (pathItem || {}) as Record<string, any>;
@@ -299,6 +300,9 @@ export abstract class BaseGenerator {
 
         const generatedOperation = {
           ...operation,
+          ...(this.operationUsesNestedResourceSurface(operation, nestedResourceSurfaceTags)
+            ? { 'x-sdk-nested-resource-surface': true }
+            : {}),
           path,
           method: normalizedMethod,
           httpMethod,
@@ -522,6 +526,43 @@ export abstract class BaseGenerator {
     }
 
     return ref;
+  }
+
+  private resolveNestedResourceSurfaceTags(spec: ApiSpec): Set<string> {
+    const tags = new Set<string>();
+    for (const tag of spec.tags || []) {
+      const name = typeof tag?.name === 'string' ? tag.name.trim() : '';
+      if (!name) {
+        continue;
+      }
+      const tagRecord = tag as Record<string, unknown>;
+      if (
+        tagRecord['x-sdk-nested-resource-surface'] === true
+        || tagRecord['x-sdk-resource-surface'] === 'nested'
+        || tagRecord['x-sdkwork-resource-surface'] === 'nested'
+      ) {
+        tags.add(name);
+      }
+    }
+    return tags;
+  }
+
+  private operationUsesNestedResourceSurface(
+    operation: Record<string, any>,
+    nestedResourceSurfaceTags: Set<string>,
+  ): boolean {
+    if (
+      operation['x-sdk-nested-resource-surface'] === true
+      || operation['x-sdk-resource-surface'] === 'nested'
+      || operation['x-sdkwork-resource-surface'] === 'nested'
+    ) {
+      return true;
+    }
+    if (nestedResourceSurfaceTags.size === 0) {
+      return false;
+    }
+    return Array.isArray(operation.tags)
+      && operation.tags.some((tag) => typeof tag === 'string' && nestedResourceSurfaceTags.has(tag));
   }
 
   private inlineNamedNonObjectSchemaRefs(
@@ -766,6 +807,15 @@ export abstract class BaseGenerator {
     path: string
   ): { domain: string; displayName: string; sourceTag?: string } {
     const rawTag = typeof operation.tags?.[0] === 'string' ? operation.tags[0].trim() : '';
+    if (this.config.options?.standardProfile === 'sdkwork-v3') {
+      const canonicalTag = this.normalizeOperationGroupTag(this.resolveOperationTag(operation, path));
+      return {
+        domain: canonicalTag,
+        displayName: rawTag || this.toPascalCase(canonicalTag),
+        sourceTag: rawTag || canonicalTag,
+      };
+    }
+
     const explicitDomain = this.resolveExplicitSdkDomain(operation);
     if (explicitDomain) {
       return {

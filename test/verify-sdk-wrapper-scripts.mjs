@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -100,4 +102,32 @@ runCheck('each sdk readme documents wrapper-based regeneration', () => {
   wrappers.forEach(({ readmePath, sdkRoot }) => {
     expectReadmeWrapperUsage(readRepoFile(readmePath), sdkRoot);
   });
+});
+
+runCheck('shared sdk version resolver wrapper is executable', () => {
+  const resolverPath = resolve(repoRoot, 'sdk/sdkwork-sdk-generator/bin/resolve-sdk-version.js');
+  assert.equal(existsSync(resolverPath), true, 'resolve-sdk-version.js should exist');
+
+  const tempRoot = mkdtempSync(resolve(tmpdir(), 'sdkwork-sdk-version-'));
+  try {
+    const result = spawnSync(process.execPath, [
+      resolverPath,
+      '--sdk-root',
+      tempRoot,
+      '--sdk-name',
+      'sdkwork-test-sdk',
+      '--sdk-type',
+      'app',
+      '--package-name',
+      '@sdkwork/test-sdk',
+      '--no-sync-published-version',
+    ], {
+      encoding: 'utf-8',
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.stdout.trim(), '1.0.0');
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

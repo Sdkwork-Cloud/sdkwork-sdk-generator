@@ -26,9 +26,7 @@ export class ReadmeGenerator {
     }).join('\n');
 
     const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
-    const accessTokenHeader = config.options?.standardProfile === 'sdkwork-v3'
-      ? 'Sdkwork-Access-Token'
-      : 'Access-Token';
+    const accessTokenHeader = 'Sdkwork-Access-Token';
     const authSection = buildMutuallyExclusiveAuthSection({
       codeFence: 'typescript',
       modeAExample: `const client = new ${clientName}({ baseUrl: '${config.baseUrl}' });

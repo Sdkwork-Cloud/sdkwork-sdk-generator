@@ -1,5 +1,5 @@
 import type { LanguageConfig } from '../../framework/base.js';
-import type { GeneratorConfig } from '../../framework/types.js';
+import type { ApiSchema, GeneratorConfig } from '../../framework/types.js';
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
@@ -46,12 +46,14 @@ export const FLUTTER_RESERVED_WORDS = new Set([
   'mixin',
   'new',
   'null',
+  'hashcode',
   'on',
   'operator',
   'part',
   'required',
   'rethrow',
   'return',
+  'runtimetype',
   'sealed',
   'set',
   'show',
@@ -61,6 +63,7 @@ export const FLUTTER_RESERVED_WORDS = new Set([
   'sync',
   'this',
   'throw',
+  'tostring',
   'true',
   'try',
   'typedef',
@@ -130,7 +133,7 @@ export function getFlutterType(schema: any, config: LanguageConfig): string {
     return config.namingConventions.modelName(refName);
   }
 
-  const composed = pickComposedSchema(schema);
+  const composed = pickFlutterComposedSchema(schema);
   if (composed) {
     return getFlutterType(composed, config);
   }
@@ -175,6 +178,27 @@ function getFlutterPrimitiveType(type: string): string {
   if (type === 'integer') return 'int';
   if (type === 'boolean') return 'bool';
   return 'dynamic';
+}
+
+function pickFlutterComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
+  if (!schema || typeof schema !== 'object') {
+    return undefined;
+  }
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    return pickComposedSchema({ allOf: schema.allOf } as ApiSchema);
+  }
+
+  const unionSchemas = Array.isArray(schema.oneOf)
+    ? schema.oneOf
+    : Array.isArray(schema.anyOf)
+      ? schema.anyOf
+      : undefined;
+  if (!unionSchemas || unionSchemas.length === 0) {
+    return undefined;
+  }
+
+  const nonNullSchemas = unionSchemas.filter((entry) => entry && typeof entry === 'object' && getFlutterType(entry as ApiSchema, FLUTTER_CONFIG) !== 'dynamic');
+  return nonNullSchemas.length === 1 ? nonNullSchemas[0] as ApiSchema : undefined;
 }
 
 export function getFlutterPackageName(config: GeneratorConfig): string {

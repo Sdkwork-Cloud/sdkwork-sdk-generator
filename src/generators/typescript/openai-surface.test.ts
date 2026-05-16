@@ -35,7 +35,7 @@ function multipartRequestBody(): Record<string, unknown> {
     required: true,
     content: {
       'multipart/form-data': {
-        schema: objectSchema,
+        schema: schemaRef('CreateUploadPartRequest'),
       },
     },
   };
@@ -157,7 +157,7 @@ const openAiStyleSpec: ApiSpec = {
         requestBody: {
           content: {
             'multipart/form-data': {
-              schema: { type: 'object', additionalProperties: true },
+              schema: { $ref: '#/components/schemas/CreateFileRequest' },
             },
           },
         },
@@ -443,6 +443,14 @@ const openAiStyleSpec: ApiSpec = {
         properties: {
           id: { type: 'string' },
           object: { type: 'string' },
+        },
+      },
+      CreateFileRequest: {
+        type: 'object',
+        required: ['file'],
+        properties: {
+          file: { type: 'string', format: 'binary' },
+          fileName: { type: 'string' },
         },
       },
       CreateChatCompletionRequest: {
@@ -737,6 +745,14 @@ const openAiNestedResourceSpec: ApiSpec = {
       VectorStoreFileContentResponse: objectSchema,
       CreateVectorStoreFileBatchRequest: objectSchema,
       VectorStoreFileBatchObject: objectSchema,
+      CreateUploadPartRequest: {
+        type: 'object',
+        required: ['file'],
+        properties: {
+          file: { type: 'string', format: 'binary' },
+          fileName: { type: 'string' },
+        },
+      },
       UploadPartObject: objectSchema,
       CreateFineTuningJobRequest: objectSchema,
       FineTuningJobObject: objectSchema,
@@ -772,6 +788,10 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(sdkFile.content).not.toContain('public readonly response:');
     expect(sdkFile.content).not.toContain('public readonly file:');
 
+    const httpClient = getGeneratedFile(result.files, 'src/http/client.ts');
+    expect(httpClient.content).toContain("if (normalizedContentType === 'multipart/form-data')");
+    expect(httpClient.content).toContain('return this.encodeMultipartBody(body);');
+
     const responsesApi = getGeneratedFile(result.files, 'src/api/responses.ts');
     expect(responsesApi.content).toContain('export class ResponsesApi');
     expect(responsesApi.content).toContain('async create(body: CreateResponseRequest): Promise<ResponseObject>');
@@ -784,8 +804,9 @@ describe('TypeScript OpenAI-style SDK surface', () => {
 
     const filesApi = getGeneratedFile(result.files, 'src/api/files.ts');
     expect(filesApi.content).toContain('async list(): Promise<ListFilesResponse>');
-    expect(filesApi.content).toContain('async create(body?: FormData): Promise<FileObject>');
-    expect(filesApi.content).toContain('async content(fileId: string): Promise<string>');
+    expect(filesApi.content).toContain('async create(body?: CreateFileRequest): Promise<FileObject>');
+    expect(filesApi.content).not.toContain('body?: FormData');
+    expect(filesApi.content).toContain('async content(fileId: string): Promise<Blob>');
     expect(filesApi.content).not.toContain('listFiles');
     expect(filesApi.content).not.toContain('uploadFile');
     expect(filesApi.content).not.toContain('public readonly content:');
@@ -840,7 +861,8 @@ describe('TypeScript OpenAI-style SDK surface', () => {
 
     const uploadsApi = getGeneratedFile(result.files, 'src/api/uploads.ts');
     expect(uploadsApi.content).toContain('public readonly parts: UploadsPartsApi;');
-    expect(uploadsApi.content).toContain('async create(uploadId: string, body: FormData): Promise<UploadPartObject>');
+    expect(uploadsApi.content).toContain('async create(uploadId: string, body: CreateUploadPartRequest): Promise<UploadPartObject>');
+    expect(uploadsApi.content).not.toContain('body: FormData');
 
     const vectorStoresApi = getGeneratedFile(result.files, 'src/api/vector-stores.ts');
     expect(vectorStoresApi.content).toContain('export class VectorStoresApi');
@@ -954,5 +976,97 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(chatApi.content).not.toContain('async getRetrieve(');
     expect(chatApi.content).not.toContain('async getList(');
     expect(chatApi.content).not.toContain('async createCreateChatCompletion(');
+  });
+
+  it('can enable nested resource surface for one app SDK tag without sdkwork-v3 global validation', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        name: 'SdkworkAppSdk',
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+      },
+      {
+        openapi: '3.0.3',
+        info: { title: 'SDKWork app API', version: '1.0.0' },
+        tags: [
+          {
+            name: 'billing',
+            'x-sdk-nested-resource-surface': true,
+          },
+        ],
+        paths: {
+          '/app/v3/api/billing/account/summary': {
+            get: {
+              summary: 'Retrieve account summary',
+              operationId: 'account.summary.retrieve',
+              tags: ['billing'],
+              responses: jsonOk(schemaRef('AccountSummaryResult')),
+            },
+          },
+          '/app/v3/api/billing/account/points/recharges': {
+            post: {
+              summary: 'Create points recharge',
+              operationId: 'account.points.recharges.create',
+              tags: ['billing'],
+              requestBody: jsonRequestBody(schemaRef('PointsRechargeRequest')),
+              responses: jsonOk(schemaRef('PointsRechargeResult')),
+            },
+          },
+          '/app/v3/api/billing/vip/purchase/renew': {
+            post: {
+              summary: 'Renew VIP purchase',
+              operationId: 'vip.purchase.renew',
+              tags: ['billing'],
+              requestBody: jsonRequestBody(schemaRef('VipPurchaseRequest')),
+              responses: jsonOk(schemaRef('VipPurchaseResult')),
+            },
+          },
+          '/app/v3/api/profile/current': {
+            get: {
+              summary: 'Legacy profile operation remains flat',
+              operationId: 'profile__current',
+              tags: ['profile'],
+              responses: jsonOk(schemaRef('ProfileResult')),
+            },
+          },
+        },
+        components: {
+          schemas: {
+            AccountSummaryResult: objectSchema,
+            PointsRechargeRequest: objectSchema,
+            PointsRechargeResult: objectSchema,
+            VipPurchaseRequest: objectSchema,
+            VipPurchaseResult: objectSchema,
+            ProfileResult: objectSchema,
+          },
+        },
+      },
+    );
+
+    expect(result.errors).toEqual([]);
+
+    const sdkFile = getGeneratedFile(result.files, 'src/sdk.ts');
+    expect(sdkFile.content).toContain('public readonly billing: BillingApi;');
+    expect(sdkFile.content).not.toContain('public readonly account:');
+    expect(sdkFile.content).not.toContain('public readonly vip:');
+
+    const billingApi = getGeneratedFile(result.files, 'src/api/billing.ts');
+    expect(billingApi.content).toContain('public readonly account: BillingAccountApi;');
+    expect(billingApi.content).toContain('public readonly vip: BillingVipApi;');
+    expect(billingApi.content).toContain('public readonly summary: BillingAccountSummaryApi;');
+    expect(billingApi.content).toContain('public readonly points: BillingAccountPointsApi;');
+    expect(billingApi.content).toContain('public readonly recharges: BillingAccountPointsRechargesApi;');
+    expect(billingApi.content).toContain('public readonly purchase: BillingVipPurchaseApi;');
+    expect(billingApi.content).toContain('async retrieve(): Promise<AccountSummaryResult>');
+    expect(billingApi.content).toContain('async create(body: PointsRechargeRequest): Promise<PointsRechargeResult>');
+    expect(billingApi.content).toContain('async renew(body: VipPurchaseRequest): Promise<VipPurchaseResult>');
+    expect(billingApi.content).not.toContain('async accountSummaryRetrieve');
+    expect(billingApi.content).not.toContain('async vipPurchaseRenew');
+
+    const profileApi = getGeneratedFile(result.files, 'src/api/profile.ts');
+    expect(profileApi.content).toContain('async current(): Promise<ProfileResult>');
+    expect(profileApi.content).not.toContain('public readonly current:');
   });
 });

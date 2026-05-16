@@ -16,6 +16,11 @@ Use Node 18+.
 ## Coding Style & Naming Conventions
 Write strict TypeScript with 2-space indentation and ES module syntax. Keep relative imports explicit with `.js` suffixes inside `.ts` files, matching the current source layout. Use `PascalCase` for classes and generator types, `camelCase` for functions and variables, and `kebab-case` for filenames. Follow the existing small-module pattern instead of adding large cross-language files.
 
+## SDKWork Standards
+Before changing domains, APIs, SDK contracts, database schemas, reusable modules, frontend UI/service logic, app manifests, IAM/auth/permission behavior, deployment/runtime configuration, external integrations, events, observability, performance, privacy, or generated-client integration, read the canonical standards in `../../specs/README.md` and then the relevant spec files under `../../specs/`. Local conventions may extend these standards but must not contradict them.
+
+For generator behavior, `../../specs/API_SPEC.md` and `../../specs/SDK_SPEC.md` are authoritative. The SDKWork v3 profile must generate nested resource clients from `tag + dotted operationId`, for example tag `auth` and operationId `sessions.create` becomes `client.auth.sessions.create(body)`. Do not introduce flat aliases such as `client.auth.createSession()` for new contracts. The generator must preserve the dual-token header model and the `/app/v3/api` plus `/backend/v3/api` surface split.
+
 ## Testing Guidelines
 Use Vitest (`describe`, `it`, `expect`) and place tests next to the code they protect. Name files `*.test.ts`. Favor targeted assertions on generated file paths and contents over broad snapshots so regressions stay readable. There is no enforced coverage threshold in this package, so every behavior change should add or update the closest regression test.
 

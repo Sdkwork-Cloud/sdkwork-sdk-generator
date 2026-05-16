@@ -361,9 +361,10 @@ components:
       expect(execution.result.errors).toEqual([]);
       expect(execution.config.apiSpecPath).toBe(specUrl);
       expect(execution.result.files.some((file) => file.path === 'src/api/report.ts')).toBe(true);
-      expect(execution.result.files.find((file) => file.path === 'src/api/report.ts')?.content).toContain(
-        'async listReports(page?: number): Promise<void>'
-      );
+      const reportApiContent = execution.result.files.find((file) => file.path === 'src/api/report.ts')?.content;
+      expect(reportApiContent).toContain('export interface ReportListReportsParams');
+      expect(reportApiContent).toContain('page?: number;');
+      expect(reportApiContent).toContain('async listReports(params?: ReportListReportsParams): Promise<void>');
       expect(existsSync(outputDir)).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;

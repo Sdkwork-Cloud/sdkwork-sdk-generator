@@ -54,7 +54,7 @@ export class ApiGenerator {
 
     files.push(this.generatePaths(config));
     files.push(this.generateResponseHelpers());
-    files.push(this.generateApiIndex(tags, resolvedTagNames));
+    files.push(this.generateApiIndex(tags, resolvedTagNames, ctx.apiGroups));
 
     return files;
   }
@@ -1133,11 +1133,14 @@ String? serializeParameterValue(HeaderParameterSpec? parameter) {
     };
   }
 
-  private generateApiIndex(tags: string[], resolvedTagNames: Map<string, string>): GeneratedFile {
+  private generateApiIndex(tags: string[], resolvedTagNames: Map<string, string>, apiGroups: SchemaContext['apiGroups']): GeneratedFile {
     const exports = tags.map((tag) => {
       const resolvedTagName = resolvedTagNames.get(tag) || tag;
       const fileName = FLUTTER_CONFIG.namingConventions.fileName(resolvedTagName);
-      return `export '${fileName}.dart';`;
+      const helpers = this.getExportHiddenHelpers(apiGroups[tag]?.operations || []);
+      return helpers.length > 0
+        ? `export '${fileName}.dart' hide ${helpers.join(', ')};`
+        : `export '${fileName}.dart';`;
     }).join('\n');
 
     return {
@@ -1148,6 +1151,54 @@ ${exports}
       language: 'flutter',
       description: 'API module exports',
     };
+  }
+
+  private getExportHiddenHelpers(operations: any[]): string[] {
+    const helpers = new Set<string>();
+    const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
+    const needsQuerySerializationHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+    });
+    const needsRequestHeaderHelpers = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
+    });
+
+    if (needsQuerySerializationHelpers) {
+      [
+        'QueryParameterSpec',
+        'buildQueryString',
+        'appendSerializedParameter',
+        'appendArrayParameter',
+        'appendObjectParameter',
+        'appendDeepObjectParameter',
+        'encodeQueryValue',
+        'urlEncode',
+      ].forEach((helper) => helpers.add(helper));
+    }
+
+    if (needsPathSerializationHelpers) {
+      [
+        'PathParameterSpec',
+        'serializePathParameter',
+        'serializePathArray',
+        'serializePathObject',
+        'pathPrefix',
+        'pathPrimitivePrefix',
+      ].forEach((helper) => helpers.add(helper));
+    }
+
+    if (needsRequestHeaderHelpers) {
+      [
+        'HeaderParameterSpec',
+        'buildRequestHeaders',
+        'buildCookieHeader',
+        'serializeParameterValue',
+      ].forEach((helper) => helpers.add(helper));
+    }
+
+    return Array.from(helpers);
   }
 
   private format(content: string): string {

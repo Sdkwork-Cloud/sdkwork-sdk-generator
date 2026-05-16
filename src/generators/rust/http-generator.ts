@@ -120,8 +120,8 @@ impl SdkworkHttpClient {
         if DEFAULT_API_KEY_HEADER != "Authorization" {
             headers.remove("Authorization");
         }
-        if DEFAULT_API_KEY_HEADER != "Access-Token" {
-            headers.remove("Access-Token");
+        if DEFAULT_API_KEY_HEADER != "Sdkwork-Access-Token" {
+            headers.remove("Sdkwork-Access-Token");
         }
     }
 
@@ -135,10 +135,10 @@ impl SdkworkHttpClient {
 
     pub fn set_access_token(&self, token: impl Into<String>) {
         let mut headers = self.headers.write().expect("sdk headers poisoned");
-        if DEFAULT_API_KEY_HEADER != "Access-Token" {
+        if DEFAULT_API_KEY_HEADER != "Sdkwork-Access-Token" {
             headers.remove(DEFAULT_API_KEY_HEADER);
         }
-        headers.insert("Access-Token".to_string(), token.into());
+        headers.insert("Sdkwork-Access-Token".to_string(), token.into());
     }
 
     pub fn set_header(&self, key: impl Into<String>, value: impl Into<String>) {

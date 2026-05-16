@@ -55,6 +55,18 @@ describe('TypeScript config', () => {
         expect(type).toBe('string | null');
     });
 
+    it('maps OpenAPI binary string schemas to Blob for typed multipart request DTOs', () => {
+        const type = getTypeScriptType(
+            {
+                type: 'string',
+                format: 'binary',
+            },
+            TYPESCRIPT_CONFIG,
+        );
+
+        expect(type).toBe('Blob');
+    });
+
     it('maps nullable oneOf and anyOf schemas without unknown null branches', () => {
         expect(getTypeScriptType(
             {

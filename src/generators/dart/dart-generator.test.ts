@@ -108,6 +108,43 @@ const dartSpec: ApiSpec = {
           nickname: {
             type: 'string',
           },
+          labels: {
+            allOf: [
+              {
+                $ref: '#/components/schemas/StringMapVO',
+              },
+            ],
+          },
+          nullableLabels: {
+            allOf: [
+              {
+                $ref: '#/components/schemas/NullableStringMapVO',
+              },
+            ],
+          },
+          attributes: {
+            type: 'object',
+            additionalProperties: true,
+          },
+          dynamicAttributes: {
+            type: 'object',
+            additionalProperties: {},
+          },
+        },
+      },
+      StringMapVO: {
+        type: 'object',
+        additionalProperties: {
+          type: 'string',
+        },
+      },
+      NullableStringMapVO: {
+        type: 'object',
+        additionalProperties: {
+          anyOf: [
+            { type: 'string' },
+            { type: 'null' },
+          ],
         },
       },
       TeamVO: {
@@ -200,6 +237,88 @@ const dartVoidOnlySpec: ApiSpec = {
   },
 };
 
+const dartMultiApiHelperSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Dart Multi API Helper Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/orgs/{orgId}': {
+      get: {
+        summary: 'Get org',
+        operationId: 'getOrg',
+        tags: ['Org'],
+        parameters: [
+          {
+            name: 'orgId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+    '/app/v3/api/teams/{teamId}': {
+      get: {
+        summary: 'Get team',
+        operationId: 'getTeam',
+        tags: ['Team'],
+        parameters: [
+          {
+            name: 'teamId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: { schemas: {} },
+};
+
+const dartObjectRuntimeSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Dart Object Runtime Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/runtime_records/current': {
+      get: {
+        summary: 'Get runtime record',
+        operationId: 'runtimeRecords.current.retrieve',
+        tags: ['Runtime'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/RuntimeRecord',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      RuntimeRecord: {
+        type: 'object',
+        properties: {
+          runtimeType: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 describe('Dart generator', () => {
   it('registers dart as a supported generator-backed language', async () => {
     const generator = getGenerator('dart' as any);
@@ -257,6 +376,18 @@ describe('Dart generator', () => {
     expect(modelsFile!.content).toContain("'data': data?.toJson(),");
     expect(modelsFile!.content).toContain("'members': members?.map((item) => item.toJson()).toList(),");
     expect(modelsFile!.content).toContain("'membersById': membersById?.map((key, item) => MapEntry(key, item.toJson())),");
+    expect(modelsFile!.content).toContain('final Map<String, String>? labels;');
+    expect(modelsFile!.content).toContain("labels: (() {\n        final map = _sdkworkAsMap(json['labels']);");
+    expect(modelsFile!.content).toContain("nullableLabels: (() {\n        final map = _sdkworkAsMap(json['nullableLabels']);");
+    expect(modelsFile!.content).toContain('final Map<String, dynamic>? attributes;');
+    expect(modelsFile!.content).toContain("attributes: _sdkworkAsMap(json['attributes'])");
+    expect(modelsFile!.content).toContain('final Map<String, dynamic>? dynamicAttributes;');
+    expect(modelsFile!.content).toContain("dynamicAttributes: (() {\n        final map = _sdkworkAsMap(json['dynamicAttributes']);");
+    expect(modelsFile!.content).not.toContain("labels: _sdkworkAsMap(json['labels'])");
+    expect(modelsFile!.content).not.toContain("nullableLabels: _sdkworkAsMap(json['nullableLabels'])");
+    expect(modelsFile!.content).not.toContain('if (deserialized is dynamic)');
+    expect(modelsFile!.content).not.toContain('StringMapVO.fromJson');
+    expect(modelsFile!.content).not.toContain('NullableStringMapVO.fromJson');
     expect(modelsFile!.content).toContain('final dynamic data;');
     expect(modelsFile!.content).not.toContain('final dynamic? data;');
     expect(readme).toBeDefined();
@@ -336,5 +467,39 @@ describe('Dart generator', () => {
     expect(smokeTestFile!.content).not.toContain('capturedBody');
     expect(smokeTestFile!.content).not.toContain('capturedContentType');
     expect(smokeTestFile!.content).not.toContain('Future<List<int>> readRequestBody');
+  });
+
+  it('hides internal dart api helpers from the barrel export to avoid ambiguous exports', async () => {
+    const generator = getGenerator('dart' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(dartConfig, dartMultiApiHelperSpec);
+    const apiIndex = result.files.find((file) => file.path === 'lib/src/api/api.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(apiIndex).toBeDefined();
+    expect(apiIndex!.content).toContain("export 'org.dart' hide ");
+    expect(apiIndex!.content).toContain("export 'team.dart' hide ");
+    expect(apiIndex!.content).toContain('PathParameterSpec');
+    expect(apiIndex!.content).not.toContain('QueryParameterSpec');
+    expect(apiIndex!.content).not.toContain('HeaderParameterSpec');
+    expect(apiIndex!.content).not.toContain("export 'org.dart';");
+    expect(apiIndex!.content).not.toContain("export 'team.dart';");
+  });
+
+  it('escapes dart model fields that would override Object runtime getters', async () => {
+    const generator = getGenerator('dart' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(dartConfig, dartObjectRuntimeSpec);
+    const modelsFile = result.files.find((file) => file.path === 'lib/src/models.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(modelsFile).toBeDefined();
+    expect(modelsFile!.content).toContain('final String? runtimeType_;');
+    expect(modelsFile!.content).toContain('this.runtimeType_');
+    expect(modelsFile!.content).toContain("runtimeType_: json['runtimeType']?.toString()");
+    expect(modelsFile!.content).toContain("'runtimeType': runtimeType_,");
+    expect(modelsFile!.content).not.toContain('final String? runtimeType;');
   });
 });

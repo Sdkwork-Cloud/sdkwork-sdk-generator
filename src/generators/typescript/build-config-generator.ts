@@ -117,8 +117,8 @@ const tempDir = path.join(projectDir, '.sdkwork', 'build-runtime');
 const tempEsmDir = path.join(tempDir, 'esm');
 
 async function main() {
-  await fs.rm(distDir, { recursive: true, force: true });
-  await fs.rm(tempDir, { recursive: true, force: true });
+  await removeDirectory(distDir);
+  await removeDirectory(tempDir);
   await fs.mkdir(distDir, { recursive: true });
 
   emitDeclarations();
@@ -126,7 +126,16 @@ async function main() {
   await bundleRuntime('es', path.join(distDir, 'index.js'));
   await bundleRuntime('cjs', path.join(distDir, 'index.cjs'));
 
-  await fs.rm(tempDir, { recursive: true, force: true });
+  await removeDirectory(tempDir);
+}
+
+async function removeDirectory(target) {
+  await fs.rm(target, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  });
 }
 
 function loadConfig(overrides) {

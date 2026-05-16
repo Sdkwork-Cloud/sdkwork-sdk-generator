@@ -194,6 +194,7 @@ export interface ApiSecurityScheme {
 export interface ApiTag {
   name: string;
   description?: string;
+  [key: string]: unknown;
 }
 
 export interface GeneratedFile {

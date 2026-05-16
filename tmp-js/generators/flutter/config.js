@@ -43,12 +43,14 @@ export const FLUTTER_RESERVED_WORDS = new Set([
     'mixin',
     'new',
     'null',
+    'hashcode',
     'on',
     'operator',
     'part',
     'required',
     'rethrow',
     'return',
+    'runtimetype',
     'sealed',
     'set',
     'show',
@@ -58,6 +60,7 @@ export const FLUTTER_RESERVED_WORDS = new Set([
     'sync',
     'this',
     'throw',
+    'tostring',
     'true',
     'try',
     'typedef',
@@ -121,7 +124,7 @@ export function getFlutterType(schema, config) {
         const refName = getSchemaReferenceName(schema.$ref);
         return config.namingConventions.modelName(refName);
     }
-    const composed = pickComposedSchema(schema);
+    const composed = pickFlutterComposedSchema(schema);
     if (composed) {
         return getFlutterType(composed, config);
     }
@@ -167,6 +170,24 @@ function getFlutterPrimitiveType(type) {
     if (type === 'boolean')
         return 'bool';
     return 'dynamic';
+}
+function pickFlutterComposedSchema(schema) {
+    if (!schema || typeof schema !== 'object') {
+        return undefined;
+    }
+    if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+        return pickComposedSchema({ allOf: schema.allOf });
+    }
+    const unionSchemas = Array.isArray(schema.oneOf)
+        ? schema.oneOf
+        : Array.isArray(schema.anyOf)
+            ? schema.anyOf
+            : undefined;
+    if (!unionSchemas || unionSchemas.length === 0) {
+        return undefined;
+    }
+    const nonNullSchemas = unionSchemas.filter((entry) => entry && typeof entry === 'object' && getFlutterType(entry, FLUTTER_CONFIG) !== 'dynamic');
+    return nonNullSchemas.length === 1 ? nonNullSchemas[0] : undefined;
 }
 export function getFlutterPackageName(config) {
     const raw = String(config.packageName || '').trim();

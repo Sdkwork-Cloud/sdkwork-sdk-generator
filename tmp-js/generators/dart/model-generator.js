@@ -1,4 +1,4 @@
-import { getSchemaReferenceName, resolveModelSchema } from '../../framework/schema.js';
+import { getSchemaReferenceName, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
 import { DART_CONFIG, getDartType } from './config.js';
 export class ModelGenerator {
     generate(ctx, _config) {
@@ -93,6 +93,10 @@ ${toJsonBody}
         if (!schema || typeof schema !== 'object') {
             return valueExpr;
         }
+        const normalizedSchema = this.normalizeDeserializationSchema(schema);
+        if (normalizedSchema !== schema) {
+            return this.deserializeExpression(normalizedSchema, valueExpr, currentModelName);
+        }
         if (schema.$ref) {
             const refName = DART_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             const refTarget = refName === currentModelName ? currentModelName : refName;
@@ -121,6 +125,11 @@ ${toJsonBody}
         if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
             const valueType = this.resolveMapValueType(schema.additionalProperties, currentModelName);
             const itemExpr = this.deserializeArrayItemExpression(schema.additionalProperties, 'item', currentModelName);
+            const assignment = valueType === 'dynamic'
+                ? '          result[key] = deserialized;'
+                : `          if (deserialized is ${valueType}) {
+            result[key] = deserialized;
+          }`;
             return `(() {
         final map = _sdkworkAsMap(${valueExpr});
         if (map == null) {
@@ -129,9 +138,7 @@ ${toJsonBody}
         final result = <String, ${valueType}>{};
         map.forEach((key, item) {
           final deserialized = ${itemExpr};
-          if (deserialized is ${valueType}) {
-            result[key] = deserialized;
-          }
+${assignment}
         });
         return result;
       })()`;
@@ -155,6 +162,10 @@ ${toJsonBody}
         return valueExpr;
     }
     deserializeArrayItemExpression(schema, itemExpr, currentModelName) {
+        const normalizedSchema = this.normalizeDeserializationSchema(schema);
+        if (normalizedSchema !== schema) {
+            return this.deserializeArrayItemExpression(normalizedSchema, itemExpr, currentModelName);
+        }
         if (schema?.$ref) {
             const refName = DART_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             const refTarget = refName === currentModelName ? currentModelName : refName;
@@ -183,6 +194,11 @@ ${toJsonBody}
         if (schema?.additionalProperties && typeof schema.additionalProperties === 'object') {
             const mapValueType = this.resolveMapValueType(schema.additionalProperties, currentModelName);
             const nestedExpr = this.deserializeArrayItemExpression(schema.additionalProperties, 'nestedItem', currentModelName);
+            const assignment = mapValueType === 'dynamic'
+                ? '          result[key] = deserialized;'
+                : `          if (deserialized is ${mapValueType}) {
+            result[key] = deserialized;
+          }`;
             return `(() {
         final map = _sdkworkAsMap(${itemExpr});
         if (map == null) {
@@ -191,9 +207,7 @@ ${toJsonBody}
         final result = <String, ${mapValueType}>{};
         map.forEach((key, nestedItem) {
           final deserialized = ${nestedExpr};
-          if (deserialized is ${mapValueType}) {
-            result[key] = deserialized;
-          }
+${assignment}
         });
         return result;
       })()`;
@@ -220,6 +234,10 @@ ${toJsonBody}
         if (!schema || typeof schema !== 'object') {
             return valueExpr;
         }
+        const normalizedSchema = this.normalizeDeserializationSchema(schema);
+        if (normalizedSchema !== schema) {
+            return this.serializeExpression(normalizedSchema, valueExpr, currentModelName);
+        }
         if (schema.$ref) {
             return `${valueExpr}?.toJson()`;
         }
@@ -237,6 +255,10 @@ ${toJsonBody}
         return valueExpr;
     }
     serializeArrayItemExpression(schema, itemExpr, currentModelName) {
+        const normalizedSchema = this.normalizeDeserializationSchema(schema);
+        if (normalizedSchema !== schema) {
+            return this.serializeArrayItemExpression(normalizedSchema, itemExpr, currentModelName);
+        }
         if (schema?.$ref) {
             return `${itemExpr}.toJson()`;
         }
@@ -254,11 +276,25 @@ ${toJsonBody}
         return itemExpr;
     }
     resolveMapValueType(schema, currentModelName) {
+        const normalizedSchema = this.normalizeDeserializationSchema(schema);
+        if (normalizedSchema !== schema) {
+            return this.resolveMapValueType(normalizedSchema, currentModelName);
+        }
         if (schema?.$ref) {
             const refName = DART_CONFIG.namingConventions.modelName(getSchemaReferenceName(schema.$ref) || 'Model');
             return refName === currentModelName ? currentModelName : refName;
         }
         return getDartType(schema, DART_CONFIG);
+    }
+    normalizeDeserializationSchema(schema) {
+        if (!schema || typeof schema !== 'object') {
+            return schema;
+        }
+        const resolvedSchema = resolveModelSchema(schema);
+        if (resolvedSchema && resolvedSchema !== schema && JSON.stringify(resolvedSchema) !== JSON.stringify(schema)) {
+            return resolvedSchema;
+        }
+        return pickComposedSchema(schema) || schema;
     }
     format(content) {
         return content.trim() + '\n';

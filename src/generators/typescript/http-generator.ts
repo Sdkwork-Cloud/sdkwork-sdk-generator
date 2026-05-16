@@ -93,8 +93,81 @@ export class HttpClient extends BaseHttpClient {
     if (normalizedContentType === 'application/x-www-form-urlencoded') {
       return this.encodeFormBody(body);
     }
+    if (normalizedContentType === 'multipart/form-data') {
+      return this.encodeMultipartBody(body);
+    }
 
     return body;
+  }
+
+  private encodeMultipartBody(body: unknown): FormData {
+    if (body instanceof FormData) {
+      return body;
+    }
+
+    const formData = new FormData();
+    if (body instanceof Map) {
+      for (const [key, value] of body.entries()) {
+        this.appendMultipartValue(formData, String(key), value);
+      }
+      return formData;
+    }
+    if (typeof body === 'object') {
+      const record = body as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        if (this.isMultipartMetadataField(key)) {
+          continue;
+        }
+        this.appendMultipartValue(formData, key, value, this.resolveMultipartFileName(record, key));
+      }
+      return formData;
+    }
+
+    this.appendMultipartValue(formData, 'value', body);
+    return formData;
+  }
+
+  private appendMultipartValue(formData: FormData, key: string, value: unknown, fileName?: string): void {
+    if (value == null) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => this.appendMultipartValue(formData, key, item, fileName));
+      return;
+    }
+    if (value instanceof Blob) {
+      if (fileName) {
+        formData.append(key, value, fileName);
+        return;
+      }
+      formData.append(key, value);
+      return;
+    }
+    if (value instanceof Date) {
+      formData.append(key, value.toISOString());
+      return;
+    }
+    if (typeof value === 'object') {
+      formData.append(key, JSON.stringify(value));
+      return;
+    }
+    formData.append(key, String(value));
+  }
+
+  private resolveMultipartFileName(record: Record<string, unknown>, key: string): string | undefined {
+    const fieldSpecificName = record[\`\${key}FileName\`];
+    if (typeof fieldSpecificName === 'string' && fieldSpecificName.trim()) {
+      return fieldSpecificName.trim();
+    }
+    const genericName = record.fileName;
+    if (key === 'file' && typeof genericName === 'string' && genericName.trim()) {
+      return genericName.trim();
+    }
+    return undefined;
+  }
+
+  private isMultipartMetadataField(key: string): boolean {
+    return key === 'fileName' || key.endsWith('FileName');
   }
 
   private encodeFormBody(body: unknown): string {
@@ -150,8 +223,6 @@ export class HttpClient extends BaseHttpClient {
 
     if (HttpClient.API_KEY_HEADER === 'Authorization' && HttpClient.API_KEY_USE_BEARER) {
       authConfig.authMode = 'apikey';
-      delete headers[HttpClient.ACCESS_TOKEN_HEADER];
-      delete headers['Access-Token'];
       return;
     }
 
@@ -163,10 +234,6 @@ export class HttpClient extends BaseHttpClient {
     if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
       delete headers['Authorization'];
     }
-    if (HttpClient.API_KEY_HEADER.toLowerCase() !== HttpClient.ACCESS_TOKEN_HEADER.toLowerCase()) {
-      delete headers[HttpClient.ACCESS_TOKEN_HEADER];
-    }
-    delete headers['Access-Token'];
   }
 
   setAuthToken(token: string): void {
@@ -179,11 +246,7 @@ export class HttpClient extends BaseHttpClient {
 
   setAccessToken(token: string): void {
     const headers = this.getInternalHeaders();
-    if (HttpClient.API_KEY_HEADER.toLowerCase() !== HttpClient.ACCESS_TOKEN_HEADER.toLowerCase()) {
-      delete headers[HttpClient.API_KEY_HEADER];
-    }
     headers[HttpClient.ACCESS_TOKEN_HEADER] = token;
-    delete headers['Access-Token'];
     super.setAccessToken(token);
   }
 
@@ -200,16 +263,14 @@ export class HttpClient extends BaseHttpClient {
     const authConfig = this.getInternalAuthConfig();
     const tokenManager = authConfig.tokenManager;
     const accessToken = tokenManager?.getAccessToken?.();
-    if (!accessToken || HttpClient.ACCESS_TOKEN_HEADER === 'Access-Token') {
+    if (!accessToken) {
       return headers;
     }
 
-    const nextHeaders = {
+    return {
       ...(headers ?? {}),
       [HttpClient.ACCESS_TOKEN_HEADER]: accessToken,
     };
-    delete nextHeaders['Access-Token'];
-    return nextHeaders;
   }
 
   async request<T>(path: string, options: HttpRequestOptions = {}): Promise<T> {
@@ -418,10 +479,7 @@ export * from './auth';
     return content.trim() + '\n';
   }
 
-  private resolveAccessTokenHeader(config: GeneratorConfig, detectedApiKeyHeader?: string): string {
-    if (config.options?.standardProfile === 'sdkwork-v3') {
-      return 'Sdkwork-Access-Token';
-    }
-    return detectedApiKeyHeader || 'Access-Token';
+  private resolveAccessTokenHeader(_config: GeneratorConfig, _detectedApiKeyHeader?: string): string {
+    return 'Sdkwork-Access-Token';
   }
 }

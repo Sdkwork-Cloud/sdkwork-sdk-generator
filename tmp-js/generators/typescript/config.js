@@ -123,6 +123,8 @@ export function getTypeScriptType(schema, config, knownModels) {
         return nullable && !enumType.includes('null') ? `${enumType} | null` : enumType;
     }
     if (type === 'string') {
+        if (format === 'binary')
+            return nullable ? 'Blob | null' : 'Blob';
         if (format === 'date')
             return 'string';
         if (format === 'date-time')

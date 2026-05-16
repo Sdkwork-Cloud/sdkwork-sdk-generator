@@ -55,7 +55,7 @@ pub struct BasePlusVo {
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct QueryListForm {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub keyword: Option<String>,
+    pub q: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -19,7 +19,7 @@ export class ApiGenerator {
         }
         files.push(this.generatePaths(config));
         files.push(this.generateResponseHelpers());
-        files.push(this.generateApiIndex(tags, resolvedTagNames));
+        files.push(this.generateApiIndex(tags, resolvedTagNames, ctx.apiGroups));
         return files;
     }
     generateApiFile(tag, resolvedTagName, operations, config, knownModels) {
@@ -1000,11 +1000,14 @@ String? serializeParameterValue(HeaderParameterSpec? parameter) {
             description: 'API response normalization helpers',
         };
     }
-    generateApiIndex(tags, resolvedTagNames) {
+    generateApiIndex(tags, resolvedTagNames, apiGroups) {
         const exports = tags.map((tag) => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
             const fileName = DART_CONFIG.namingConventions.fileName(resolvedTagName);
-            return `export '${fileName}.dart';`;
+            const helpers = this.getExportHiddenHelpers(apiGroups[tag]?.operations || []);
+            return helpers.length > 0
+                ? `export '${fileName}.dart' hide ${helpers.join(', ')};`
+                : `export '${fileName}.dart';`;
         }).join('\n');
         return {
             path: 'lib/src/api/api.dart',
@@ -1014,6 +1017,49 @@ ${exports}
             language: 'dart',
             description: 'API module exports',
         };
+    }
+    getExportHiddenHelpers(operations) {
+        const helpers = new Set();
+        const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
+        const needsQuerySerializationHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+        });
+        const needsRequestHeaderHelpers = operations.some((op) => {
+            const allParameters = op.allParameters || op.parameters || [];
+            return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
+        });
+        if (needsQuerySerializationHelpers) {
+            [
+                'QueryParameterSpec',
+                'buildQueryString',
+                'appendSerializedParameter',
+                'appendArrayParameter',
+                'appendObjectParameter',
+                'appendDeepObjectParameter',
+                'encodeQueryValue',
+                'urlEncode',
+            ].forEach((helper) => helpers.add(helper));
+        }
+        if (needsPathSerializationHelpers) {
+            [
+                'PathParameterSpec',
+                'serializePathParameter',
+                'serializePathArray',
+                'serializePathObject',
+                'pathPrefix',
+                'pathPrimitivePrefix',
+            ].forEach((helper) => helpers.add(helper));
+        }
+        if (needsRequestHeaderHelpers) {
+            [
+                'HeaderParameterSpec',
+                'buildRequestHeaders',
+                'buildCookieHeader',
+                'serializeParameterValue',
+            ].forEach((helper) => helpers.add(helper));
+        }
+        return Array.from(helpers);
     }
     format(content) {
         return content.trim() + '\n';

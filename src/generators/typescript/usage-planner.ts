@@ -95,7 +95,7 @@ export type TypeScriptUsageRenderMode = 'readme' | 'test';
 
 export interface TypeScriptUsageVariable {
   name: string;
-  kind: 'path' | 'body' | 'params' | 'headers' | 'parameter';
+  kind: 'path' | 'body' | 'query' | 'params' | 'headers' | 'parameter';
   initializerByMode: Record<TypeScriptUsageRenderMode, string>;
 }
 
@@ -116,6 +116,7 @@ export interface TypeScriptUsagePlan {
   requestBodyMediaType?: string;
   variables: TypeScriptUsageVariable[];
   callExpression: string;
+  capturedParamsVariableName?: string;
   headerExpectations: TypeScriptUsageExpectation[];
 }
 
@@ -178,12 +179,14 @@ export class TypeScriptUsagePlanner {
     const variables: TypeScriptUsageVariable[] = [];
     const callArguments: string[] = [];
     const headerExpectations: TypeScriptUsageExpectation[] = [];
+    let capturedParamsVariableName: string | undefined;
+    const headerVariableNames: string[] = [];
 
     const pathParams = extractPathParams(operation.path);
     const pathParamNames = createUniqueIdentifierMap(
       pathParams,
       (value) => toSafeCamelIdentifier(value, TYPESCRIPT_RESERVED_WORDS),
-      ['body', 'params', 'headers'],
+      ['body', 'params', 'query', 'headers'],
     );
     for (let index = 0; index < pathParams.length; index += 1) {
       const variableName = pathParamNames.get(pathParams[index]) || toUsageIdentifier(pathParams[index], 'pathParam', index + 1);
@@ -214,17 +217,6 @@ export class TypeScriptUsagePlanner {
 
     const allParameters = resolveConcreteParameters(operation);
     const queryParams = allParameters.filter((parameter) => parameter?.in === 'query');
-    if (queryParams.length > 0) {
-      variables.push({
-        name: 'params',
-        kind: 'params',
-        initializerByMode: {
-          readme: renderObjectLiteral(this.ctx, queryParams),
-          test: renderObjectLiteral(this.ctx, queryParams),
-        },
-      });
-      callArguments.push('params');
-    }
 
     const headerParams = allParameters.filter((parameter) => parameter?.in === 'header' || parameter?.in === 'cookie');
     const headerParameterKeys = headerParams.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);
@@ -234,7 +226,7 @@ export class TypeScriptUsagePlanner {
     const headerParameterNames = createUniqueIdentifierMap(
       headerParameterKeys,
       (key) => toSafeCamelIdentifier(rawHeaderNameByKey.get(key) || 'value', TYPESCRIPT_RESERVED_WORDS),
-      [...variables.map((variable) => variable.name), 'body', 'params', 'headers'],
+      [...variables.map((variable) => variable.name), 'body', 'params', 'query', 'headers'],
     );
     for (let index = 0; index < headerParams.length; index += 1) {
       const parameter = headerParams[index];
@@ -253,13 +245,55 @@ export class TypeScriptUsagePlanner {
           test: sampleValue,
         },
       });
-      callArguments.push(variableName);
+      headerVariableNames.push(variableName);
       headerExpectations.push({
         name: parameter.in === 'cookie' ? 'Cookie' : parameter.name,
         expected: extractLiteralString(sampleValue) || parameter.name || `value${variables.length}`,
         source: variableName,
         cookie: parameter.in === 'cookie',
       });
+    }
+
+    if (queryParams.length > 0 && headerParams.length === 0) {
+      variables.push({
+        name: 'params',
+        kind: 'params',
+        initializerByMode: {
+          readme: renderObjectLiteral(this.ctx, queryParams),
+          test: renderObjectLiteral(this.ctx, queryParams),
+        },
+      });
+      callArguments.push('params');
+      capturedParamsVariableName = 'params';
+    } else if (queryParams.length > 0 && headerParams.length > 0) {
+      variables.push({
+        name: 'query',
+        kind: 'query',
+        initializerByMode: {
+          readme: renderObjectLiteral(this.ctx, queryParams),
+          test: renderObjectLiteral(this.ctx, queryParams),
+        },
+      });
+      variables.push({
+        name: 'params',
+        kind: 'params',
+        initializerByMode: {
+          readme: renderMergedCallParamsLiteral(queryParams, headerVariableNames),
+          test: renderMergedCallParamsLiteral(queryParams, headerVariableNames),
+        },
+      });
+      callArguments.push('params');
+      capturedParamsVariableName = 'query';
+    } else if (headerParams.length > 0) {
+      variables.push({
+        name: 'params',
+        kind: 'params',
+        initializerByMode: {
+          readme: renderMergedCallParamsLiteral([], headerVariableNames),
+          test: renderMergedCallParamsLiteral([], headerVariableNames),
+        },
+      });
+      callArguments.push('params');
     }
 
     return {
@@ -272,6 +306,7 @@ export class TypeScriptUsagePlanner {
       requestBodyMediaType: requestBodyInfo?.mediaType,
       variables,
       callExpression: `client.${clientPropertyPath.join('.')}.${methodName}(${callArguments.join(', ')})`,
+      capturedParamsVariableName,
       headerExpectations,
     };
   }
@@ -419,7 +454,7 @@ export function buildTypeScriptResourceTree(
     node.operations.push(operation);
   }
 
-  if (config && usesNestedResourceSurface(config)) {
+  if (usesNestedResourceSurfaceForOperations(config, operations)) {
     dedupeResourceTreeOperations(root, tag, config);
   }
 
@@ -436,7 +471,7 @@ export function resolveTypeScriptOperationSurfaces(
     return new Map<GeneratedApiOperation, TypeScriptOperationSurface>();
   }
 
-  if (!usesNestedResourceSurface(config)) {
+  if (!usesNestedResourceSurfaceForOperations(config, operations)) {
     const methodNames = resolveTypeScriptMethodNames(tag, operations, config);
     return new Map(operations.map((operation) => [operation, {
       clientPropertyPath: [metadata.clientPropertyName],
@@ -603,12 +638,39 @@ function usesNestedResourceSurface(config?: GeneratorConfig): boolean {
   return config?.sdkType === 'ai' || config?.options?.standardProfile === 'sdkwork-v3';
 }
 
+export function operationRequestsNestedResourceSurface(operation: GeneratedApiOperation | undefined): boolean {
+  if (!operation || typeof operation !== 'object') {
+    return false;
+  }
+  const operationRecord = operation as unknown as Record<string, unknown>;
+  return operationRecord['x-sdk-nested-resource-surface'] === true
+    || operationRecord['x-sdk-resource-surface'] === 'nested'
+    || operationRecord['x-sdkwork-resource-surface'] === 'nested';
+}
+
+export function operationsRequestNestedResourceSurface(operations: GeneratedApiOperation[]): boolean {
+  return Array.isArray(operations) && operations.some(operationRequestsNestedResourceSurface);
+}
+
+export function usesNestedResourceSurfaceForOperations(
+  config: GeneratorConfig | undefined,
+  operations: GeneratedApiOperation[],
+): boolean {
+  return usesNestedResourceSurface(config) || operationsRequestNestedResourceSurface(operations);
+}
+
 function resolveDottedOperationActionName(
   operation: GeneratedApiOperation,
   config?: GeneratorConfig,
   resourcePathSegments?: string[],
 ): string {
-  if (config?.options?.standardProfile !== 'sdkwork-v3' || !resourcePathSegments?.length) {
+  if (
+    config?.options?.standardProfile !== 'sdkwork-v3'
+    && !operationRequestsNestedResourceSurface(operation)
+  ) {
+    return '';
+  }
+  if (!resourcePathSegments?.length) {
     return '';
   }
 
@@ -735,7 +797,7 @@ function resolveRootResourceSegment(
 function dedupeResourceTreeOperations(
   node: TypeScriptResourceNode,
   tag: string,
-  config: GeneratorConfig,
+  config?: GeneratorConfig,
 ): void {
   node.operations = selectCanonicalResourceOperations(node.operations, tag, config, node.resourcePathSegments);
   for (const child of node.children) {
@@ -746,7 +808,7 @@ function dedupeResourceTreeOperations(
 function selectCanonicalResourceOperations(
   operations: GeneratedApiOperation[],
   tag: string,
-  config: GeneratorConfig,
+  config: GeneratorConfig | undefined,
   resourcePathSegments: string[],
 ): GeneratedApiOperation[] {
   if (operations.length <= 1) {
@@ -763,7 +825,7 @@ function selectCanonicalResourceOperations(
       config,
       resourcePathSegments,
     );
-    const score = scoreOperationPathForConfiguredPrefix(operation.path, config.apiPrefix);
+    const score = scoreOperationPathForConfiguredPrefix(operation.path, config?.apiPrefix);
     const existing = selectedByMethodName.get(methodName);
     if (!existing || score > existing.score || (score === existing.score && index < existing.index)) {
       selectedByMethodName.set(methodName, { operation, score, index });
@@ -781,6 +843,11 @@ function resolveOperationResourcePath(
   config: GeneratorConfig | undefined,
   fallbackRootSegment: string,
 ): string[] {
+  const operationIdResourcePath = resolveSdkworkV3OperationResourcePath(operation, config, fallbackRootSegment);
+  if (operationIdResourcePath.length > 0) {
+    return operationIdResourcePath;
+  }
+
   const relativeSegments = getRelativePathSegments(operation.path, config?.apiPrefix);
   const tagParts = stripGenericTagSuffix(toIdentifierParts(tag));
   let resourceIndex = findResourceSegmentIndex(relativeSegments, tagParts);
@@ -802,6 +869,39 @@ function resolveOperationResourcePath(
   }
 
   return resourceSegments.length > 0 ? resourceSegments : [fallbackRootSegment];
+}
+
+function resolveSdkworkV3OperationResourcePath(
+  operation: GeneratedApiOperation,
+  config: GeneratorConfig | undefined,
+  fallbackRootSegment: string,
+): string[] {
+  if (
+    config?.options?.standardProfile !== 'sdkwork-v3'
+    && !operationRequestsNestedResourceSurface(operation)
+  ) {
+    return [];
+  }
+
+  const operationId = String(operation.operationId || '').trim();
+  if (!operationId.includes('.')) {
+    return [];
+  }
+
+  const parts = operationId.split('.').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) {
+    return [];
+  }
+
+  const resourceParts = parts.slice(0, -1).map((part) => normalizeStaticSegment(part)).filter(Boolean);
+  const rootSegment = normalizeStaticSegment(fallbackRootSegment);
+  if (!rootSegment) {
+    return resourceParts;
+  }
+  if (resourceParts.length > 0 && canonicalResourcePart(resourceParts[0]) === canonicalResourcePart(rootSegment)) {
+    return resourceParts;
+  }
+  return resourceParts.length > 0 ? [rootSegment, ...resourceParts] : [rootSegment];
 }
 
 function resourcePathKey(segments: string[]): string {
@@ -1081,6 +1181,25 @@ function renderObjectLiteral(ctx: SchemaContext, parameters: ApiParameter[]): st
     const value = sampleValueForParameter(ctx, parameter, index);
     return `  ${key}: ${value},`;
   });
+  return ['{', ...lines, '}'].join('\n');
+}
+
+function renderMergedCallParamsLiteral(queryParams: ApiParameter[], headerVariableNames: string[]): string {
+  const lines: string[] = [];
+
+  if (queryParams.length > 0) {
+    lines.push('  ...query,');
+  }
+
+  for (const variableName of headerVariableNames) {
+    const headerKey = formatObjectKey(variableName);
+    lines.push(`  ${headerKey},`);
+  }
+
+  if (lines.length === 0) {
+    return '{}';
+  }
+
   return ['{', ...lines, '}'].join('\n');
 }
 

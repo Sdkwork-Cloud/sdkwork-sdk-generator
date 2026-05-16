@@ -8,7 +8,9 @@ export class BuildConfigGenerator {
         const crateName = getRustCrateName(config);
         return {
             path: 'Cargo.toml',
-            content: this.format(`[package]
+            content: this.format(`[workspace]
+
+[package]
 name = "${packageName}"
 version = "${config.version}"
 edition = "2021"

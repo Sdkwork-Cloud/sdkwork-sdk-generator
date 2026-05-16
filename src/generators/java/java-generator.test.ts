@@ -165,6 +165,42 @@ const wrappedTypedResponseSpec: ApiSpec = {
   },
 };
 
+const javaExplicitQuerySpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Java Explicit Query Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/finance/usage_statements': {
+      get: {
+        summary: 'List usage statements',
+        operationId: 'usageStatements.list',
+        tags: ['Finance'],
+        parameters: [
+          {
+            name: 'filter',
+            in: 'query',
+            required: false,
+            style: 'deepObject',
+            explode: true,
+            schema: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+            },
+          },
+        ],
+        responses: {
+          '204': {
+            description: 'No content',
+          },
+        },
+      },
+    },
+  },
+  components: { schemas: {} },
+};
+
 describe('Java generator regressions', () => {
   it('applies explicit namespace and Maven coordinates consistently', async () => {
     const generator = getGenerator('java' as any);
@@ -286,5 +322,20 @@ describe('Java generator regressions', () => {
     expect(smokeTestFile!.content).toContain('assertNotNull(result.getData());');
     expect(smokeTestFile!.content).toContain('assertEquals("ok", result.getCode());');
     expect(smokeTestFile!.content).not.toContain('assertEquals("data", result.getData());');
+  });
+
+  it('emits urlEncode with query serialization helpers even without headers', async () => {
+    const generator = getGenerator('java' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(javaConfig, javaExplicitQuerySpec);
+    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/app/api/FinanceApi.java');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('private static String buildQueryString(List<QueryParameterSpec> parameters)');
+    expect(apiFile!.content).toContain('private static String encodeQueryValue(String value, boolean allowReserved)');
+    expect(apiFile!.content).toContain('private static String urlEncode(String value)');
+    expect(apiFile!.content).toContain('return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);');
   });
 });

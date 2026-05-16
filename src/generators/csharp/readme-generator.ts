@@ -47,7 +47,7 @@ client.SetAuthToken("your-auth-token");
 client.SetAccessToken("your-access-token");
 // Sends:
 // Authorization: Bearer <authToken>
-// Access-Token: <accessToken>`,
+// Sdkwork-Access-Token: <accessToken>`,
       apiKeyCall: 'SetApiKey(...)',
       authTokenCall: 'SetAuthToken(...)',
       accessTokenCall: 'SetAccessToken(...)',

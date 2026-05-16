@@ -19,6 +19,27 @@ export const SDKWORK_GENERATOR_CHANGES_PATH = `${SDKWORK_STATE_DIR}/sdkwork-gene
 export const SDKWORK_MANUAL_BACKUP_DIR = `${SDKWORK_STATE_DIR}/manual-backups`;
 export const SDKWORK_GENERATOR_NAME = '@sdkwork/sdk-generator';
 const PROTECTED_OUTPUT_ROOTS = new Set([SDKWORK_STATE_DIR, 'custom']);
+const PROTECTED_GENERATED_SCAN_ROOTS = new Set([
+  SDKWORK_STATE_DIR,
+  'custom',
+  'node_modules',
+  'build',
+  'dist',
+  'target',
+]);
+const GENERATED_ROOT_FILE_EXTENSIONS = new Set([
+  '.cs',
+  '.dart',
+  '.go',
+  '.java',
+  '.kt',
+  '.php',
+  '.py',
+  '.rb',
+  '.rs',
+  '.swift',
+  '.ts',
+]);
 
 const TRANSIENT_FS_ERROR_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const MAX_FS_RETRIES = 5;
@@ -170,6 +191,21 @@ export function syncGeneratedOutput(
         }
         deletedGeneratedFiles += 1;
         deletedGeneratedFilesByPath.add(entry.path);
+      }
+    }
+    for (const stalePath of collectStaleGeneratedRootFiles(outDir, generatedFiles, previousManifest, nextGeneratedPaths)) {
+      if (deletedGeneratedFilesByPath.has(stalePath)) {
+        continue;
+      }
+      backupExistingFile(outDir, stalePath, undefined, undefined, backedUpFiles, dryRun);
+      const targetPath = resolveOutputPath(outDir, stalePath);
+      if (fs.existsSync(targetPath)) {
+        if (!dryRun) {
+          withFsRetry(() => fs.rmSync(targetPath, { force: true }));
+          cleanupEmptyParents(outDir, path.dirname(targetPath));
+        }
+        deletedGeneratedFiles += 1;
+        deletedGeneratedFilesByPath.add(stalePath);
       }
     }
   }
@@ -447,6 +483,138 @@ function backupExistingFile(
   withFsRetry(() => fs.writeFileSync(backupPath, currentContent, 'utf-8'));
 }
 
+function collectStaleGeneratedRootFiles(
+  outputDir: string,
+  generatedFiles: GeneratedFile[],
+  previousManifest: PersistedGeneratorManifest,
+  nextGeneratedPaths: Set<string>
+): string[] {
+  const roots = resolveGeneratedScanRoots(generatedFiles, previousManifest);
+  if (roots.length === 0) {
+    return [];
+  }
+
+  const stalePaths: string[] = [];
+  for (const root of roots) {
+    const rootPath = resolveOutputPath(outputDir, root);
+    if (!fs.existsSync(rootPath) || !fs.statSync(rootPath).isDirectory()) {
+      continue;
+    }
+    walkGeneratedRoot(outputDir, rootPath, (relativePath) => {
+      if (nextGeneratedPaths.has(relativePath)) {
+        return;
+      }
+      if (previousManifest.scaffoldFiles.includes(relativePath)) {
+        return;
+      }
+      stalePaths.push(relativePath);
+    });
+  }
+  return sortPaths(Array.from(new Set(stalePaths)));
+}
+
+function resolveGeneratedScanRoots(
+  generatedFiles: GeneratedFile[],
+  previousManifest: PersistedGeneratorManifest
+): string[] {
+  const roots = new Set<string>();
+  for (const filePath of [
+    ...generatedFiles.map((file) => file.path),
+    ...previousManifest.generatedFiles.map((entry) => entry.path),
+  ]) {
+    const root = generatedScanRootForPath(filePath);
+    if (root) {
+      roots.add(root);
+    }
+  }
+  return sortPaths(Array.from(roots));
+}
+
+function generatedScanRootForPath(relativePath: string): string | null {
+  const segments = relativePath.split('/').filter(Boolean);
+  if (segments.length === 0 || PROTECTED_GENERATED_SCAN_ROOTS.has(segments[0])) {
+    return null;
+  }
+
+  if (['api', 'types', 'models', 'Api', 'Models'].includes(segments[0])) {
+    return segments[0];
+  }
+  if (segments[0] === 'lib' && segments.length >= 4 && ['api', 'models'].includes(segments[segments.length - 2])) {
+    return segments.slice(0, segments.length - 1).join('/');
+  }
+  if (segments[0] === 'lib' && segments.length >= 3 && segments[1] === 'src') {
+    if (segments[2] === 'api.dart') {
+      return 'lib/src/api';
+    }
+    if (segments[2] === 'models.dart') {
+      return 'lib/src/models';
+    }
+    if (['api', 'models'].includes(segments[2])) {
+      return `lib/src/${segments[2]}`;
+    }
+  }
+  if (segments[0] === 'Sources' && segments.length >= 2) {
+    if (segments[1] === 'API.swift') {
+      return 'Sources/API';
+    }
+    if (segments[1] === 'Models.swift') {
+      return 'Sources/Models';
+    }
+    if (['API', 'Models'].includes(segments[1])) {
+      return `Sources/${segments[1]}`;
+    }
+  }
+  if (segments[0] === 'src' && segments.length >= 2 && ['api', 'types', 'Api', 'Models'].includes(segments[1])) {
+    return `src/${segments[1]}`;
+  }
+  if (segments[0] === 'src' && segments.length >= 3 && segments[1] === 'models') {
+    return 'src/models';
+  }
+  if (segments[0] === 'src' && segments.length >= 4 && ['main', 'test'].includes(segments[1]) && ['java', 'kotlin'].includes(segments[2])) {
+    const apiIndex = segments.indexOf('api', 3);
+    if (apiIndex >= 3) {
+      return segments.slice(0, apiIndex + 1).join('/');
+    }
+    const modelIndex = segments.indexOf('model', 3);
+    if (modelIndex >= 3) {
+      return segments.slice(0, modelIndex + 1).join('/');
+    }
+    return segments.slice(0, segments.length - 1).join('/');
+  }
+  if (segments[0] === 'lib' && segments.length >= 3 && segments[1] === 'src' && ['api', 'models'].includes(segments[2])) {
+    return `lib/src/${segments[2]}`;
+  }
+  if (segments[0] === 'Sources' && segments.length >= 2 && ['API', 'Models'].includes(segments[1])) {
+    return `Sources/${segments[1]}`;
+  }
+  if (segments[0] === 'sdkwork_app_sdk' && segments.length >= 2 && ['api', 'models'].includes(segments[1])) {
+    return `sdkwork_app_sdk/${segments[1]}`;
+  }
+  if (segments[0] === 'sdkwork_backend_sdk' && segments.length >= 2 && ['api', 'models'].includes(segments[1])) {
+    return `sdkwork_backend_sdk/${segments[1]}`;
+  }
+  return null;
+}
+
+function walkGeneratedRoot(outputDir: string, currentPath: string, onFile: (relativePath: string) => void): void {
+  for (const entry of fs.readdirSync(currentPath, { withFileTypes: true })) {
+    const entryPath = path.join(currentPath, entry.name);
+    const relativePath = normalizePathSeparators(path.relative(outputDir, entryPath));
+    const firstSegment = relativePath.split('/')[0];
+    if (PROTECTED_GENERATED_SCAN_ROOTS.has(firstSegment)) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      walkGeneratedRoot(outputDir, entryPath, onFile);
+      continue;
+    }
+    if (!entry.isFile() || !GENERATED_ROOT_FILE_EXTENSIONS.has(path.extname(entry.name))) {
+      continue;
+    }
+    onFile(relativePath);
+  }
+}
+
 function cleanupEmptyParents(outputDir: string, startDir: string): void {
   const outputRoot = path.resolve(outputDir);
   let current = startDir;
@@ -459,7 +627,7 @@ function cleanupEmptyParents(outputDir: string, startDir: string): void {
     if (fs.readdirSync(current).length > 0) {
       return;
     }
-    withFsRetry(() => fs.rmSync(current, { recursive: false, force: true }));
+    withFsRetry(() => fs.rmdirSync(current));
     current = path.dirname(current);
   }
 }
@@ -604,6 +772,10 @@ function normalizeRelativePath(path: string): string {
   }
 
   return normalized;
+}
+
+function normalizePathSeparators(relativePath: string): string {
+  return relativePath.replace(/\\/g, '/');
 }
 
 function validateProtectedOutputPath(

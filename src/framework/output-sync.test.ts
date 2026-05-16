@@ -337,6 +337,166 @@ describe('output sync', () => {
     expect(readFileSync(join(outputDir, 'src/index.ts'), 'utf-8')).toBe('export const generated = true;\n');
   });
 
+  it('prunes stale generated-root files once a generator manifest exists', () => {
+    const outputDir = createTempDir();
+    const firstGeneration: GeneratedFile[] = [
+      {
+        path: 'src/api/current.ts',
+        content: 'export const current = true;\n',
+        language: 'typescript',
+      },
+      {
+        path: 'src/api/legacy.ts',
+        content: 'export const legacy = true;\n',
+        language: 'typescript',
+      },
+      {
+        path: 'custom/README.md',
+        content: '# Custom Code\n',
+        language: 'typescript',
+        ownership: 'scaffold',
+        overwriteStrategy: 'if-missing',
+      },
+    ];
+
+    syncGeneratedOutput(outputDir, firstGeneration, {
+      cleanGenerated: true,
+      sdk: sdkMetadata,
+    });
+
+    writeFileSync(join(outputDir, 'src/api/orphan.ts'), 'stale generated file without manifest entry\n', 'utf-8');
+    writeFileSync(join(outputDir, 'custom/manual.ts'), 'manual extension\n', 'utf-8');
+
+    const summary = syncGeneratedOutput(
+      outputDir,
+      [
+        {
+          path: 'src/api/current.ts',
+          content: 'export const current = true;\n',
+          language: 'typescript',
+        },
+        {
+          path: 'custom/README.md',
+          content: '# Custom Code\n',
+          language: 'typescript',
+          ownership: 'scaffold',
+          overwriteStrategy: 'if-missing',
+        },
+      ],
+      {
+        cleanGenerated: true,
+        sdk: sdkMetadata,
+      }
+    );
+
+    expect(readFileSync(join(outputDir, 'src/api/current.ts'), 'utf-8')).toBe('export const current = true;\n');
+    expect(existsSync(join(outputDir, 'src/api/legacy.ts'))).toBe(false);
+    expect(existsSync(join(outputDir, 'src/api/orphan.ts'))).toBe(false);
+    expect(readFileSync(join(outputDir, 'custom/manual.ts'), 'utf-8')).toBe('manual extension\n');
+    expect(summary.changes.deletedGeneratedFiles).toEqual(['src/api/legacy.ts', 'src/api/orphan.ts']);
+  });
+
+  it('prunes stale files from language-specific generated api and model roots', () => {
+    const outputDir = createTempDir();
+    const firstGeneration: GeneratedFile[] = [
+      {
+        path: 'lib/src/api.dart',
+        content: 'export "api/current.dart";\n',
+        language: 'dart',
+      },
+      {
+        path: 'lib/src/models.dart',
+        content: 'export "models/current.dart";\n',
+        language: 'dart',
+      },
+      {
+        path: 'Sources/API.swift',
+        content: 'public enum API {}\n',
+        language: 'swift',
+      },
+      {
+        path: 'Sources/Models.swift',
+        content: 'public struct Current {}\n',
+        language: 'swift',
+      },
+      {
+        path: 'Api/CurrentApi.cs',
+        content: 'public class CurrentApi {}\n',
+        language: 'csharp',
+      },
+      {
+        path: 'Models/Current.cs',
+        content: 'public class Current {}\n',
+        language: 'csharp',
+      },
+      {
+        path: 'src/main/java/com/sdkwork/app/api/CurrentApi.java',
+        content: 'class CurrentApi {}\n',
+        language: 'java',
+      },
+      {
+        path: 'src/main/java/com/sdkwork/app/model/Current.java',
+        content: 'class Current {}\n',
+        language: 'java',
+      },
+      {
+        path: 'src/main/kotlin/com/sdkwork/app/Current.kt',
+        content: 'class Current\n',
+        language: 'kotlin',
+      },
+      {
+        path: 'lib/sdkwork/app/api/current_api.rb',
+        content: 'class CurrentApi\nend\n',
+        language: 'ruby',
+      },
+      {
+        path: 'lib/sdkwork/app/models/current.rb',
+        content: 'class Current\nend\n',
+        language: 'ruby',
+      },
+    ];
+
+    syncGeneratedOutput(outputDir, firstGeneration, {
+      cleanGenerated: true,
+      sdk: sdkMetadata,
+    });
+
+    mkdirSync(join(outputDir, 'lib/src/api'), { recursive: true });
+    mkdirSync(join(outputDir, 'lib/src/models'), { recursive: true });
+    mkdirSync(join(outputDir, 'Sources/API'), { recursive: true });
+    mkdirSync(join(outputDir, 'Sources/Models'), { recursive: true });
+    writeFileSync(join(outputDir, 'lib/src/api/orphan.dart'), 'stale dart api\n', 'utf-8');
+    writeFileSync(join(outputDir, 'lib/src/models/orphan.dart'), 'stale dart model\n', 'utf-8');
+    writeFileSync(join(outputDir, 'Sources/API/OrphanApi.swift'), 'stale swift api\n', 'utf-8');
+    writeFileSync(join(outputDir, 'Sources/Models/Orphan.swift'), 'stale swift model\n', 'utf-8');
+    writeFileSync(join(outputDir, 'Api/LegacyApi.cs'), 'stale csharp api\n', 'utf-8');
+    writeFileSync(join(outputDir, 'Models/Legacy.cs'), 'stale csharp model\n', 'utf-8');
+    writeFileSync(join(outputDir, 'src/main/java/com/sdkwork/app/api/LegacyApi.java'), 'stale java api\n', 'utf-8');
+    writeFileSync(join(outputDir, 'src/main/java/com/sdkwork/app/model/Legacy.java'), 'stale java model\n', 'utf-8');
+    writeFileSync(join(outputDir, 'src/main/kotlin/com/sdkwork/app/Legacy.kt'), 'stale kotlin model\n', 'utf-8');
+    writeFileSync(join(outputDir, 'lib/sdkwork/app/api/legacy_api.rb'), 'stale ruby api\n', 'utf-8');
+    writeFileSync(join(outputDir, 'lib/sdkwork/app/models/legacy.rb'), 'stale ruby model\n', 'utf-8');
+
+    const summary = syncGeneratedOutput(outputDir, firstGeneration, {
+      cleanGenerated: true,
+      sdk: sdkMetadata,
+    });
+
+    expect(summary.changes.deletedGeneratedFiles).toEqual([
+      'Api/LegacyApi.cs',
+      'lib/sdkwork/app/api/legacy_api.rb',
+      'lib/sdkwork/app/models/legacy.rb',
+      'lib/src/api/orphan.dart',
+      'lib/src/models/orphan.dart',
+      'Models/Legacy.cs',
+      'Sources/API/OrphanApi.swift',
+      'Sources/Models/Orphan.swift',
+      'src/main/java/com/sdkwork/app/api/LegacyApi.java',
+      'src/main/java/com/sdkwork/app/model/Legacy.java',
+      'src/main/kotlin/com/sdkwork/app/Legacy.kt',
+    ]);
+  });
+
   it('supports dry-run previews without modifying the filesystem', () => {
     const outputDir = createTempDir();
     const initialFiles: GeneratedFile[] = [

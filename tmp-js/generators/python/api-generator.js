@@ -1,10 +1,10 @@
 import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
-import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
-import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
+import { resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
+import { buildPythonResourceTree, resolvePythonMethodNames, usesPythonNestedResourceSurfaceForOperations, } from './usage-planner.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 export class ApiGenerator {
     generate(ctx, config) {
@@ -25,21 +25,10 @@ export class ApiGenerator {
         operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);
         const className = `${PYTHON_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
         const fileName = PYTHON_CONFIG.namingConventions.fileName(resolvedTagName);
-        const scopedMethodNames = resolveOpenAIStyleMethodNames(tag, operations, config, PYTHON_CONFIG, 'snake')
-            || resolveScopedMethodNames(operations, (op) => this.generateOperationId(op.method, op.path, op, tag));
-        const methodNames = new Map();
-        for (const op of operations) {
-            const scopedName = scopedMethodNames.get(op) || 'operation';
-            methodNames.set(op, PYTHON_CONFIG.namingConventions.methodName(scopedName));
-        }
         const referencedModels = new Set();
-        const methods = operations
-            .map((op) => {
-            const generated = this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels);
-            generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
-            return generated.content;
-        })
-            .join('\n\n');
+        const methods = usesPythonNestedResourceSurfaceForOperations(config, operations)
+            ? this.generateResourceClasses(buildPythonResourceTree(tag, operations, resolvedTagName, config), tag, config, knownModels, referencedModels)
+            : this.generateFlatApiClass(tag, className, operations, config, knownModels, referencedModels);
         const needsRequestHeaderHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -72,6 +61,22 @@ ${needsPathSerializationHelpers ? this.generatePathSerializationHelpers() : ''}
 ${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
 ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
 
+${methods}
+`),
+            language: 'python',
+            description: `${tag} API module`,
+        };
+    }
+    generateFlatApiClass(tag, className, operations, config, knownModels, referencedModels) {
+        const methodNames = resolvePythonMethodNames(tag, operations, config);
+        const methods = operations
+            .map((op) => {
+            const generated = this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels);
+            generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
+            return generated.content;
+        })
+            .join('\n\n');
+        return `
 class ${className}:
     """${tag} API client."""
     
@@ -79,10 +84,37 @@ class ${className}:
         self._client = client
 
 ${methods}
-`),
-            language: 'python',
-            description: `${tag} API module`,
-        };
+`;
+    }
+    generateResourceClasses(root, tag, config, knownModels, referencedModels) {
+        return this.flattenResourceNodes(root)
+            .map((node) => this.generateResourceClass(node, tag, config, knownModels, referencedModels))
+            .join('\n\n');
+    }
+    generateResourceClass(node, tag, config, knownModels, referencedModels) {
+        const methodNames = resolvePythonMethodNames(tag, node.operations, config, node.resourcePathSegments);
+        const childInitializers = node.children
+            .map((child) => `        self.${child.propertyName} = ${child.className}(client)`)
+            .join('\n');
+        const generatedMethods = node.operations
+            .map((op) => {
+            const generated = this.generateMethod(op, config, methodNames.get(op) || 'operation', knownModels);
+            generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
+            return generated.content;
+        });
+        const methods = generatedMethods.join('\n\n');
+        return `class ${node.className}:
+    """${tag} ${node.resourcePathSegments.join('.')} API client."""
+
+    def __init__(self, client: HttpClient):
+        self._client = client${childInitializers ? `\n${childInitializers}` : ''}
+${methods ? `\n\n${methods}` : ''}`;
+    }
+    flattenResourceNodes(root) {
+        return [
+            root,
+            ...root.children.flatMap((child) => this.flattenResourceNodes(child)),
+        ];
     }
     generateMethod(op, config, methodName, knownModels) {
         const rawPathParams = this.extractPathParams(op.path);
@@ -590,26 +622,6 @@ def serialize_header_object(value: Dict[str, Any], explode: bool) -> str:
 def serialize_header_primitive(value: Any) -> str:
     return str(value)
 `;
-    }
-    generateOperationId(method, path, op, tag) {
-        if (op.operationId) {
-            const normalized = normalizeOperationId(op.operationId);
-            return PYTHON_CONFIG.namingConventions.methodName(stripTagPrefixFromOperationId(normalized, tag));
-        }
-        const pathParts = path.split('/').filter(Boolean);
-        const resource = pathParts[pathParts.length - 1]?.replace(/[{}]/g, '') || 'resource';
-        const actionMap = {
-            get: path.includes('{') ? 'get' : 'list',
-            post: 'create',
-            put: 'update',
-            patch: 'patch',
-            delete: 'delete',
-            options: 'options',
-            head: 'head',
-            trace: 'trace',
-            query: 'query',
-        };
-        return `${actionMap[method] || method}_${PYTHON_CONFIG.namingConventions.propertyName(resource)}`;
     }
     extractPathParams(path) {
         const matches = path.match(/\{([^}]+)\}/g) || [];

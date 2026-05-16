@@ -59,8 +59,12 @@ ${assertions}
         if (plan.variables.some((variable) => variable.kind === 'body')) {
             assertions.push('assert.deepEqual(captured.body, body);');
         }
-        if (plan.variables.some((variable) => variable.kind === 'params')) {
-            assertions.push('assert.deepEqual(captured.params, params);');
+        const queryVariable = plan.variables.find((variable) => variable.kind === 'query')?.name;
+        if (queryVariable) {
+            assertions.push(`assert.deepEqual(captured.params, ${queryVariable});`);
+        }
+        else if (plan.capturedParamsVariableName) {
+            assertions.push(`assert.deepEqual(captured.params, ${plan.capturedParamsVariableName});`);
         }
         if (plan.headerExpectations.length > 0) {
             assertions.push('assert.ok(captured.headers);');

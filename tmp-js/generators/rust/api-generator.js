@@ -55,6 +55,8 @@ export class ApiGenerator {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
         });
+        const needsJsonPrimitiveHelper = needsPathSerializationHelpers || needsQuerySerializationHelpers;
+        const needsPercentEncodeHelper = needsPathSerializationHelpers || needsQuerySerializationHelpers || needsRequestHeaderHelpers;
         const needsAppendQueryString = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'querystring')
@@ -88,7 +90,9 @@ ${this.indent(methods, 4)}
 }
 ${needsPathSerializationHelpers ? `\n${this.generatePathSerializationHelpers()}` : ''}
 ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
-${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}`),
+${needsQuerySerializationHelpers ? `\n${this.generateQuerySerializationHelpers()}` : ''}
+${needsJsonPrimitiveHelper ? `\n${this.generatePrimitiveToStringHelper()}` : ''}
+${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
             language: 'rust',
             description: `${apiName.tag} Rust API module`,
         };
@@ -482,15 +486,6 @@ fn append_deep_object_parameter(
     }
 }
 
-fn primitive_to_string(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(value) => value.clone(),
-        serde_json::Value::Number(value) => value.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        other => other.to_string(),
-    }
-}
-
 fn encode_query_value(value: &str, allow_reserved: bool) -> String {
     let mut encoded = percent_encode(value);
     if !allow_reserved {
@@ -610,7 +605,6 @@ fn path_primitive_prefix(name: &str, style: &str) -> String {
     generateRequestHeaderHelpers() {
         return `struct HeaderParameterSpec {
     value: serde_json::Value,
-    style: &'static str,
     explode: bool,
     content_type: Option<&'static str>,
 }
@@ -618,13 +612,12 @@ fn path_primitive_prefix(name: &str, style: &str) -> String {
 impl HeaderParameterSpec {
     fn new<T: serde::Serialize>(
         value: T,
-        style: &'static str,
+        _style: &'static str,
         explode: bool,
         content_type: Option<&'static str>,
     ) -> Self {
         Self {
             value: serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
-            style,
             explode,
             content_type,
         }
@@ -721,9 +714,20 @@ fn serialize_json_value(value: &serde_json::Value) -> Option<String> {
         serde_json::Value::Bool(value) => Some(value.to_string()),
         other => Some(other.to_string()),
     }
-}
-
-fn percent_encode(value: &str) -> String {
+}`;
+    }
+    generatePrimitiveToStringHelper() {
+        return `fn primitive_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        other => other.to_string(),
+    }
+}`;
+    }
+    generatePercentEncodeHelper() {
+        return `fn percent_encode(value: &str) -> String {
     value
         .bytes()
         .flat_map(|byte| match byte {

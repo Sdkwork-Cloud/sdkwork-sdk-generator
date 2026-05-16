@@ -227,6 +227,65 @@ const rustReservedTagSpec: ApiSpec = {
   },
 };
 
+const rustPathOnlySerializationSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Rust Path Only Serialization Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/items/{itemId}': {
+      get: {
+        summary: 'Get item',
+        operationId: 'items.retrieve',
+        tags: ['Item'],
+        parameters: [
+          {
+            name: 'itemId',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: { schemas: {} },
+};
+
+const rustQueryOnlySerializationSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Rust Query Only Serialization Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/items': {
+      get: {
+        summary: 'List items',
+        operationId: 'items.list',
+        tags: ['Item'],
+        parameters: [
+          {
+            name: 'filter',
+            in: 'query',
+            required: false,
+            style: 'deepObject',
+            explode: true,
+            schema: {
+              type: 'object',
+              additionalProperties: { type: 'string' },
+            },
+          },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: { schemas: {} },
+};
+
 describe('Rust generator', () => {
   it('emits rust smoke tests and aligns README quick start when generateTests is enabled', async () => {
     const generator = getGenerator('rust' as any);
@@ -300,6 +359,91 @@ describe('Rust generator', () => {
     expect(apiFile!.content).not.toContain('use reqwest::Method;');
     expect(apiFile!.content).not.toContain('Method::from_bytes');
     expect(apiFile!.content).not.toContain('append_query_string');
+  });
+
+  it('marks generated rust SDK crates as standalone workspaces for nested repository output', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rustConfig, rustSpec);
+    const cargoFile = result.files.find((file) => file.path === 'Cargo.toml');
+
+    expect(result.errors).toEqual([]);
+    expect(cargoFile).toBeDefined();
+    expect(cargoFile!.content).toContain('[workspace]');
+    expect(cargoFile!.content).toMatch(/\[workspace\]\s*\n\s*\[package\]/);
+  });
+
+  it('emits primitive and percent helpers for path-only rust serialization', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rustConfig, rustPathOnlySerializationSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/item.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('fn serialize_path_parameter<T: serde::Serialize>');
+    expect(apiFile!.content).toContain('fn primitive_to_string(value: &serde_json::Value) -> String');
+    expect(apiFile!.content).toContain('fn percent_encode(value: &str) -> String');
+  });
+
+  it('emits percent helpers for query-only rust serialization', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rustConfig, rustQueryOnlySerializationSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/item.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('fn build_query_string(parameters: &[QueryParameterSpec');
+    expect(apiFile!.content).toContain('fn primitive_to_string(value: &serde_json::Value) -> String');
+    expect(apiFile!.content).toContain('fn percent_encode(value: &str) -> String');
+  });
+
+  it('accepts header style arguments without storing unused rust header fields', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rustConfig, {
+      openapi: '3.1.0',
+      info: {
+        title: 'Rust Header Serialization Regression',
+        version: '1.0.0',
+      },
+      paths: {
+        '/app/v3/api/items': {
+          get: {
+            summary: 'List items',
+            operationId: 'items.list',
+            tags: ['Item'],
+            parameters: [
+              {
+                name: 'X-Trace-Parts',
+                in: 'header',
+                required: false,
+                style: 'simple',
+                explode: true,
+                schema: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: { schemas: {} },
+    });
+    const apiFile = result.files.find((file) => file.path === 'src/api/item.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('HeaderParameterSpec::new(x_trace_parts, "simple", true, None)');
+    expect(apiFile!.content).toContain('_style:');
+    expect(apiFile!.content).not.toContain("    style: &'static str,\n");
   });
 
   it('sanitizes reserved rust tag names across modules, client getters, docs, and tests', async () => {

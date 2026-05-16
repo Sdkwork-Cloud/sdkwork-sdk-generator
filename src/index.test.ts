@@ -333,7 +333,22 @@ describe('Generator registry', () => {
     expect(commonFile.content).toContain(
       "export type { Page, RequestConfig, RequestOptions, QueryParams } from '@sdkwork/sdk-common';",
     );
+    expect(commonFile.content).toContain('q?: string;');
+    expect(commonFile.content).not.toContain('keyword?: string;');
     expect(commonFile.content).not.toContain('PageResult');
+  });
+
+  it('should expose q as the shared free-text query field in generated common list forms', async () => {
+    const goResult = await new GoGenerator().generate({ ...baseConfig, language: 'go' }, mockSpec);
+    const goCommonFile = getGeneratedFile(goResult.files, 'types/common.go');
+    expect(goCommonFile.content).toContain('Q           string      `json:"q"`');
+    expect(goCommonFile.content).not.toContain('Keyword');
+    expect(goCommonFile.content).not.toContain('json:"keyword"');
+
+    const rustResult = await new RustGenerator().generate({ ...baseConfig, language: 'rust' }, mockSpec);
+    const rustCommonFile = getGeneratedFile(rustResult.files, 'src/models/common.rs');
+    expect(rustCommonFile.content).toContain('pub q: Option<String>,');
+    expect(rustCommonFile.content).not.toContain('pub keyword');
   });
 
   it('should generate closed empty TypeScript interfaces for sealed empty object schemas', async () => {
@@ -629,6 +644,14 @@ const sdkworkV3IamSpec: ApiSpec = {
         operationId: 'sessions.create',
         tags: ['auth'],
         security: [],
+        parameters: [
+          {
+            name: 'X-Request-Id',
+            in: 'header',
+            required: false,
+            schema: { type: 'string' },
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -700,6 +723,108 @@ const sdkworkV3IamSpec: ApiSpec = {
         },
       },
     },
+    '/app/v3/api/auth/sessions/refresh': {
+      post: {
+        summary: 'Refresh auth session',
+        operationId: 'sessions.refresh',
+        tags: ['auth'],
+        security: [{ AuthToken: [], SdkworkAccessToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RefreshSessionRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AuthSession' },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/app/v3/api/auth/verification_codes': {
+      post: {
+        summary: 'Create verification code',
+        operationId: 'verificationCodes.create',
+        tags: ['auth'],
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateVerificationCodeRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/VerificationCodeResult' },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/app/v3/api/auth/verification_codes/verify': {
+      post: {
+        summary: 'Verify verification code',
+        operationId: 'verificationCodes.verify',
+        tags: ['auth'],
+        security: [],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/VerifyVerificationCodeRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/VerificationCodeVerifyResult' },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -712,6 +837,38 @@ const sdkworkV3IamSpec: ApiSpec = {
         properties: {
           username: { type: 'string' },
           password: { type: 'string' },
+        },
+      },
+      RefreshSessionRequest: {
+        type: 'object',
+        properties: {
+          refreshToken: { type: 'string' },
+        },
+      },
+      CreateVerificationCodeRequest: {
+        type: 'object',
+        properties: {
+          target: { type: 'string' },
+          scene: { type: 'string' },
+        },
+      },
+      VerifyVerificationCodeRequest: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          target: { type: 'string' },
+        },
+      },
+      VerificationCodeResult: {
+        type: 'object',
+        properties: {
+          codeId: { type: 'string' },
+        },
+      },
+      VerificationCodeVerifyResult: {
+        type: 'object',
+        properties: {
+          verified: { type: 'boolean' },
         },
       },
       AuthSession: {
@@ -1919,6 +2076,38 @@ const composedHeaderParameterSpec: ApiSpec = {
   },
 };
 
+const queryHeaderParameterSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Query Header Parameter API', version: '1.0.0' },
+  paths: {
+    '/resources': {
+      get: {
+        summary: 'List resources',
+        operationId: 'listResources',
+        tags: ['Resource'],
+        parameters: [
+          {
+            name: 'page',
+            in: 'query',
+            required: true,
+            schema: { type: 'integer' },
+          },
+          {
+            name: 'X-Trace-Id',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: { '200': { description: 'Success' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
 const composedReferencedQueryParameterSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Composed Referenced Query Parameter API', version: '1.0.0' },
@@ -2576,6 +2765,21 @@ describe('OpenAPI Security And Compliance', () => {
     expect(httpClientFile!.content).toContain("private static readonly API_KEY_HEADER: string = 'X-API-Key';");
   });
 
+  it('should use Sdkwork-Access-Token as the TypeScript access token header outside strict profile', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, securitySpec);
+    const httpClientFile = result.files.find((f) => f.path === 'src/http/client.ts');
+    const readmeFile = result.files.find((f) => f.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(httpClientFile).toBeDefined();
+    expect(httpClientFile!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Sdkwork-Access-Token';");
+    expect(httpClientFile!.content).not.toMatch(/(?<!Sdkwork-)Access-Token/);
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('// Sdkwork-Access-Token: <accessToken>');
+    expect(readmeFile!.content).not.toContain('// Access-Token: <accessToken>');
+  });
+
   it('should preserve swift bearer interpolation syntax', async () => {
     const generator = new SwiftGenerator();
     const result = await generator.generate(baseConfig, securitySpec);
@@ -2600,6 +2804,64 @@ describe('OpenAPI Security And Compliance', () => {
     expect(modelAFile).toBeDefined();
     expect(modelAFile!.content).toContain("import type { ModelB } from './model-b';");
     expect(modelAFile!.content).toContain('modelB?: ModelB;');
+  });
+
+  it('should import referenced TypeScript path parameter schemas', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, {
+      openapi: '3.1.0',
+      info: { title: 'Path Ref API', version: '1.0.0' },
+      paths: {
+        '/roles/{id}': {
+          get: {
+            summary: 'Get role',
+            operationId: 'role__getById',
+            tags: ['Role'],
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { $ref: '#/components/schemas/UserRoleKey' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'Success',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/RoleVO' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          UserRoleKey: {
+            type: 'object',
+            properties: {
+              userId: { type: 'integer', format: 'int64' },
+              roleId: { type: 'integer', format: 'int64' },
+            },
+          },
+          RoleVO: {
+            type: 'object',
+            properties: {
+              id: { type: 'integer', format: 'int64' },
+            },
+          },
+        },
+      },
+    });
+    const apiFile = result.files.find((file) => file.path === 'src/api/role.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('import type { RoleVO, UserRoleKey } from');
+    expect(apiFile!.content).toContain('async getById(id: UserRoleKey): Promise<RoleVO>');
   });
 
   it('should emit deferred annotations for python model references', async () => {
@@ -3717,13 +3979,15 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     const auditApi = getGeneratedFile(result.files, 'src/api/audit.ts');
-    expect(auditApi.content).toContain('async getAuditEventWithEscapedRefs(');
+    expect(auditApi.content).toContain('export interface AuditGetAuditEventWithEscapedRefsParams');
+    expect(auditApi.content).toContain('async getAuditEventWithEscapedRefs(eventId: string, params?: AuditGetAuditEventWithEscapedRefsParams): Promise<AuditEvent>');
     expect(auditApi.content).toContain('filter?: string');
     expect(auditApi.content).toContain('xTraceId?: string');
     expect(auditApi.content).toContain("name: 'filter'");
+    expect(auditApi.content).toContain("value: params?.filter");
     expect(auditApi.content).toContain('buildQueryString(');
     expect(auditApi.content).toContain('buildRequestHeaders(');
-    expect(auditApi.content).toContain("'X-Trace-Id': { value: xTraceId, style: 'simple', explode: false }");
+    expect(auditApi.content).toContain("'X-Trace-Id': { value: params?.xTraceId, style: 'simple', explode: false }");
     expect(auditApi.content).toContain('Promise<AuditEvent>');
     expect(auditApi.content).not.toContain('GENERATION_ERROR');
   });
@@ -3890,10 +4154,13 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
-    expect(apiFile!.content).toContain('async listResources(xTraceId: string, sessionId?: string): Promise<void>');
+    expect(apiFile!.content).toContain('export interface ResourceListResourcesParams');
+    expect(apiFile!.content).toContain('xTraceId: string;');
+    expect(apiFile!.content).toContain('sessionId?: string;');
+    expect(apiFile!.content).toContain('async listResources(params: ResourceListResourcesParams): Promise<void>');
     expect(apiFile!.content).toContain("const requestHeaders = buildRequestHeaders(");
-    expect(apiFile!.content).toContain("'X-Trace-Id': { value: xTraceId, style: 'simple', explode: false }");
-    expect(apiFile!.content).toContain("session_id: { value: sessionId, style: 'form', explode: true }");
+    expect(apiFile!.content).toContain("'X-Trace-Id': { value: params.xTraceId, style: 'simple', explode: false }");
+    expect(apiFile!.content).toContain("session_id: { value: params.sessionId, style: 'form', explode: true }");
     expect(apiFile!.content).toContain('this.client.get<void>(backendApiPath(`/resources`), undefined, requestHeaders)');
     expect(apiFile!.content).not.toContain('headers?: Record<string, string>');
   });
@@ -3978,14 +4245,20 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
-    expect(apiFile!.content).toContain(
-      'async searchResources(tag: string[], filter?: Record<string, unknown>, range?: Record<string, number>, jsonFilter?: Record<string, unknown>, q?: string): Promise<void>'
-    );
+    expect(apiFile!.content).toContain('export interface ResourceSearchResourcesParams');
+    expect(apiFile!.content).toContain('tag: string[];');
+    expect(apiFile!.content).toContain('filter?: Record<string, unknown>;');
+    expect(apiFile!.content).toContain('range?: Record<string, number>;');
+    expect(apiFile!.content).toContain('jsonFilter?: Record<string, unknown>;');
+    expect(apiFile!.content).toContain('q?: string;');
+    expect(apiFile!.content).toContain('async searchResources(params: ResourceSearchResourcesParams): Promise<void>');
     expect(apiFile!.content).toContain('const query = buildQueryString([');
     expect(apiFile!.content).toContain("name: 'tag'");
+    expect(apiFile!.content).toContain("value: params.tag");
     expect(apiFile!.content).toContain("style: 'form'");
     expect(apiFile!.content).toContain('explode: true');
     expect(apiFile!.content).toContain("name: 'filter'");
+    expect(apiFile!.content).toContain("value: params.filter");
     expect(apiFile!.content).toContain("style: 'deepObject'");
     expect(apiFile!.content).toContain("contentType: 'application/json'");
     expect(apiFile!.content).toContain('allowReserved: true');
@@ -4410,9 +4683,13 @@ describe('OpenAPI Security And Compliance', () => {
     const tsResult = await new TypeScriptGenerator().generate(baseConfig, simpleQuerySpec);
     const tsApi = getGeneratedFile(tsResult.files, 'src/api/resource.ts');
     expect(tsResult.errors).toEqual([]);
-    expect(tsApi.content).toContain('async listResources(page: number, limit?: number, sort?: string): Promise<void>');
+    expect(tsApi.content).toContain('export interface ResourceListResourcesParams');
+    expect(tsApi.content).toContain('page: number;');
+    expect(tsApi.content).toContain('limit?: number;');
+    expect(tsApi.content).toContain('sort?: string;');
+    expect(tsApi.content).toContain('async listResources(params: ResourceListResourcesParams): Promise<void>');
     expect(tsApi.content).toContain('const query = buildQueryString([');
-    expect(tsApi.content).toContain("{ name: 'page', value: page, style: 'form', explode: true, allowReserved: false },");
+    expect(tsApi.content).toContain("{ name: 'page', value: params.page, style: 'form', explode: true, allowReserved: false },");
     expect(tsApi.content).toContain('appendQueryString(backendApiPath(`/resources`), query)');
     expect(tsApi.content).not.toContain('params?: QueryParams');
 
@@ -4701,13 +4978,16 @@ describe('OpenAPI Security And Compliance', () => {
         config: baseConfig,
         apiPath: 'src/api/resource.ts',
         expected: [
-          'async readSerialized(tenant: string, labels: Record<string, string>, matrix: string[], xTraceParts: Record<string, string>, session?: Record<string, unknown>): Promise<void>',
+          'export interface ResourceReadSerializedParams',
+          'xTraceParts: Record<string, string>;',
+          'session?: Record<string, unknown>;',
+          'async readSerialized(tenant: string, labels: Record<string, string>, matrix: string[], params: ResourceReadSerializedParams): Promise<void>',
           'serializePathParameter(tenant, { name: \'tenant\', style: \'simple\', explode: false })',
           'serializePathParameter(labels, { name: \'labels\', style: \'label\', explode: true })',
           'serializePathParameter(matrix, { name: \'matrix\', style: \'matrix\', explode: false })',
           "buildRequestHeaders(",
-          "'X-Trace-Parts': { value: xTraceParts, style: 'simple', explode: true }",
-          "session: { value: session, style: 'form', explode: false, contentType: 'application/json' }",
+          "'X-Trace-Parts': { value: params.xTraceParts, style: 'simple', explode: true }",
+          "session: { value: params.session, style: 'form', explode: false, contentType: 'application/json' }",
         ],
         forbidden: ['/${tenant}/${labels}/${matrix}'],
       },
@@ -5451,12 +5731,15 @@ describe('OpenAPI Security And Compliance', () => {
     const tenantApi = result.files.find((f) => f.path === 'src/api/tenant.ts');
 
     expect(tenantApi).toBeDefined();
+    expect(tenantApi!.content).toContain('export interface TenantListByPageParams');
+    expect(tenantApi!.content).toContain('page?: number;');
+    expect(tenantApi!.content).toContain('size?: number;');
     expect(tenantApi!.content).toContain(
-      'async listByPage(body?: PlusTenantQueryListForm, page?: number, size?: number): Promise<PlusApiResultPagePlusTenantVO>'
+      'async listByPage(body?: PlusTenantQueryListForm, params?: TenantListByPageParams): Promise<PlusApiResultPagePlusTenantVO>'
     );
     expect(tenantApi!.content).toContain('const query = buildQueryString([');
-    expect(tenantApi!.content).toContain("{ name: 'page', value: page, style: 'form', explode: true, allowReserved: false },");
-    expect(tenantApi!.content).toContain("{ name: 'size', value: size, style: 'form', explode: true, allowReserved: false },");
+    expect(tenantApi!.content).toContain("{ name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },");
+    expect(tenantApi!.content).toContain("{ name: 'size', value: params?.size, style: 'form', explode: true, allowReserved: false },");
     expect(tenantApi!.content).toContain(
       'return this.client.post<PlusApiResultPagePlusTenantVO>(appendQueryString(backendApiPath(`/tenant/list`), query), body, undefined'
     );
@@ -5512,13 +5795,168 @@ describe('OpenAPI Security And Compliance', () => {
     expect(authApi!.content).toContain('this.sessions = new AuthSessionsApi(client);');
     expect(authApi!.content).toContain('export class AuthSessionsApi');
     expect(authApi!.content).toContain('public readonly current: AuthSessionsCurrentApi;');
-    expect(authApi!.content).toContain('async create(body: CreateSessionRequest): Promise<AuthSession>');
+    expect(authApi!.content).toContain('export interface AuthSessionsCreateParams');
+    expect(authApi!.content).toContain('xRequestId?: string;');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest, params?: AuthSessionsCreateParams): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async refresh(body: RefreshSessionRequest): Promise<AuthSession>');
     expect(authApi!.content).toContain('async retrieve(): Promise<AuthSession>');
     expect(authApi!.content).toContain('async delete(): Promise<void>');
+    expect(authApi!.content).toContain('export class AuthVerificationCodesApi');
+    expect(authApi!.content).toContain('async create(body: CreateVerificationCodeRequest): Promise<VerificationCodeResult>');
+    expect(authApi!.content).toContain('async verify(body: VerifyVerificationCodeRequest): Promise<VerificationCodeVerifyResult>');
+    expect(authApi!.content).not.toContain('public readonly refresh: AuthSessionsRefreshApi;');
+    expect(authApi!.content).not.toContain('export class AuthSessionsRefreshApi');
+    expect(authApi!.content).not.toContain('public readonly verify: AuthVerificationCodesVerifyApi;');
+    expect(authApi!.content).not.toContain('export class AuthVerificationCodesVerifyApi');
     expect(authApi!.content).not.toContain('async createSession(');
     expect(authApi!.content).not.toContain('async sessionsCreate(');
     expect(readmeFile).toBeDefined();
-    expect(readmeFile!.content).toContain('client.auth.sessions.create(body)');
+    expect(readmeFile!.content).toContain("const xRequestId = 'X-Request-Id';");
+    expect(readmeFile!.content).toContain("const params = {");
+    expect(readmeFile!.content).toContain("  xRequestId,");
+    expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body, params);');
+    expect(readmeFile!.content).not.toContain('client.auth.sessions.create(body)');
+  });
+
+  it('should generate sdkwork v3 TypeScript auth headers without legacy Access-Token aliases', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      sdkworkV3IamSpec
+    );
+    const httpClient = result.files.find((f) => f.path === 'src/http/client.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(httpClient).toBeDefined();
+    expect(httpClient!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Sdkwork-Access-Token';");
+    expect(httpClient!.content).not.toMatch(/(?<!Sdkwork-)Access-Token/);
+    expect(httpClient!.content).not.toContain("HttpClient.ACCESS_TOKEN_HEADER === 'Access-Token'");
+  });
+
+  it('should keep sdkwork v3 typescript namespaces tag-driven when governance domains differ', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          ...sdkworkV3IamSpec.paths,
+          '/app/v3/api/auth/sessions': {
+            post: {
+              ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
+              'x-sdk-domain': 'iam',
+              'x-sdkwork-domain': 'iam',
+            },
+          },
+        },
+      },
+    );
+    const sdkFile = result.files.find((f) => f.path === 'src/sdk.ts');
+    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+    const iamApi = result.files.find((f) => f.path === 'src/api/iam.ts');
+    const readmeFile = result.files.find((f) => f.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(sdkFile).toBeDefined();
+    expect(sdkFile!.content).toContain('public readonly auth: AuthApi;');
+    expect(sdkFile!.content).toContain('this.auth = createAuthApi(this.httpClient);');
+    expect(sdkFile!.content).not.toContain('public readonly iam: IamApi;');
+    expect(authApi).toBeDefined();
+    expect(authApi!.content).toContain('public readonly sessions: AuthSessionsApi;');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest, params?: AuthSessionsCreateParams): Promise<AuthSession>');
+    expect(iamApi).toBeUndefined();
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body, params);');
+    expect(readmeFile!.content).not.toContain('client.iam.sessions.create');
+  });
+
+  it('should generate object-shaped TypeScript params for sdkwork v3 query resources', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          ...sdkworkV3IamSpec.paths,
+          '/app/v3/api/auth/oauth_authorization_urls': {
+            get: {
+              summary: 'Retrieve OAuth authorization URL',
+              operationId: 'oauthAuthorizationUrls.retrieve',
+              tags: ['auth'],
+              security: [],
+              parameters: [
+                { name: 'provider', in: 'query', required: true, schema: { type: 'string' } },
+                { name: 'redirectUri', in: 'query', required: true, schema: { type: 'string' } },
+                { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
+                { name: 'scope', in: 'query', required: false, schema: { type: 'string' } },
+              ],
+              responses: {
+                '200': {
+                  description: 'Success',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/OauthAuthorizationUrlsRetrieveResult' },
+                    },
+                  },
+                },
+                '400': {
+                  description: 'Bad request',
+                  content: {
+                    'application/problem+json': {
+                      schema: { $ref: '#/components/schemas/ProblemDetail' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          ...sdkworkV3IamSpec.components,
+          schemas: {
+            ...sdkworkV3IamSpec.components?.schemas,
+            OauthAuthorizationUrlsRetrieveResult: {
+              type: 'object',
+              properties: {
+                authUrl: { type: 'string' },
+              },
+            },
+          },
+        },
+      }
+    );
+    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(authApi).toBeDefined();
+    expect(authApi!.content).toContain('export interface AuthOauthAuthorizationUrlsRetrieveParams');
+    expect(authApi!.content).toContain('provider: string;');
+    expect(authApi!.content).toContain('redirectUri: string;');
+    expect(authApi!.content).toContain('state?: string;');
+    expect(authApi!.content).toContain('scope?: string;');
+    expect(authApi!.content).toContain(
+      'async retrieve(params: AuthOauthAuthorizationUrlsRetrieveParams): Promise<OauthAuthorizationUrlsRetrieveResult>'
+    );
+    expect(authApi!.content).toContain("{ name: 'provider', value: params.provider, style: 'form', explode: true, allowReserved: false },");
+    expect(authApi!.content).toContain("{ name: 'redirectUri', value: params.redirectUri, style: 'form', explode: true, allowReserved: false },");
+    expect(authApi!.content).toContain("{ name: 'state', value: params.state, style: 'form', explode: true, allowReserved: false },");
+    expect(authApi!.content).not.toContain('async retrieve(provider: string, redirectUri: string');
+    expect(authApi!.content).not.toContain('value: provider');
   });
 
   it('should reject non-standard sdkwork v3 OpenAPI contracts under the strict standard profile', async () => {
@@ -6002,6 +6440,8 @@ describe('OpenAPI Security And Compliance', () => {
     expect(buildRuntimeFile?.ownership).toBe('scaffold');
     expect(buildRuntimeFile?.overwriteStrategy).toBe('if-missing');
     expect(buildRuntimeFile?.content).toContain("import { rollup } from 'rollup';");
+    expect(buildRuntimeFile?.content).toContain('maxRetries: 5');
+    expect(buildRuntimeFile?.content).toContain('retryDelay: 100');
     expect(result.files.some((file) => file.path === 'vite.config.ts')).toBe(false);
 
     const packageJson = JSON.parse(packageJsonFile.content) as {
@@ -6781,7 +7221,37 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(readmeFile).toBeDefined();
     expect(readmeFile!.content).toContain("const xTraceId = 'trace-token';");
-    expect(readmeFile!.content).toContain('const result = await client.tenant.listByPage(xTraceId);');
+    expect(readmeFile!.content).toContain('const params = {');
+    expect(readmeFile!.content).toContain('  xTraceId,');
+    expect(readmeFile!.content).toContain('const result = await client.tenant.listByPage(params);');
+    expect(readmeFile!.content).not.toContain('const result = await client.tenant.listByPage(xTraceId);');
+  });
+
+  it('should generate TypeScript usage examples with combined query and header params objects', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate({ ...baseConfig, generateTests: true }, queryHeaderParameterSpec);
+    const readmeFile = result.files.find((file) => file.path === 'README.md');
+    const smokeTestFile = result.files.find((file) => file.path === 'test/sdk.smoke.test.mjs');
+
+    expect(result.errors).toEqual([]);
+    expect(readmeFile).toBeDefined();
+    expect(smokeTestFile).toBeDefined();
+    expect(readmeFile!.content).toContain("const xTraceId = 'X-Trace-Id';");
+    expect(readmeFile!.content).toContain('const query = {');
+    expect(readmeFile!.content).toContain('  page: 1,');
+    expect(readmeFile!.content).toContain('const params = {');
+    expect(readmeFile!.content).toContain('  ...query,');
+    expect(readmeFile!.content).toContain('  xTraceId,');
+    expect(readmeFile!.content).toContain('const result = await client.resource.listResources(params);');
+    expect(smokeTestFile!.content).toContain("const xTraceId = 'X-Trace-Id';");
+    expect(smokeTestFile!.content).toContain('const query = {');
+    expect(smokeTestFile!.content).toContain('  page: 1,');
+    expect(smokeTestFile!.content).toContain('const params = {');
+    expect(smokeTestFile!.content).toContain('  ...query,');
+    expect(smokeTestFile!.content).toContain('  xTraceId,');
+    expect(smokeTestFile!.content).toContain('await client.resource.listResources(params);');
+    expect(smokeTestFile!.content).toContain('assert.deepEqual(captured.params, query);');
+    expect(smokeTestFile!.content).toContain("assert.equal(captured.headers['X-Trace-Id'], xTraceId);");
   });
 
   it('should generate named header and cookie usage examples instead of generic headers maps across languages', async () => {
@@ -6795,12 +7265,18 @@ describe('OpenAPI Security And Compliance', () => {
         expectedReadme: [
           "const xTraceId = 'X-Trace-Id';",
           "const sessionId = 'session_id';",
-          'const result = await client.resource.listResources(xTraceId, sessionId);',
+          'const params = {',
+          '  xTraceId,',
+          '  sessionId,',
+          'const result = await client.resource.listResources(params);',
         ],
         expectedSmoke: [
           "const xTraceId = 'X-Trace-Id';",
           "const sessionId = 'session_id';",
-          'await client.resource.listResources(xTraceId, sessionId);',
+          'const params = {',
+          '  xTraceId,',
+          '  sessionId,',
+          'await client.resource.listResources(params);',
           "assert.equal(captured.headers['X-Trace-Id'], xTraceId);",
           "assert.equal(captured.headers.Cookie, `session_id=${encodeURIComponent(sessionId)}`);",
         ],
