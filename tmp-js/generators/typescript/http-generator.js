@@ -454,6 +454,6 @@ export * from './auth';
         return content.trim() + '\n';
     }
     resolveAccessTokenHeader(_config, _detectedApiKeyHeader) {
-        return 'Sdkwork-Access-Token';
+        return 'Access-Token';
     }
 }

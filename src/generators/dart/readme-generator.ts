@@ -44,7 +44,7 @@ client.setAuthToken('your-auth-token');
 client.setAccessToken('your-access-token');
 // Sends:
 // Authorization: Bearer <authToken>
-// Sdkwork-Access-Token: <accessToken>`,
+// Access-Token: <accessToken>`,
       apiKeyCall: 'setApiKey(...)',
       authTokenCall: 'setAuthToken(...)',
       accessTokenCall: 'setAccessToken(...)',

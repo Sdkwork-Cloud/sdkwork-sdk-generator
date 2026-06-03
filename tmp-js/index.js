@@ -22,7 +22,7 @@ import { PhpGenerator } from './generators/php/index.js';
 import { RubyGenerator } from './generators/ruby/index.js';
 import { getLanguageRegistry } from './language-registry.js';
 const generators = new Map();
-const supportedSdkTypes = ['app', 'backend', 'ai', 'custom'];
+const supportedSdkTypes = ['app', 'backend', 'im', 'ai', 'custom'];
 const GENERATOR_FACTORIES = {
     typescript: () => new TypeScriptGenerator(),
     dart: () => new DartGenerator(),

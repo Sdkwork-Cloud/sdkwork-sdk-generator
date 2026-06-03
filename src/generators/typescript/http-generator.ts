@@ -480,6 +480,6 @@ export * from './auth';
   }
 
   private resolveAccessTokenHeader(_config: GeneratorConfig, _detectedApiKeyHeader?: string): string {
-    return 'Sdkwork-Access-Token';
+    return 'Access-Token';
   }
 }

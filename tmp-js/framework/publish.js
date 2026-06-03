@@ -267,9 +267,15 @@ function runDart(ctx) {
   ensureFile(pubspec, 'pubspec.yaml');
 
   run('dart', ['pub', 'get'], { cwd: ctx.projectDir });
+
+  if (ctx.action === 'check' || ctx.action === 'build') {
+    run('dart', ['analyze'], { cwd: ctx.projectDir });
+    return;
+  }
+
   run('dart', ['pub', 'publish', '--dry-run'], { cwd: ctx.projectDir });
 
-  if (ctx.action === 'check' || ctx.action === 'build' || ctx.dryRun) {
+  if (ctx.dryRun) {
     return;
   }
 
@@ -512,9 +518,15 @@ function runFlutter(ctx) {
   ensureFile(pubspec, 'pubspec.yaml');
 
   run('dart', ['pub', 'get'], { cwd: ctx.projectDir });
+
+  if (ctx.action === 'check' || ctx.action === 'build') {
+    run('dart', ['analyze'], { cwd: ctx.projectDir });
+    return;
+  }
+
   run('dart', ['pub', 'publish', '--dry-run'], { cwd: ctx.projectDir });
 
-  if (ctx.action === 'check' || ctx.action === 'build' || ctx.dryRun) {
+  if (ctx.dryRun) {
     return;
   }
 

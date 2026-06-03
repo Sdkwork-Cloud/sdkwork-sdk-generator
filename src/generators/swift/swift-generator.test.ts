@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
 import { getGenerator } from '../../index.js';
+import { discriminatedContentSpec } from '../../../test-support/discriminated-content-spec.js';
 
 const swiftConfig: GeneratorConfig = {
   name: 'SdkworkAppSdk',
@@ -232,5 +233,25 @@ describe('Swift generator regressions', () => {
     expect(smokeTestFile!.content).toContain('let result = try await client.user.getWrappedUserProfile()');
     expect(smokeTestFile!.content).toContain('XCTAssertNotNil(result?.data)');
     expect(smokeTestFile!.content).toContain('XCTAssertEqual("ok", result?.code)');
+  });
+
+  it('generates oneOf content parts as a kind-dispatched Codable enum instead of one wide struct', async () => {
+    const generator = getGenerator('swift' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(swiftConfig, discriminatedContentSpec);
+    const modelsFile = result.files.find((file) => file.path === 'Sources/Models.swift');
+
+    expect(result.errors).toEqual([]);
+    expect(modelsFile).toBeDefined();
+    expect(modelsFile!.content).toContain('public enum ContentPart: Codable {');
+    expect(modelsFile!.content).toContain('case media(MediaContentPart)');
+    expect(modelsFile!.content).toContain('switch kind {');
+    expect(modelsFile!.content).toContain('case "media": self = .media(try MediaContentPart(from: decoder))');
+    expect(modelsFile!.content).toContain('public struct MediaContentPart: Codable');
+    expect(modelsFile!.content).toContain('public let drive: DriveReference');
+    expect(modelsFile!.content).toContain('public let resource: MediaResource');
+    expect(modelsFile!.content).not.toContain('public struct ContentPart: Codable');
+    expect(modelsFile!.content).not.toContain('public let drive: DriveReference?');
   });
 });

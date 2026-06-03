@@ -82,8 +82,8 @@ class HttpClient(
         if (!API_KEY_HEADER.equals("Authorization", ignoreCase = true)) {
             headers.remove("Authorization")
         }
-        if (!API_KEY_HEADER.equals("Sdkwork-Access-Token", ignoreCase = true)) {
-            headers.remove("Sdkwork-Access-Token")
+        if (!API_KEY_HEADER.equals("Access-Token", ignoreCase = true)) {
+            headers.remove("Access-Token")
         }
     }
 
@@ -95,10 +95,10 @@ class HttpClient(
     }
 
     fun setAccessToken(token: String) {
-        if (!API_KEY_HEADER.equals("Sdkwork-Access-Token", ignoreCase = true)) {
+        if (!API_KEY_HEADER.equals("Access-Token", ignoreCase = true)) {
             headers.remove(API_KEY_HEADER)
         }
-        headers["Sdkwork-Access-Token"] = token
+        headers["Access-Token"] = token
     }
 
     fun setHeader(key: String, value: String) {

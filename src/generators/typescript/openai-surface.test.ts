@@ -848,6 +848,69 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(threadsApi.content).not.toContain('public readonly submitToolOutputs:');
   });
 
+  it('derives OpenAI root resource names from configured prefix paths', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, {
+      openapi: '3.0.3',
+      info: { title: 'Configured Prefix API', version: '1.0.0' },
+      paths: {
+        '/v1/conversations': {
+          get: {
+            summary: 'List conversations',
+            operationId: 'listConversations',
+            tags: ['Conversations API'],
+            responses: jsonOk(schemaRef('ConversationList')),
+          },
+        },
+        '/v1/evals': {
+          get: {
+            summary: 'List evals',
+            operationId: 'listEvals',
+            tags: ['Evaluations'],
+            responses: jsonOk(schemaRef('EvalList')),
+          },
+        },
+        '/v1/videos': {
+          post: {
+            summary: 'Create video',
+            operationId: 'createVideo',
+            tags: ['Video Generation'],
+            responses: jsonOk(schemaRef('VideoObject')),
+          },
+        },
+      },
+      components: {
+        schemas: {
+          ConversationList: objectSchema,
+          EvalList: objectSchema,
+          VideoObject: objectSchema,
+        },
+      },
+    });
+
+    expect(result.errors).toEqual([]);
+
+    const sdkFile = getGeneratedFile(result.files, 'src/sdk.ts');
+    expect(sdkFile.content).toContain('public readonly conversation: ConversationApi;');
+    expect(sdkFile.content).toContain('public readonly eval: EvalApi;');
+    expect(sdkFile.content).toContain('public readonly video: VideoApi;');
+    expect(sdkFile.content).not.toContain('public readonly conversationsApi:');
+    expect(sdkFile.content).not.toContain('public readonly evaluations:');
+    expect(sdkFile.content).not.toContain('public readonly videos:');
+
+    const conversationApi = getGeneratedFile(result.files, 'src/api/conversation.ts');
+    expect(conversationApi.content).toContain('export class ConversationApi');
+    expect(conversationApi.content).toContain('async list(): Promise<ConversationList>');
+
+    const evalApi = getGeneratedFile(result.files, 'src/api/eval.ts');
+    expect(evalApi.content).toContain('export class EvalApi');
+    expect(evalApi.content).toContain('async list(): Promise<EvalList>');
+
+    const videoApi = getGeneratedFile(result.files, 'src/api/video.ts');
+    expect(videoApi.content).toContain('export class VideoApi');
+    expect(videoApi.content).toContain('async create(): Promise<VideoObject>');
+  });
+
   it('maps nested OpenAI resources and collection actions to standard client chains', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(baseConfig, openAiNestedResourceSpec);

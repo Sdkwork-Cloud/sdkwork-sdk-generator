@@ -114,8 +114,8 @@ func (c *Client) SetApiKey(apiKey string) {
     if defaultApiKeyHeader != "Authorization" {
         delete(c.headers, "Authorization")
     }
-    if defaultApiKeyHeader != "Sdkwork-Access-Token" {
-        delete(c.headers, "Sdkwork-Access-Token")
+    if defaultApiKeyHeader != "Access-Token" {
+        delete(c.headers, "Access-Token")
     }
 }
 
@@ -127,10 +127,10 @@ func (c *Client) SetAuthToken(token string) {
 }
 
 func (c *Client) SetAccessToken(token string) {
-    if defaultApiKeyHeader != "Sdkwork-Access-Token" {
+    if defaultApiKeyHeader != "Access-Token" {
         delete(c.headers, defaultApiKeyHeader)
     }
-    c.headers["Sdkwork-Access-Token"] = token
+    c.headers["Access-Token"] = token
 }
 
 func (c *Client) SetHeader(key, value string) {

@@ -294,7 +294,10 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const queryBindings = hasExplicitQuerySerialization
       ? this.createQueryParameterBindings(queryParams, knownModels, namespace, parameterReservedNames)
       : [];
-    const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, namespace, parameterReservedNames);
+    const headerBindings = this.createHeaderParameterBindings(headerParams, knownModels, namespace, [
+      ...parameterReservedNames,
+      ...queryBindings.map((binding) => binding.safeName),
+    ]);
     const cookieBindings = this.createHeaderParameterBindings(cookieParams, knownModels, namespace, [
       ...parameterReservedNames,
       ...queryBindings.map((binding) => binding.safeName),

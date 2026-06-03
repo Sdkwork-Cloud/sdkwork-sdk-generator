@@ -17,7 +17,7 @@ export class ReadmeGenerator {
             return `- \`client.${planner.getModuleName(tag)}\` - ${tag} API`;
         }).join('\n');
         const authHeaderPreview = resolveApiKeyHeaderPreview(ctx.auth);
-        const accessTokenHeader = 'Sdkwork-Access-Token';
+        const accessTokenHeader = 'Access-Token';
         const authSection = buildMutuallyExclusiveAuthSection({
             codeFence: 'typescript',
             modeAExample: `const client = new ${clientName}({ baseUrl: '${config.baseUrl}' });

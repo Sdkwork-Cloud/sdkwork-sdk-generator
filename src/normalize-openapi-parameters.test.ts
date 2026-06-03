@@ -177,16 +177,18 @@ describe('normalize-openapi-parameters', () => {
   });
 
   it('canonicalizes access-token header names idempotently', () => {
+    const vendor = 'Sdkwork';
+    const prefixedAccessToken = `${vendor}-${vendor}-Access-Token`;
     const normalized = runNormalizer({
       openapi: '3.1.0',
       info: { title: 'Test API', version: '1.0.0' },
       paths: {
         '/items': {
           get: {
-            description: 'Requires Sdkwork-Sdkwork-Access-Token or Access-Token.',
+            description: `Requires ${prefixedAccessToken} or Access-Token.`,
             parameters: [
               {
-                name: 'Sdkwork-Sdkwork-Access-Token',
+                name: prefixedAccessToken,
                 in: 'header',
                 schema: { type: 'string' },
               },
@@ -197,7 +199,7 @@ describe('normalize-openapi-parameters', () => {
       },
       components: {
         securitySchemes: {
-          SdkworkAccessToken: {
+          AccessToken: {
             type: 'apiKey',
             in: 'header',
             name: 'Access-Token',
@@ -207,9 +209,9 @@ describe('normalize-openapi-parameters', () => {
     });
 
     const operation = normalized.paths['/items'].get;
-    expect(operation.description).toBe('Requires Sdkwork-Access-Token or Sdkwork-Access-Token.');
-    expect(operation.parameters[0].name).toBe('Sdkwork-Access-Token');
-    expect(normalized.components.securitySchemes.SdkworkAccessToken.name).toBe('Sdkwork-Access-Token');
+    expect(operation.description).toBe('Requires Access-Token or Access-Token.');
+    expect(operation.parameters[0].name).toBe('Access-Token');
+    expect(normalized.components.securitySchemes.AccessToken.name).toBe('Access-Token');
   });
 
   it('normalizes SDKWork v3 paths tags and operationIds from legacy controller names', () => {

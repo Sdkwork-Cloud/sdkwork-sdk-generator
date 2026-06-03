@@ -1,6 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import type { ApiSchema, GeneratorConfig } from '../../framework/types.js';
-import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { toSafeCamelIdentifier, toSafePascalIdentifier } from '../../framework/identifiers.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
 export const DART_RESERVED_WORDS = new Set([
@@ -98,23 +98,13 @@ export const DART_CONFIG: LanguageConfig = {
     url: 'String',
   },
   namingConventions: {
-    modelName: (name) => toPascalCase(name),
+    modelName: (name) => toSafePascalIdentifier(name, DART_RESERVED_WORDS),
     propertyName: (name) => toSafeCamelIdentifier(name, DART_RESERVED_WORDS),
     methodName: (name) => toSafeCamelIdentifier(name, DART_RESERVED_WORDS),
     fileName: (name) => toSnakeCase(name),
     packageName: (name) => toSnakeCase(name),
   },
 };
-
-function toPascalCase(str: string): string {
-  return str
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/[^a-zA-Z0-9]+/g, ' ')
-    .split(' ')
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join('');
-}
 
 function toSnakeCase(str: string): string {
   return str.replace(/([a-z])([A-Z])/g, '$1_$2')

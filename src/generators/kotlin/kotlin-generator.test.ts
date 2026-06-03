@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
 import { getGenerator } from '../../index.js';
+import { discriminatedContentSpec } from '../../../test-support/discriminated-content-spec.js';
 
 const kotlinConfig: GeneratorConfig = {
   name: 'SdkworkBackendSdk',
@@ -293,5 +294,32 @@ describe('Kotlin generator regressions', () => {
     expect(smokeTestFile!.content).toContain('assertNotNull(result?.data_)');
     expect(smokeTestFile!.content).toContain('assertEquals("ok", result?.code)');
     expect(smokeTestFile!.content).not.toContain('assertEquals("data", result?.data_)');
+  });
+
+  it('generates oneOf content parts as Jackson polymorphic models instead of one wide DTO', async () => {
+    const generator = getGenerator('kotlin' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(kotlinConfig, discriminatedContentSpec);
+    const contentPartFile = result.files.find(
+      (file) => file.path === 'src/main/kotlin/com/sdkwork/backend/ContentPart.kt'
+    );
+    const mediaContentPartFile = result.files.find(
+      (file) => file.path === 'src/main/kotlin/com/sdkwork/backend/MediaContentPart.kt'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(contentPartFile).toBeDefined();
+    expect(mediaContentPartFile).toBeDefined();
+    expect(contentPartFile!.content).toContain('import com.fasterxml.jackson.annotation.JsonSubTypes');
+    expect(contentPartFile!.content).toContain('import com.fasterxml.jackson.annotation.JsonTypeInfo');
+    expect(contentPartFile!.content).toContain('@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "kind", visible = true)');
+    expect(contentPartFile!.content).toContain('@JsonSubTypes.Type(value = MediaContentPart::class, name = "media")');
+    expect(contentPartFile!.content).toContain('sealed interface ContentPart');
+    expect(contentPartFile!.content).not.toContain('val drive: DriveReference?');
+    expect(mediaContentPartFile!.content).toContain('data class MediaContentPart(');
+    expect(mediaContentPartFile!.content).toContain(') : ContentPart');
+    expect(mediaContentPartFile!.content).toContain('val drive: DriveReference');
+    expect(mediaContentPartFile!.content).toContain('val resource: MediaResource');
   });
 });

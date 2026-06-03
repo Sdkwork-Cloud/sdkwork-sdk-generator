@@ -182,7 +182,7 @@ describe('Generator registry', () => {
   });
 
   it('should expose the supported sdk types for orchestration callers', () => {
-    expect(getSupportedSdkTypes()).toEqual(['app', 'backend', 'ai', 'custom']);
+    expect(getSupportedSdkTypes()).toEqual(['app', 'backend', 'im', 'ai', 'custom']);
   });
 
   it('should expose a truthful cross-language capability matrix for automation callers', () => {
@@ -685,7 +685,7 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Get current auth session',
         operationId: 'sessions.current.retrieve',
         tags: ['auth'],
-        security: [{ AuthToken: [], SdkworkAccessToken: [] }],
+        security: [{ AuthToken: [], AccessToken: [] }],
         responses: {
           '200': {
             description: 'Success',
@@ -709,7 +709,7 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Delete current auth session',
         operationId: 'sessions.current.delete',
         tags: ['auth'],
-        security: [{ AuthToken: [], SdkworkAccessToken: [] }],
+        security: [{ AuthToken: [], AccessToken: [] }],
         responses: {
           '204': { description: 'No content' },
           '401': {
@@ -728,7 +728,7 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Refresh auth session',
         operationId: 'sessions.refresh',
         tags: ['auth'],
-        security: [{ AuthToken: [], SdkworkAccessToken: [] }],
+        security: [{ AuthToken: [], AccessToken: [] }],
         requestBody: {
           required: true,
           content: {
@@ -829,7 +829,7 @@ const sdkworkV3IamSpec: ApiSpec = {
   components: {
     securitySchemes: {
       AuthToken: { type: 'http', scheme: 'bearer' },
-      SdkworkAccessToken: { type: 'apiKey', in: 'header', name: 'Sdkwork-Access-Token' },
+      AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
     },
     schemas: {
       CreateSessionRequest: {
@@ -889,6 +889,161 @@ const sdkworkV3IamSpec: ApiSpec = {
           instance: { type: 'string' },
         },
       },
+    },
+  },
+};
+
+const sdkworkV3ImDeviceSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'SDKWork v3 IM API', version: '1.0.0' },
+  paths: {
+    '/im/v3/api/device/sessions/resume': {
+      post: {
+        summary: 'Resume the current device route',
+        operationId: 'device.sessions.resume',
+        tags: ['device'],
+        security: [{ AuthToken: [], AccessToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ResumeDeviceSessionRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Device route resumed',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DeviceSessionResumeView' },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/im/v3/api/device/sessions/disconnect': {
+      post: {
+        summary: 'Disconnect the current device route',
+        operationId: 'device.sessions.disconnect',
+        tags: ['device'],
+        security: [{ AuthToken: [], AccessToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/PresenceDeviceRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Presence snapshot after disconnect',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PresenceSnapshotView' },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/im/v3/api/devices/register': {
+      post: {
+        summary: 'Register the current device',
+        operationId: 'registrations.create',
+        tags: ['device'],
+        security: [{ AuthToken: [], AccessToken: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/RegisterDeviceRequest' },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Registered device view',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/RegisteredDeviceView' },
+              },
+            },
+          },
+          '400': {
+            description: 'Bad request',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/im/v3/api/devices/{deviceId}/sync_feed': {
+      get: {
+        summary: 'Get device sync feed entries',
+        operationId: 'syncFeed.retrieve',
+        tags: ['device'],
+        security: [{ AuthToken: [], AccessToken: [] }],
+        parameters: [
+          { name: 'deviceId', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'afterSeq', in: 'query', required: false, schema: { type: 'integer', format: 'int64' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Device sync feed',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DeviceSyncFeedResponse' },
+              },
+            },
+          },
+          '404': {
+            description: 'Not found',
+            content: {
+              'application/problem+json': {
+                schema: { $ref: '#/components/schemas/ProblemDetail' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    securitySchemes: {
+      AuthToken: { type: 'http', scheme: 'bearer' },
+      AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
+    },
+    schemas: {
+      ResumeDeviceSessionRequest: { type: 'object', properties: { deviceId: { type: 'string' } } },
+      DeviceSessionResumeView: { type: 'object', properties: { resumed: { type: 'boolean' } } },
+      PresenceDeviceRequest: { type: 'object', properties: { deviceId: { type: 'string' } } },
+      PresenceSnapshotView: { type: 'object', properties: { online: { type: 'boolean' } } },
+      RegisterDeviceRequest: { type: 'object', properties: { deviceId: { type: 'string' } } },
+      RegisteredDeviceView: { type: 'object', properties: { deviceId: { type: 'string' } } },
+      DeviceSyncFeedResponse: { type: 'object', properties: { nextSeq: { type: 'integer' } } },
+      ProblemDetail: { type: 'object', properties: { title: { type: 'string' } } },
     },
   },
 };
@@ -1489,6 +1644,48 @@ const reservedIdentifierSpec: ApiSpec = {
   },
 };
 
+const dartReservedModelNameSpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: { title: 'Dart Reserved Model Name API', version: '1.0.0' },
+  paths: {
+    '/tools': {
+      get: {
+        summary: 'List tools',
+        operationId: 'listTools',
+        tags: ['Tool'],
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/FunctionTool' },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      Function: {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+          description: { type: 'string' },
+        },
+      },
+      FunctionTool: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          function: { $ref: '#/components/schemas/Function' },
+        },
+      },
+    },
+  },
+};
+
 const pathParameterIdentifierSpec: ApiSpec = {
   openapi: '3.0.3',
   info: { title: 'Path Parameter Identifier API', version: '1.0.0' },
@@ -1563,6 +1760,28 @@ const scalarHeaderCookieParameterSpec: ApiSpec = {
         parameters: [
           { name: 'X-Retry-Count', in: 'header', required: true, schema: { type: 'integer' } },
           { name: 'debug_mode', in: 'cookie', required: false, schema: { type: 'boolean' } },
+        ],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
+const collidingQueryHeaderParameterSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: { title: 'Colliding Query Header Parameter API', version: '1.0.0' },
+  paths: {
+    '/chat/stop': {
+      post: {
+        summary: 'Stop chat stream',
+        operationId: 'chat.stop',
+        tags: ['Chat'],
+        parameters: [
+          { name: 'conversation_id', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'conversationId', in: 'header', required: false, schema: { type: 'string' } },
         ],
         responses: { '204': { description: 'No content' } },
       },
@@ -2726,6 +2945,36 @@ describe('SDK Generators', () => {
           expect(paths).toContain('bin/sdk-gen.sh');
         }
       });
+
+      it('should keep Dart-family check verification independent from pub publish validation', async () => {
+        if (name !== 'Dart' && name !== 'Flutter') {
+          return;
+        }
+
+        const generator = new Generator();
+        const result = await generator.generate(baseConfig, mockSpec);
+        const publishCore = getGeneratedFile(result.files, 'bin/publish-core.mjs');
+
+        expect(publishCore.content).toContain("if (ctx.action === 'check' || ctx.action === 'build') {");
+        expect(publishCore.content).toContain("run('dart', ['analyze'], { cwd: ctx.projectDir });");
+        expect(publishCore.content).toContain("run('dart', ['pub', 'publish', '--dry-run'], { cwd: ctx.projectDir });");
+
+        const runDartStart = publishCore.content.indexOf('function runDart(ctx) {');
+        const runFlutterStart = publishCore.content.indexOf('function runFlutter(ctx) {');
+        const functionStart = name === 'Dart' ? runDartStart : runFlutterStart;
+        const functionEnd = publishCore.content.indexOf('\nfunction ', functionStart + 1);
+        const functionBody = publishCore.content.slice(functionStart, functionEnd);
+        const checkStart = functionBody.indexOf("if (ctx.action === 'check' || ctx.action === 'build') {");
+        const analyzeStart = functionBody.indexOf("run('dart', ['analyze'], { cwd: ctx.projectDir });", checkStart);
+        const checkReturnStart = functionBody.indexOf('return;', analyzeStart);
+        const publishDryRunStart = functionBody.indexOf("run('dart', ['pub', 'publish', '--dry-run'], { cwd: ctx.projectDir });");
+
+        expect(functionStart).toBeGreaterThanOrEqual(0);
+        expect(checkStart).toBeGreaterThanOrEqual(0);
+        expect(analyzeStart).toBeGreaterThan(checkStart);
+        expect(checkReturnStart).toBeGreaterThan(analyzeStart);
+        expect(publishDryRunStart).toBeGreaterThan(checkReturnStart);
+      });
     });
   });
 });
@@ -2765,7 +3014,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(httpClientFile!.content).toContain("private static readonly API_KEY_HEADER: string = 'X-API-Key';");
   });
 
-  it('should use Sdkwork-Access-Token as the TypeScript access token header outside strict profile', async () => {
+  it('should use Access-Token as the TypeScript access token header outside strict profile', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(baseConfig, securitySpec);
     const httpClientFile = result.files.find((f) => f.path === 'src/http/client.ts');
@@ -2773,11 +3022,9 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(httpClientFile).toBeDefined();
-    expect(httpClientFile!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Sdkwork-Access-Token';");
-    expect(httpClientFile!.content).not.toMatch(/(?<!Sdkwork-)Access-Token/);
+    expect(httpClientFile!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Access-Token';");
     expect(readmeFile).toBeDefined();
-    expect(readmeFile!.content).toContain('// Sdkwork-Access-Token: <accessToken>');
-    expect(readmeFile!.content).not.toContain('// Access-Token: <accessToken>');
+    expect(readmeFile!.content).toContain('// Access-Token: <accessToken>');
   });
 
   it('should preserve swift bearer interpolation syntax', async () => {
@@ -4113,6 +4360,27 @@ describe('OpenAPI Security And Compliance', () => {
     expect(apiFile!.content).not.toContain('Future<KeywordModel?> class(');
   });
 
+  it('should escape reserved Dart built-in schema names in model classes and refs', async () => {
+    const cases = [
+      { generator: new DartGenerator(), language: 'dart' as const },
+      { generator: new FlutterGenerator(), language: 'flutter' as const },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(
+        { ...baseConfig, language: testCase.language } as any,
+        dartReservedModelNameSpec
+      );
+      const modelFile = getGeneratedFile(result.files, 'lib/src/models.dart');
+
+      expect(modelFile.content, testCase.language).toContain('class Function_ {');
+      expect(modelFile.content, testCase.language).toContain('final Function_? function_;');
+      expect(modelFile.content, testCase.language).toContain('Function_.fromJson(map)');
+      expect(modelFile.content, testCase.language).not.toContain('class Function {');
+      expect(modelFile.content, testCase.language).not.toContain('final Function? function_;');
+    }
+  });
+
   it('should sanitize unsafe path parameters in typescript and python apis', async () => {
     const tsGenerator = new TypeScriptGenerator();
     const tsResult = await tsGenerator.generate(baseConfig, pathParameterIdentifierSpec);
@@ -4971,6 +5239,159 @@ describe('OpenAPI Security And Compliance', () => {
     expect(rustApi.content).not.toContain('debug_mode: Option<&str>');
   });
 
+  it('should keep colliding query and header parameters uniquely named across SDK languages', async () => {
+    const cases = [
+      {
+        generator: new TypeScriptGenerator(),
+        config: baseConfig,
+        apiPath: 'src/api/chat.ts',
+        expected: [
+          'conversationId: string;',
+          'conversationId_?: string;',
+          'async stop(params: ChatStopParams): Promise<void>',
+          "{ name: 'conversation_id', value: params.conversationId, style: 'form', explode: true, allowReserved: false }",
+          "conversationId: { value: params.conversationId_, style: 'simple', explode: false }",
+        ],
+        forbidden: ['conversationId?: string;\n  conversationId?: string;'],
+      },
+      {
+        generator: new PythonGenerator(),
+        config: { ...baseConfig, language: 'python' as const },
+        apiPath: 'sdkwork_backend_sdk/api/chat.py',
+        expected: [
+          'def stop(self, conversation_id: str, conversation_id_: Optional[str] = None) -> None:',
+          "'name': 'conversation_id', 'value': conversation_id",
+          "'conversationId': {'value': conversation_id_, 'style': 'simple', 'explode': False}",
+        ],
+        forbidden: ['def stop(self, conversation_id: str, conversation_id: Optional[str] = None)'],
+      },
+      {
+        generator: new DartGenerator(),
+        config: { ...baseConfig, language: 'dart' as const },
+        apiPath: 'lib/src/api/chat.dart',
+        expected: [
+          'Future<void> stop(String conversationId, [String? conversationId_]) async {',
+          "QueryParameterSpec('conversation_id', conversationId, 'form', true, false, null)",
+          "'conversationId': HeaderParameterSpec(conversationId_, 'simple', false, null)",
+        ],
+        forbidden: ['Future<void> stop(String conversationId, [String? conversationId])'],
+      },
+      {
+        generator: new FlutterGenerator(),
+        config: { ...baseConfig, language: 'flutter' as const },
+        apiPath: 'lib/src/api/chat.dart',
+        expected: [
+          'Future<void> stop(String conversationId, [String? conversationId_]) async {',
+          "QueryParameterSpec('conversation_id', conversationId, 'form', true, false, null)",
+          "'conversationId': HeaderParameterSpec(conversationId_, 'simple', false, null)",
+        ],
+        forbidden: ['Future<void> stop(String conversationId, [String? conversationId])'],
+      },
+      {
+        generator: new GoGenerator(),
+        config: { ...baseConfig, language: 'go' as const },
+        apiPath: 'api/chat.go',
+        expected: [
+          'func (a *ChatApi) Stop(conversationId string, conversationId_ *string)',
+          '{Name: "conversation_id", Value: conversationId, Style: "form", Explode: true, AllowReserved: false}',
+          '"conversationId": ParameterSpec{Value: func() interface{} { if conversationId_ == nil { return nil }; return *conversationId_ }(), Style: "simple", Explode: false}',
+        ],
+        forbidden: ['func (a *ChatApi) Stop(conversationId string, conversationId *string)'],
+      },
+      {
+        generator: new JavaGenerator(),
+        config: { ...baseConfig, language: 'java' as const },
+        apiPath: 'src/main/java/com/sdkwork/backend/api/ChatApi.java',
+        expected: [
+          'public Void stop(String conversationId, String conversationId_) throws Exception',
+          'new QueryParameterSpec("conversation_id", conversationId, "form", true, false, null)',
+          'Map.of("conversationId", new HeaderParameterSpec(conversationId_, "simple", false, null))',
+        ],
+        forbidden: ['public Void stop(String conversationId, String conversationId)'],
+      },
+      {
+        generator: new KotlinGenerator(),
+        config: { ...baseConfig, language: 'kotlin' as const },
+        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ChatApi.kt',
+        expected: [
+          'suspend fun stop(conversationId: String, conversationId_: String? = null): Unit',
+          'QueryParameterSpec("conversation_id", conversationId, "form", true, false, null)',
+          '"conversationId" to HeaderParameterSpec(conversationId_, "simple", false, null)',
+        ],
+        forbidden: ['suspend fun stop(conversationId: String, conversationId: String? = null)'],
+      },
+      {
+        generator: new SwiftGenerator(),
+        config: { ...baseConfig, language: 'swift' as const },
+        apiPath: 'Sources/API/ChatApi.swift',
+        expected: [
+          'public func stop(conversationId: String, conversationId_: String? = nil) async throws -> Void',
+          'QueryParameterSpec(name: "conversation_id", value: conversationId, style: "form", explode: true, allowReserved: false, contentType: nil)',
+          '"conversationId": HeaderParameterSpec(value: conversationId_, style: "simple", explode: false, contentType: nil)',
+        ],
+        forbidden: ['public func stop(conversationId: String, conversationId: String? = nil)'],
+      },
+      {
+        generator: new CSharpGenerator(),
+        config: { ...baseConfig, language: 'csharp' as const },
+        apiPath: 'Api/ChatApi.cs',
+        expected: [
+          'public async Task StopAsync(string conversationId, string? conversationId_ = null)',
+          'new QueryParameterSpec("conversation_id", conversationId, "form", true, false, null)',
+          '["conversationId"] = new HeaderParameterSpec(conversationId_, "simple", false, null)',
+        ],
+        forbidden: ['public async Task StopAsync(string conversationId, string? conversationId = null)'],
+      },
+      {
+        generator: new RustGenerator(),
+        config: { ...baseConfig, language: 'rust' as const },
+        apiPath: 'src/api/chat.rs',
+        expected: [
+          'pub async fn stop(&self, conversation_id: &str, conversation_id_: Option<&str>) -> Result<(), SdkworkError>',
+          'QueryParameterSpec::new("conversation_id", conversation_id, "form", true, false, None)',
+          '("conversationId", HeaderParameterSpec::new(conversation_id_, "simple", false, None))',
+        ],
+        forbidden: ['pub async fn stop(&self, conversation_id: &str, conversation_id: Option<&str>)'],
+      },
+      {
+        generator: new PhpGenerator(),
+        config: { ...baseConfig, language: 'php' as const },
+        apiPath: 'src/Api/Chat.php',
+        expected: [
+          'public function stop(string $conversationId, ?string $conversationId_ = null): void',
+          "new QueryParameterSpec('conversation_id', $conversationId, 'form', true, false, null)",
+          "'conversationId' => new HeaderParameterSpec($conversationId_, 'simple', false, null)",
+        ],
+        forbidden: ['public function stop(string $conversationId, ?string $conversationId = null)'],
+      },
+      {
+        generator: new RubyGenerator(),
+        config: { ...baseConfig, language: 'ruby' as const },
+        apiPath: 'lib/sdkwork/backend_sdk/api/chat.rb',
+        expected: [
+          'def stop(conversation_id, conversation_id_: nil)',
+          "QueryParameterSpec.new('conversation_id', conversation_id, 'form', true, false, nil)",
+          "'conversationId' => HeaderParameterSpec.new(conversation_id_, 'simple', false, nil)",
+        ],
+        forbidden: ['def stop(conversation_id, conversation_id: nil)'],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await testCase.generator.generate(testCase.config, collidingQueryHeaderParameterSpec);
+      const apiFile = result.files.find((file) => file.path === testCase.apiPath);
+
+      expect(result.errors, testCase.config.language).toEqual([]);
+      expect(apiFile, testCase.config.language).toBeDefined();
+      for (const expected of testCase.expected) {
+        expect(apiFile!.content, `${testCase.config.language}: ${expected}`).toContain(expected);
+      }
+      for (const forbidden of testCase.forbidden) {
+        expect(apiFile!.content, `${testCase.config.language}: ${forbidden}`).not.toContain(forbidden);
+      }
+    }
+  });
+
   it('should generate OpenAPI path header and cookie parameter serialization metadata across SDK languages', async () => {
     const cases = [
       {
@@ -5818,6 +6239,50 @@ describe('OpenAPI Security And Compliance', () => {
     expect(readmeFile!.content).not.toContain('client.auth.sessions.create(body)');
   });
 
+  it('should support IM sdkwork v3 generated clients without backend masquerading', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'im',
+        apiPrefix: '/im/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      sdkworkV3ImDeviceSpec
+    );
+    const sdkFile = result.files.find((f) => f.path === 'src/sdk.ts');
+    const apiPathsFile = result.files.find((f) => f.path === 'src/api/paths.ts');
+    const deviceApi = result.files.find((f) => f.path === 'src/api/device.ts');
+    const indexFile = result.files.find((f) => f.path === 'src/index.ts');
+    const readmeFile = result.files.find((f) => f.path === 'README.md');
+
+    expect(result.errors).toEqual([]);
+    expect(sdkFile).toBeDefined();
+    expect(sdkFile!.content).toContain('export class SdkworkImClient');
+    expect(sdkFile!.content).toContain('public readonly device: DeviceApi;');
+    expect(sdkFile!.content).not.toContain('SdkworkBackendClient');
+    expect(sdkFile!.content).not.toContain('deviceSessions');
+    expect(apiPathsFile).toBeDefined();
+    expect(apiPathsFile!.content).toContain("export const IM_API_PREFIX = '/im/v3/api';");
+    expect(apiPathsFile!.content).toContain('export function imApiPath(path: string): string');
+    expect(deviceApi).toBeDefined();
+    expect(deviceApi!.content).toContain('public readonly sessions: DeviceSessionsApi;');
+    expect(deviceApi!.content).toContain('this.sessions = new DeviceSessionsApi(client);');
+    expect(deviceApi!.content).toContain('export class DeviceSessionsApi');
+    expect(deviceApi!.content).toContain('async resume(body: ResumeDeviceSessionRequest): Promise<DeviceSessionResumeView>');
+    expect(deviceApi!.content).toContain('async disconnect(body: PresenceDeviceRequest): Promise<PresenceSnapshotView>');
+    expect(deviceApi!.content).toContain('export class DeviceRegistrationsApi');
+    expect(deviceApi!.content).toContain('async create(body: RegisterDeviceRequest): Promise<RegisteredDeviceView>');
+    expect(deviceApi!.content).toContain('export class DeviceSyncFeedApi');
+    expect(deviceApi!.content).toContain('async retrieve(deviceId: string, params?: DeviceSyncFeedRetrieveParams): Promise<DeviceSyncFeedResponse>');
+    expect(deviceApi!.content).not.toContain('DeviceSessionsApi(client).resume');
+    expect(deviceApi!.content).not.toContain('async deviceSessions');
+    expect(indexFile).toBeDefined();
+    expect(indexFile!.content).toContain("export { SdkworkImClient, createClient } from './sdk';");
+    expect(readmeFile).toBeDefined();
+    expect(readmeFile!.content).toContain('client.device.sessions.resume(body);');
+  });
+
   it('should generate sdkwork v3 TypeScript auth headers without legacy Access-Token aliases', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(
@@ -5833,8 +6298,8 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(httpClient).toBeDefined();
-    expect(httpClient!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Sdkwork-Access-Token';");
-    expect(httpClient!.content).not.toMatch(/(?<!Sdkwork-)Access-Token/);
+    expect(httpClient!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Access-Token';");
+    expect(httpClient!.content).not.toContain(`${'Sdkwork'}-Access-Token`);
     expect(httpClient!.content).not.toContain("HttpClient.ACCESS_TOKEN_HEADER === 'Access-Token'");
   });
 
@@ -5959,6 +6424,209 @@ describe('OpenAPI Security And Compliance', () => {
     expect(authApi!.content).not.toContain('value: provider');
   });
 
+  it('should allow backend admin course hyphenated content resource paths without rewriting generated URLs', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'backend',
+        apiPrefix: '/backend/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          '/backend/v3/api/content/course-applications': {
+            get: {
+              summary: 'List course applications',
+              operationId: 'courseApplications.list',
+              tags: ['content'],
+              security: [{ AuthToken: [], AccessToken: [] }],
+              responses: {
+                '200': {
+                  description: 'Success',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/CourseApplicationsListResult' },
+                    },
+                  },
+                },
+                '400': {
+                  description: 'Bad request',
+                  content: {
+                    'application/problem+json': {
+                      schema: { $ref: '#/components/schemas/ProblemDetail' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '/backend/v3/api/content/course-applications/{applicationId}/review': {
+            patch: {
+              summary: 'Review course application',
+              operationId: 'courseApplications.review',
+              tags: ['content'],
+              security: [{ AuthToken: [], AccessToken: [] }],
+              parameters: [
+                { name: 'applicationId', in: 'path', required: true, schema: { type: 'string' } },
+              ],
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/CourseApplicationReviewRequest' },
+                  },
+                },
+              },
+              responses: {
+                '200': {
+                  description: 'Success',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/CourseApplicationsReviewResult' },
+                    },
+                  },
+                },
+                '400': {
+                  description: 'Bad request',
+                  content: {
+                    'application/problem+json': {
+                      schema: { $ref: '#/components/schemas/ProblemDetail' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '/backend/v3/api/content/course-sections/{sectionId}': {
+            patch: {
+              summary: 'Update course section',
+              operationId: 'courseSections.update',
+              tags: ['content'],
+              security: [{ AuthToken: [], AccessToken: [] }],
+              parameters: [
+                { name: 'sectionId', in: 'path', required: true, schema: { type: 'string' } },
+              ],
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/CourseSectionMutationRequest' },
+                  },
+                },
+              },
+              responses: {
+                '200': {
+                  description: 'Success',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/CourseSectionsUpdateResult' },
+                    },
+                  },
+                },
+                '400': {
+                  description: 'Bad request',
+                  content: {
+                    'application/problem+json': {
+                      schema: { $ref: '#/components/schemas/ProblemDetail' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '/backend/v3/api/content/course-lessons/{lessonId}': {
+            delete: {
+              summary: 'Delete course lesson',
+              operationId: 'courseLessons.delete',
+              tags: ['content'],
+              security: [{ AuthToken: [], AccessToken: [] }],
+              parameters: [
+                { name: 'lessonId', in: 'path', required: true, schema: { type: 'string' } },
+              ],
+              responses: {
+                '200': {
+                  description: 'Success',
+                  content: {
+                    'application/json': {
+                      schema: { $ref: '#/components/schemas/CourseLessonsDeleteResult' },
+                    },
+                  },
+                },
+                '400': {
+                  description: 'Bad request',
+                  content: {
+                    'application/problem+json': {
+                      schema: { $ref: '#/components/schemas/ProblemDetail' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          ...sdkworkV3IamSpec.components,
+          schemas: {
+            ...sdkworkV3IamSpec.components?.schemas,
+            CourseApplicationReviewRequest: {
+              type: 'object',
+              properties: {
+                status: { type: 'string' },
+                comment: { type: 'string' },
+              },
+            },
+            CourseApplicationsListResult: {
+              type: 'object',
+              properties: {
+                items: {
+                  type: 'array',
+                  items: { type: 'object' },
+                },
+              },
+            },
+            CourseApplicationsReviewResult: {
+              type: 'object',
+              properties: {
+                accepted: { type: 'boolean' },
+              },
+            },
+            CourseSectionMutationRequest: {
+              type: 'object',
+              properties: {
+                title: { type: 'string' },
+              },
+            },
+            CourseSectionsUpdateResult: {
+              type: 'object',
+              properties: {
+                updated: { type: 'boolean' },
+              },
+            },
+            CourseLessonsDeleteResult: {
+              type: 'object',
+              properties: {
+                deleted: { type: 'boolean' },
+              },
+            },
+          },
+        },
+      }
+    );
+    const contentApi = result.files.find((f) => f.path === 'src/api/content.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(contentApi).toBeDefined();
+    expect(contentApi!.content).toContain('backendApiPath(`/content/course-applications`)');
+    expect(contentApi!.content).toContain('backendApiPath(`/content/course-applications/${serializePathParameter(applicationId');
+    expect(contentApi!.content).toContain('backendApiPath(`/content/course-sections/${serializePathParameter(sectionId');
+    expect(contentApi!.content).toContain('backendApiPath(`/content/course-lessons/${serializePathParameter(lessonId');
+    expect(contentApi!.content).not.toContain('/content/course_applications');
+    expect(contentApi!.content).not.toContain('/content/course_sections');
+    expect(contentApi!.content).not.toContain('/content/course_lessons');
+  });
+
   it('should reject non-standard sdkwork v3 OpenAPI contracts under the strict standard profile', async () => {
     const generator = new TypeScriptGenerator();
     const invalidSpec: ApiSpec = {
@@ -5972,6 +6640,25 @@ describe('OpenAPI Security And Compliance', () => {
             responses: {
               '200': { description: 'Success' },
               '401': { description: 'Unauthorized' },
+            },
+          },
+        },
+        '/backend/v3/api/content/course-offers': {
+          get: {
+            summary: 'List course offers',
+            operationId: 'courseOffers.list',
+            tags: ['content'],
+            security: [{ AuthToken: [], AccessToken: [] }],
+            responses: {
+              '200': { description: 'Success' },
+              '400': {
+                description: 'Bad request',
+                content: {
+                  'application/problem+json': {
+                    schema: { $ref: '#/components/schemas/ProblemDetail' },
+                  },
+                },
+              },
             },
           },
         },
@@ -5994,6 +6681,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors[0].message).toContain('operationId "auth__login" must not contain "__"');
     expect(result.errors[0].message).toContain('must not expose auth/session endpoints in backend-api');
     expect(result.errors[0].message).toContain('must include application/problem+json');
+    expect(result.errors[0].message).toContain('Path "/backend/v3/api/content/course-offers" segment "course-offers" must use lower_snake_case');
   });
 
   it('should strip tag-like operationId prefixes into friendly method names', async () => {

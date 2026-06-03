@@ -91,7 +91,7 @@ final class HttpClient
     public function setAccessToken(string $token): self
     {
         $this->accessToken = $token;
-        if (strtolower('${apiKeyHeader}') !== 'sdkwork-access-token') {
+        if (strtolower('${apiKeyHeader}') !== 'access-token') {
             $this->apiKey = null;
         }
         return $this;
@@ -207,7 +207,7 @@ final class HttpClient
             $headers['Authorization'] = $this->formatBearer($this->authToken);
         }
         if ($this->accessToken !== null && $this->accessToken !== '') {
-            $headers['Sdkwork-Access-Token'] = $this->accessToken;
+            $headers['Access-Token'] = $this->accessToken;
         }
 
         return $headers;

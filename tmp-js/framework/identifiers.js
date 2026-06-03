@@ -9,6 +9,9 @@ function splitIdentifierParts(value) {
 function capitalize(value) {
     return value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : '';
 }
+function pascalize(value) {
+    return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+}
 function finalizeIdentifier(candidate, reservedWords, fallback) {
     let normalized = String(candidate || '')
         .replace(/[^a-zA-Z0-9_]/g, '_')
@@ -30,6 +33,11 @@ export function toSafeCamelIdentifier(value, reservedWords, fallback = 'value') 
     const candidate = parts.length === 0
         ? fallback
         : parts[0].toLowerCase() + parts.slice(1).map(capitalize).join('');
+    return finalizeIdentifier(candidate, reservedWords, fallback);
+}
+export function toSafePascalIdentifier(value, reservedWords, fallback = 'Model') {
+    const parts = splitIdentifierParts(value);
+    const candidate = parts.length === 0 ? fallback : parts.map(pascalize).join('');
     return finalizeIdentifier(candidate, reservedWords, fallback);
 }
 export function toSafeSnakeIdentifier(value, reservedWords, fallback = 'value') {

@@ -312,7 +312,10 @@ end`, requires)),
     const queryBindings = hasExplicitQuerySerialization
       ? this.createQueryParameterBindings(queryParams, parameterReservedNames)
       : [];
-    const headerBindings = this.createHeaderParameterBindings(headerParams, parameterReservedNames);
+    const headerBindings = this.createHeaderParameterBindings(headerParams, [
+      ...parameterReservedNames,
+      ...queryBindings.map((binding) => binding.safeName),
+    ]);
     const cookieBindings = this.createHeaderParameterBindings(cookieParams, [
       ...parameterReservedNames,
       ...queryBindings.map((binding) => binding.safeName),

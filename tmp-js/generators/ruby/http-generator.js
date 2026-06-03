@@ -91,7 +91,7 @@ end`)),
 
   def set_access_token(token)
     @access_token = token
-    @api_key = nil unless '${apiKeyHeader}'.downcase == 'sdkwork-access-token'
+    @api_key = nil unless '${apiKeyHeader}'.downcase == 'access-token'
     self
   end
 
@@ -158,7 +158,7 @@ end`)),
     auth_headers = {}
     auth_headers['${apiKeyHeader}'] = ${apiKeyUseBearer ? "format_bearer(@api_key)" : '@api_key'} if @api_key && !@api_key.empty?
     auth_headers['Authorization'] = format_bearer(@auth_token) if @auth_token && !@auth_token.empty?
-    auth_headers['Sdkwork-Access-Token'] = @access_token if @access_token && !@access_token.empty?
+    auth_headers['Access-Token'] = @access_token if @access_token && !@access_token.empty?
     auth_headers.merge(@headers).merge(request_headers || {})
   end
 

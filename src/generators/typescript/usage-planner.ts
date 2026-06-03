@@ -685,8 +685,13 @@ function resolveDottedOperationActionName(
   }
 
   const resourceParts = parts.slice(0, -1).map((part) => normalizeStaticSegment(part)).filter(Boolean);
-  const canonicalResourcePath = resourcePathSegments.slice(1).map(canonicalResourcePart);
-  if (resourceParts.length > 0 && !sameCanonicalParts(resourceParts, canonicalResourcePath.slice(-resourceParts.length))) {
+  const canonicalResourcePathWithoutRoot = resourcePathSegments.slice(1).map(canonicalResourcePart);
+  const canonicalResourcePathWithRoot = resourcePathSegments.map(canonicalResourcePart);
+  if (
+    resourceParts.length > 0
+    && !sameCanonicalParts(resourceParts, canonicalResourcePathWithoutRoot.slice(-resourceParts.length))
+    && !sameCanonicalParts(resourceParts, canonicalResourcePathWithRoot.slice(-resourceParts.length))
+  ) {
     return '';
   }
 

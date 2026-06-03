@@ -1,7 +1,7 @@
 import { normalizeOpenApiPathItemOperations } from './http-methods.js';
-const SDKWORK_ACCESS_TOKEN_HEADER = 'Sdkwork-Access-Token';
+const ACCESS_TOKEN_HEADER = 'Access-Token';
 const AUTH_TOKEN_SCHEME = 'AuthToken';
-const ACCESS_TOKEN_SCHEME = 'SdkworkAccessToken';
+const ACCESS_TOKEN_SCHEME = 'AccessToken';
 const AUTH_BACKEND_RESOURCE_SEGMENTS = new Set([
     'sessions',
     'verification_codes',
@@ -9,6 +9,11 @@ const AUTH_BACKEND_RESOURCE_SEGMENTS = new Set([
     'password_resets',
     'oauth_authorization_urls',
     'oauth_sessions',
+]);
+const BACKEND_COURSE_RESOURCE_SEGMENTS = new Set([
+    'course-applications',
+    'course-lessons',
+    'course-sections',
 ]);
 export function validateSdkworkV3Standard(spec, options) {
     const issues = [];
@@ -25,15 +30,15 @@ export function validateSdkworkV3Standard(spec, options) {
     const accessScheme = securitySchemes[ACCESS_TOKEN_SCHEME];
     if (accessScheme?.type !== 'apiKey'
         || accessScheme.in !== 'header'
-        || accessScheme.name !== SDKWORK_ACCESS_TOKEN_HEADER) {
-        issues.push(`components.securitySchemes.${ACCESS_TOKEN_SCHEME} must be an apiKey header named "${SDKWORK_ACCESS_TOKEN_HEADER}".`);
+        || accessScheme.name !== ACCESS_TOKEN_HEADER) {
+        issues.push(`components.securitySchemes.${ACCESS_TOKEN_SCHEME} must be an apiKey header named "${ACCESS_TOKEN_HEADER}".`);
     }
     for (const [rawPath, pathItem] of Object.entries(spec.paths || {})) {
         const path = normalizePath(rawPath);
         if (!path.startsWith(`${expectedPrefix}/`) && path !== expectedPrefix) {
             issues.push(`Path "${rawPath}" must start with "${expectedPrefix}".`);
         }
-        validatePathSegments(rawPath, expectedPrefix, issues);
+        validatePathSegments(rawPath, expectedPrefix, options.sdkType, issues);
         const item = (pathItem || {});
         for (const { method, operation } of normalizeOpenApiPathItemOperations(item)) {
             const apiOperation = operation;
@@ -62,7 +67,10 @@ function resolveExpectedPrefix(sdkType) {
     if (sdkType === 'backend') {
         return '/backend/v3/api';
     }
-    throw new Error(`sdkwork-v3 standard profile supports app and backend SDKs only. Received: ${sdkType}`);
+    if (sdkType === 'im') {
+        return '/im/v3/api';
+    }
+    throw new Error(`sdkwork-v3 standard profile supports app, backend, and im SDKs only. Received: ${sdkType}`);
 }
 function validateOperationId(operationLabel, operationId, issues) {
     const value = (operationId || '').trim();
@@ -111,7 +119,7 @@ function validateSecurity(operationLabel, operation, issues) {
         issues.push(`${operationLabel} must require both ${AUTH_TOKEN_SCHEME} and ${ACCESS_TOKEN_SCHEME}, or explicitly set security: [].`);
     }
 }
-function validatePathSegments(rawPath, expectedPrefix, issues) {
+function validatePathSegments(rawPath, expectedPrefix, sdkType, issues) {
     const path = normalizePath(rawPath);
     const relative = path.startsWith(expectedPrefix)
         ? path.slice(expectedPrefix.length)
@@ -125,9 +133,15 @@ function validatePathSegments(rawPath, expectedPrefix, issues) {
             continue;
         }
         if (!/^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(segment)) {
+            if (sdkType === 'backend' && isAllowedBackendCourseResourceSegment(path, expectedPrefix, segment)) {
+                continue;
+            }
             issues.push(`Path "${rawPath}" segment "${segment}" must use lower_snake_case.`);
         }
     }
+}
+function isAllowedBackendCourseResourceSegment(path, expectedPrefix, segment) {
+    return path.startsWith(`${expectedPrefix}/content/`) && BACKEND_COURSE_RESOURCE_SEGMENTS.has(segment);
 }
 function isBackendAuthEndpoint(path, expectedPrefix) {
     const relativeSegments = path

@@ -227,6 +227,84 @@ const rustReservedTagSpec: ApiSpec = {
   },
 };
 
+const rustDiscriminatedContentSpec: ApiSpec = {
+  openapi: '3.1.2',
+  info: { title: 'Rust Discriminated Content API', version: '1.0.0' },
+  paths: {
+    '/app/v3/api/messages': {
+      post: {
+        summary: 'Create message',
+        operationId: 'messages.create',
+        tags: ['chat'],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  parts: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/ContentPart' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      ContentPart: {
+        discriminator: { propertyName: 'kind' } as any,
+        oneOf: [
+          { $ref: '#/components/schemas/TextContentPart' },
+          { $ref: '#/components/schemas/MediaContentPart' },
+        ],
+      },
+      TextContentPart: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'text'],
+        properties: {
+          kind: { type: 'string', enum: ['text'] },
+          text: { type: 'string' },
+        },
+      },
+      MediaContentPart: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'drive', 'resource'],
+        properties: {
+          kind: { type: 'string', enum: ['media'] },
+          drive: { $ref: '#/components/schemas/DriveReference' },
+          resource: { $ref: '#/components/schemas/MediaResource' },
+          mediaRole: { type: 'string' },
+        },
+      },
+      DriveReference: {
+        type: 'object',
+        required: ['driveUri', 'spaceId', 'nodeId'],
+        properties: {
+          driveUri: { type: 'string' },
+          spaceId: { type: 'string' },
+          nodeId: { type: 'string' },
+        },
+      },
+      MediaResource: {
+        type: 'object',
+        required: ['uri'],
+        properties: {
+          uri: { type: 'string' },
+          kind: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 const rustPathOnlySerializationSpec: ApiSpec = {
   openapi: '3.1.0',
   info: {
@@ -471,5 +549,35 @@ describe('Rust generator', () => {
     expect(clientFile!.content).not.toContain('pub fn const(&self)');
     expect(readme!.content).toContain('client.const_().get_const_envelope().await?;');
     expect(smokeTest!.content).toContain('client.const_().get_const_envelope().await?;');
+  });
+
+  it('generates oneOf content parts as a discriminator-dispatched enum instead of one wide DTO', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rustConfig, rustDiscriminatedContentSpec);
+    const contentPartFile = result.files.find((file) => file.path === 'src/models/content_part.rs');
+    const mediaContentPartFile = result.files.find((file) => file.path === 'src/models/media_content_part.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(contentPartFile).toBeDefined();
+    expect(mediaContentPartFile).toBeDefined();
+    expect(contentPartFile!.content).toContain('use crate::models::{MediaContentPart, TextContentPart};');
+    expect(contentPartFile!.content).toContain('pub enum ContentPart {');
+    expect(contentPartFile!.content).toContain('Text(TextContentPart),');
+    expect(contentPartFile!.content).toContain('Media(MediaContentPart),');
+    expect(contentPartFile!.content).toContain('impl Serialize for ContentPart');
+    expect(contentPartFile!.content).toContain('Self::Media(value) => value.serialize(serializer),');
+    expect(contentPartFile!.content).toContain('impl<\'de> Deserialize<\'de> for ContentPart');
+    expect(contentPartFile!.content).toContain('let kind = value\n            .get("kind")');
+    expect(contentPartFile!.content).toContain('"media" => Ok(Self::Media(serde_json::from_value(value).map_err(de::Error::custom)?)),');
+    expect(contentPartFile!.content).toContain('other => Err(de::Error::unknown_variant(other, VARIANTS)),');
+    expect(contentPartFile!.content).not.toContain('pub struct ContentPart');
+    expect(contentPartFile!.content).not.toContain('pub drive: Option<DriveReference>');
+    expect(mediaContentPartFile!.content).toContain('pub struct MediaContentPart');
+    expect(mediaContentPartFile!.content).toContain('pub drive: DriveReference,');
+    expect(mediaContentPartFile!.content).toContain('pub resource: MediaResource,');
+    expect(mediaContentPartFile!.content).not.toContain('pub drive: Option<DriveReference>');
+    expect(mediaContentPartFile!.content).not.toContain('pub resource: Option<MediaResource>');
   });
 });

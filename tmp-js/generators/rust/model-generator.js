@@ -1,4 +1,4 @@
-import { collectSchemaReferences, getSchemaReferenceName, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
+import { collectSchemaReferences, getConstSchemaInfo, getSchemaReferenceName, pickComposedSchema, resolveModelSchema, } from '../../framework/schema.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { sanitizeRustRawIdentifier } from './identifiers.js';
 export class ModelGenerator {
@@ -79,6 +79,10 @@ pub struct Page<T> {
         };
     }
     generateModel(name, schema, schemas, knownModels) {
+        const oneOfModel = this.resolveOneOfModel(name, schema, schemas, knownModels);
+        if (oneOfModel) {
+            return this.generateOneOfEnum(name, oneOfModel);
+        }
         const modelSchema = resolveModelSchema(schema, schemas);
         const modelName = RUST_CONFIG.namingConventions.modelName(name);
         const fileName = RUST_CONFIG.namingConventions.fileName(name);
@@ -110,6 +114,81 @@ ${fields}
             description: `${modelName} Rust model`,
         };
     }
+    generateOneOfEnum(name, oneOfModel) {
+        const modelName = RUST_CONFIG.namingConventions.modelName(name);
+        const fileName = RUST_CONFIG.namingConventions.fileName(name);
+        const modelImports = Array.from(new Set(oneOfModel.variants.map((variant) => variant.modelName))).sort();
+        const enumVariants = oneOfModel.variants
+            .map((variant) => `    ${variant.variantName}(${variant.modelName}),`)
+            .join('\n');
+        const serializeArms = oneOfModel.variants
+            .map((variant) => `            Self::${variant.variantName}(value) => value.serialize(serializer),`)
+            .join('\n');
+        const deserializeArms = oneOfModel.variants
+            .map((variant) => {
+            const discriminatorValue = this.escapeRustStringLiteral(variant.discriminatorValue);
+            return `            "${discriminatorValue}" => Ok(Self::${variant.variantName}(serde_json::from_value(value).map_err(de::Error::custom)?)),`;
+        })
+            .join('\n');
+        const variantList = oneOfModel.variants
+            .map((variant) => `"${this.escapeRustStringLiteral(variant.discriminatorValue)}"`)
+            .join(', ');
+        const discriminatorProperty = this.escapeRustStringLiteral(oneOfModel.discriminatorProperty);
+        const defaultVariant = oneOfModel.variants[0];
+        const defaultImpl = defaultVariant
+            ? `
+impl Default for ${modelName} {
+    fn default() -> Self {
+        Self::${defaultVariant.variantName}(${defaultVariant.modelName}::default())
+    }
+}`
+            : '';
+        return {
+            path: `src/models/${fileName}.rs`,
+            content: this.format(`use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::models::{${modelImports.join(', ')}};
+
+#[derive(Debug, Clone)]
+pub enum ${modelName} {
+${enumVariants}
+}
+
+impl Serialize for ${modelName} {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+${serializeArms}
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ${modelName} {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        const VARIANTS: &[&str] = &[${variantList}];
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let kind = value
+            .get("${discriminatorProperty}")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| de::Error::missing_field("${discriminatorProperty}"))?
+            .to_owned();
+
+        match kind.as_str() {
+${deserializeArms}
+            other => Err(de::Error::unknown_variant(other, VARIANTS)),
+        }
+    }
+}
+${defaultImpl}`),
+            language: 'rust',
+            description: `${modelName} Rust discriminated union model`,
+        };
+    }
     generateField(propName, propSchema, required, modelName) {
         const normalizedName = sanitizeRustIdentifier(RUST_CONFIG.namingConventions.propertyName(propName) || 'value');
         const originalName = String(propName || '').trim();
@@ -136,6 +215,73 @@ ${fields}
     }
     format(content) {
         return `${content.trim()}\n`;
+    }
+    resolveOneOfModel(name, schema, schemas, knownModels) {
+        if (!schema || typeof schema !== 'object' || !Array.isArray(schema.oneOf) || schema.oneOf.length === 0) {
+            return undefined;
+        }
+        const discriminatorProperty = typeof schema.discriminator?.propertyName === 'string'
+            ? schema.discriminator.propertyName
+            : 'kind';
+        const modelName = RUST_CONFIG.namingConventions.modelName(name);
+        const variants = [];
+        const usedVariantNames = new Set();
+        for (const entry of schema.oneOf) {
+            if (!entry || typeof entry !== 'object' || typeof entry.$ref !== 'string') {
+                return undefined;
+            }
+            const schemaName = getSchemaReferenceName(entry.$ref);
+            const variantModelName = RUST_CONFIG.namingConventions.modelName(schemaName);
+            if (!knownModels.has(variantModelName)) {
+                return undefined;
+            }
+            const variantSchema = resolveModelSchema(schemas[schemaName], schemas);
+            const discriminatorValue = this.resolveDiscriminatorValue(variantSchema, discriminatorProperty);
+            if (!discriminatorValue) {
+                return undefined;
+            }
+            const baseVariantName = this.resolveEnumVariantName(variantModelName, modelName);
+            let variantName = baseVariantName;
+            let suffix = 2;
+            while (usedVariantNames.has(variantName)) {
+                variantName = `${baseVariantName}${suffix}`;
+                suffix += 1;
+            }
+            usedVariantNames.add(variantName);
+            variants.push({
+                discriminatorValue,
+                modelName: variantModelName,
+                variantName,
+            });
+        }
+        return variants.length > 0
+            ? { discriminatorProperty, variants }
+            : undefined;
+    }
+    resolveDiscriminatorValue(schema, discriminatorProperty) {
+        const propertySchema = schema?.properties?.[discriminatorProperty];
+        if (!propertySchema || typeof propertySchema !== 'object') {
+            return undefined;
+        }
+        const constInfo = getConstSchemaInfo(propertySchema);
+        if (constInfo?.value != null) {
+            return String(constInfo.value);
+        }
+        if (Array.isArray(propertySchema.enum) && propertySchema.enum.length === 1 && propertySchema.enum[0] != null) {
+            return String(propertySchema.enum[0]);
+        }
+        return undefined;
+    }
+    resolveEnumVariantName(variantModelName, baseModelName) {
+        const stripped = variantModelName.endsWith(baseModelName)
+            ? variantModelName.slice(0, -baseModelName.length)
+            : '';
+        const preferred = stripped || variantModelName || 'Variant';
+        const sanitized = preferred.replace(/[^A-Za-z0-9_]/g, '') || 'Variant';
+        return /^[0-9]/.test(sanitized) ? `Variant${sanitized}` : sanitized;
+    }
+    escapeRustStringLiteral(value) {
+        return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     }
     collectReferencedModels(schema, knownModels, refs) {
         collectSchemaReferences(schema, RUST_CONFIG.namingConventions.modelName, knownModels, refs);

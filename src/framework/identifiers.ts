@@ -11,6 +11,10 @@ function capitalize(value: string): string {
   return value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : '';
 }
 
+function pascalize(value: string): string {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+}
+
 function finalizeIdentifier(
   candidate: string,
   reservedWords: ReadonlySet<string>,
@@ -45,6 +49,16 @@ export function toSafeCamelIdentifier(
   const candidate = parts.length === 0
     ? fallback
     : parts[0].toLowerCase() + parts.slice(1).map(capitalize).join('');
+  return finalizeIdentifier(candidate, reservedWords, fallback);
+}
+
+export function toSafePascalIdentifier(
+  value: string,
+  reservedWords: ReadonlySet<string>,
+  fallback = 'Model'
+): string {
+  const parts = splitIdentifierParts(value);
+  const candidate = parts.length === 0 ? fallback : parts.map(pascalize).join('');
   return finalizeIdentifier(candidate, reservedWords, fallback);
 }
 

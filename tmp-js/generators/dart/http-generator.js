@@ -262,7 +262,7 @@ class HttpClient {
       merged['Authorization'] = 'Bearer $_authToken';
     }
     if (_accessToken != null && _accessToken!.isNotEmpty) {
-      merged['Sdkwork-Access-Token'] = _accessToken!;
+      merged['Access-Token'] = _accessToken!;
     }
 
     return merged;

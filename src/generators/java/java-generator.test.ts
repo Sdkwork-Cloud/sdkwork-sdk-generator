@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
 import { getGenerator } from '../../index.js';
+import { discriminatedContentSpec } from '../../../test-support/discriminated-content-spec.js';
 
 const javaConfig: GeneratorConfig = {
   name: 'SdkworkAppSdk',
@@ -201,6 +202,43 @@ const javaExplicitQuerySpec: ApiSpec = {
   components: { schemas: {} },
 };
 
+const javaQueryHeaderCollisionSpec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'Java Query Header Collision Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/chat/stop': {
+      post: {
+        summary: 'Stop chat',
+        operationId: 'chat.stop',
+        tags: ['Chat'],
+        parameters: [
+          {
+            name: 'conversation_id',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'conversationId',
+            in: 'header',
+            required: true,
+            schema: { type: 'string' },
+          },
+        ],
+        responses: {
+          '204': {
+            description: 'No content',
+          },
+        },
+      },
+    },
+  },
+  components: { schemas: {} },
+};
+
 describe('Java generator regressions', () => {
   it('applies explicit namespace and Maven coordinates consistently', async () => {
     const generator = getGenerator('java' as any);
@@ -337,5 +375,46 @@ describe('Java generator regressions', () => {
     expect(apiFile!.content).toContain('private static String encodeQueryValue(String value, boolean allowReserved)');
     expect(apiFile!.content).toContain('private static String urlEncode(String value)');
     expect(apiFile!.content).toContain('return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);');
+  });
+
+  it('keeps Java query and header parameter names unique after camel-case normalization', async () => {
+    const generator = getGenerator('java' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(javaConfig, javaQueryHeaderCollisionSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/app/api/ChatApi.java');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('public Void stop(String conversationId, String conversationId_) throws Exception');
+    expect(apiFile!.content).toContain('new QueryParameterSpec("conversation_id", conversationId, "form", true, false, null)');
+    expect(apiFile!.content).toContain('"conversationId", new HeaderParameterSpec(conversationId_, "simple", false, null)');
+    expect(apiFile!.content).not.toContain('public Void stop(String conversationId, String conversationId) throws Exception');
+  });
+
+  it('generates oneOf content parts as Jackson polymorphic models instead of one wide DTO', async () => {
+    const generator = getGenerator('java' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(javaConfig, discriminatedContentSpec);
+    const contentPartFile = result.files.find(
+      (file) => file.path === 'src/main/java/com/sdkwork/app/model/ContentPart.java'
+    );
+    const mediaContentPartFile = result.files.find(
+      (file) => file.path === 'src/main/java/com/sdkwork/app/model/MediaContentPart.java'
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(contentPartFile).toBeDefined();
+    expect(mediaContentPartFile).toBeDefined();
+    expect(contentPartFile!.content).toContain('import com.fasterxml.jackson.annotation.JsonSubTypes;');
+    expect(contentPartFile!.content).toContain('import com.fasterxml.jackson.annotation.JsonTypeInfo;');
+    expect(contentPartFile!.content).toContain('@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.EXISTING_PROPERTY, property = "kind", visible = true)');
+    expect(contentPartFile!.content).toContain('@JsonSubTypes.Type(value = MediaContentPart.class, name = "media")');
+    expect(contentPartFile!.content).toContain('public abstract class ContentPart');
+    expect(contentPartFile!.content).not.toContain('private DriveReference drive;');
+    expect(mediaContentPartFile!.content).toContain('public class MediaContentPart extends ContentPart');
+    expect(mediaContentPartFile!.content).toContain('private DriveReference drive;');
+    expect(mediaContentPartFile!.content).toContain('private MediaResource resource;');
   });
 });

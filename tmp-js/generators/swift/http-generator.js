@@ -64,8 +64,8 @@ public class HttpClient {
         if Self.apiKeyHeader.lowercased() != "authorization" {
             headers.removeValue(forKey: "Authorization")
         }
-        if Self.apiKeyHeader.lowercased() != "sdkwork-access-token" {
-            headers.removeValue(forKey: "Sdkwork-Access-Token")
+        if Self.apiKeyHeader.lowercased() != "access-token" {
+            headers.removeValue(forKey: "Access-Token")
         }
     }
 
@@ -77,10 +77,10 @@ public class HttpClient {
     }
 
     public func setAccessToken(_ token: String) {
-        if Self.apiKeyHeader.lowercased() != "sdkwork-access-token" {
+        if Self.apiKeyHeader.lowercased() != "access-token" {
             headers.removeValue(forKey: Self.apiKeyHeader)
         }
-        headers["Sdkwork-Access-Token"] = token
+        headers["Access-Token"] = token
     }
 
     public func setHeader(_ key: String, value: String) {

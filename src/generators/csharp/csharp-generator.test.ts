@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
 import { getGenerator } from '../../index.js';
+import { discriminatedContentSpec } from '../../../test-support/discriminated-content-spec.js';
 
 const csharpConfig: GeneratorConfig = {
   name: 'SdkworkAppSdk',
@@ -348,5 +349,27 @@ describe('CSharp generator regressions', () => {
     expect(apiFile!.content).toContain('public async Task<App.Models.FileInfo?> UploadAsync(App.Models.UploadFileRequest body)');
     expect(apiFile!.content).toContain('_client.PostAsync<App.Models.FileInfo>(');
     expect(apiFile!.content).not.toContain('public async Task<FileInfo?> UploadAsync(UploadFileRequest body)');
+  });
+
+  it('generates oneOf content parts as System.Text.Json polymorphic models instead of one wide DTO', async () => {
+    const generator = getGenerator('csharp' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(csharpConfig, discriminatedContentSpec);
+    const contentPartFile = result.files.find((file) => file.path === 'Models/ContentPart.cs');
+    const mediaContentPartFile = result.files.find((file) => file.path === 'Models/MediaContentPart.cs');
+
+    expect(result.errors).toEqual([]);
+    expect(contentPartFile).toBeDefined();
+    expect(mediaContentPartFile).toBeDefined();
+    expect(contentPartFile!.content).toContain('[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]');
+    expect(contentPartFile!.content).toContain('[JsonDerivedType(typeof(MediaContentPart), "media")]');
+    expect(contentPartFile!.content).toContain('public abstract class ContentPart');
+    expect(contentPartFile!.content).not.toContain('public DriveReference? Drive');
+    expect(mediaContentPartFile!.content).toContain('public class MediaContentPart : ContentPart');
+    expect(mediaContentPartFile!.content).toContain('public DriveReference Drive { get; set; }');
+    expect(mediaContentPartFile!.content).toContain('public MediaResource Resource { get; set; }');
+    expect(mediaContentPartFile!.content).not.toContain('public DriveReference? Drive');
+    expect(mediaContentPartFile!.content).not.toContain('public MediaResource? Resource');
   });
 });

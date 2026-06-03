@@ -85,8 +85,8 @@ public class HttpClient {
         if (!"Authorization".equalsIgnoreCase(API_KEY_HEADER)) {
             headers.remove("Authorization");
         }
-        if (!"Sdkwork-Access-Token".equalsIgnoreCase(API_KEY_HEADER)) {
-            headers.remove("Sdkwork-Access-Token");
+        if (!"Access-Token".equalsIgnoreCase(API_KEY_HEADER)) {
+            headers.remove("Access-Token");
         }
     }
 
@@ -98,10 +98,10 @@ public class HttpClient {
     }
 
     public void setAccessToken(String token) {
-        if (!"Sdkwork-Access-Token".equalsIgnoreCase(API_KEY_HEADER)) {
+        if (!"Access-Token".equalsIgnoreCase(API_KEY_HEADER)) {
             headers.remove(API_KEY_HEADER);
         }
-        headers.put("Sdkwork-Access-Token", token);
+        headers.put("Access-Token", token);
     }
 
     public void setHeader(String key, String value) {

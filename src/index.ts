@@ -26,7 +26,7 @@ import type { Language, GeneratorConfig, ApiSpec, GeneratorResult, SdkType } fro
 import type { BaseGenerator } from './framework/base.js';
 
 const generators: Map<Language, BaseGenerator> = new Map();
-const supportedSdkTypes = ['app', 'backend', 'ai', 'custom'] as const satisfies readonly SdkType[];
+const supportedSdkTypes = ['app', 'backend', 'im', 'ai', 'custom'] as const satisfies readonly SdkType[];
 const GENERATOR_FACTORIES: Record<Language, () => BaseGenerator> = {
   typescript: () => new TypeScriptGenerator(),
   dart: () => new DartGenerator(),

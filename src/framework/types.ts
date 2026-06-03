@@ -12,7 +12,7 @@ export type Language =
   | 'php'
   | 'ruby';
 
-export type SdkType = 'app' | 'backend' | 'ai' | 'custom';
+export type SdkType = 'app' | 'backend' | 'im' | 'ai' | 'custom';
 
 export interface GeneratorConfig {
   name: string;

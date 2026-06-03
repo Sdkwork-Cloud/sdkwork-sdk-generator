@@ -908,7 +908,6 @@ export class BaseGenerator {
         const managedHeaders = new Set([
             'authorization',
             'access-token',
-            'sdkwork-access-token',
         ]);
         if (auth?.apiKeyHeader) {
             managedHeaders.add(String(auth.apiKeyHeader).trim().toLowerCase());
@@ -973,9 +972,6 @@ export class BaseGenerator {
             score += 1;
         }
         if (header === 'access-token') {
-            score -= 4;
-        }
-        if (header === 'sdkwork-access-token') {
             score -= 4;
         }
         return score;

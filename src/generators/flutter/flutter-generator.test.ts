@@ -322,6 +322,84 @@ const flutterObjectRuntimeSpec: ApiSpec = {
   },
 };
 
+const flutterDiscriminatedContentSpec: ApiSpec = {
+  openapi: '3.1.2',
+  info: { title: 'Flutter Discriminated Content API', version: '1.0.0' },
+  paths: {
+    '/app/v3/api/messages': {
+      post: {
+        summary: 'Create message',
+        operationId: 'messages.create',
+        tags: ['chat'],
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  parts: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/ContentPart' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      ContentPart: {
+        discriminator: { propertyName: 'kind' } as any,
+        oneOf: [
+          { $ref: '#/components/schemas/TextContentPart' },
+          { $ref: '#/components/schemas/MediaContentPart' },
+        ],
+      },
+      TextContentPart: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'text'],
+        properties: {
+          kind: { type: 'string', enum: ['text'] },
+          text: { type: 'string' },
+        },
+      },
+      MediaContentPart: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['kind', 'drive', 'resource'],
+        properties: {
+          kind: { type: 'string', enum: ['media'] },
+          drive: { $ref: '#/components/schemas/DriveReference' },
+          resource: { $ref: '#/components/schemas/MediaResource' },
+          mediaRole: { type: 'string' },
+        },
+      },
+      DriveReference: {
+        type: 'object',
+        required: ['driveUri', 'spaceId', 'nodeId'],
+        properties: {
+          driveUri: { type: 'string' },
+          spaceId: { type: 'string' },
+          nodeId: { type: 'string' },
+        },
+      },
+      MediaResource: {
+        type: 'object',
+        required: ['uri'],
+        properties: {
+          uri: { type: 'string' },
+          kind: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
 describe('Flutter generator regressions', () => {
   it('generates sdk client imports from lib/src/api', async () => {
     const generator = new FlutterGenerator();
@@ -514,5 +592,25 @@ describe('Flutter generator regressions', () => {
     expect(modelsFile!.content).toContain("runtimeType_: json['runtimeType']?.toString()");
     expect(modelsFile!.content).toContain("'runtimeType': runtimeType_,");
     expect(modelsFile!.content).not.toContain('final String? runtimeType;');
+  });
+
+  it('generates oneOf content parts as discriminated Flutter models instead of one wide DTO', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate(flutterConfig, flutterDiscriminatedContentSpec);
+    const modelsFile = result.files.find((file) => file.path === 'lib/src/models.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(modelsFile).toBeDefined();
+    expect(modelsFile!.content).toContain('abstract class ContentPart {');
+    expect(modelsFile!.content).toContain('factory ContentPart.fromJson(Map<String, dynamic> json) {');
+    expect(modelsFile!.content).toContain("case 'media':");
+    expect(modelsFile!.content).toContain('return MediaContentPart.fromJson(json);');
+    expect(modelsFile!.content).toContain('class MediaContentPart implements ContentPart {');
+    expect(modelsFile!.content).toContain("final String kind;");
+    expect(modelsFile!.content).toContain('final DriveReference drive;');
+    expect(modelsFile!.content).toContain('final MediaResource resource;');
+    expect(modelsFile!.content).toContain('required this.drive');
+    expect(modelsFile!.content).toContain('required this.resource');
+    expect(modelsFile!.content).not.toContain('class ContentPart {\n  final String?');
   });
 });
