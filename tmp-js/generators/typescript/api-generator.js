@@ -1187,7 +1187,11 @@ ${exports}
         };
     }
     format(content) {
-        return content.trim() + '\n';
+        return content
+            .trim()
+            .split(/\r?\n/u)
+            .map((line) => line.trimEnd())
+            .join('\n') + '\n';
     }
     escapeSingleQuoted(value) {
         return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");

@@ -3053,6 +3053,64 @@ describe('OpenAPI Security And Compliance', () => {
     expect(modelAFile!.content).toContain('modelB?: ModelB;');
   });
 
+  it('should map int64 browser json contracts to TypeScript strings while preserving int32 numbers', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, {
+      openapi: '3.1.0',
+      info: { title: 'Int64 API', version: '1.0.0' },
+      paths: {
+        '/events': {
+          get: {
+            summary: 'List events',
+            operationId: 'events.list',
+            tags: ['Event'],
+            parameters: [
+              { name: 'after_seq', in: 'query', required: false, schema: { type: 'integer', format: 'int64' } },
+              { name: 'page', in: 'query', required: false, schema: { type: 'integer', format: 'int32' } },
+            ],
+            responses: {
+              '200': {
+                description: 'Success',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/EventListResponse' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          EventListResponse: {
+            type: 'object',
+            properties: {
+              id: {
+                type: 'string',
+                format: 'int64',
+                pattern: '^[1-9][0-9]*$',
+                'x-sdkwork-int64-string': true,
+                'x-sdkwork-rust-type': 'i64',
+              },
+              legacySeq: { type: 'integer', format: 'int64' },
+              page: { type: 'integer', format: 'int32' },
+            },
+          },
+        },
+      },
+    });
+    const apiFile = getGeneratedFile(result.files, 'src/api/event.ts');
+    const modelFile = getGeneratedFile(result.files, 'src/types/event-list-response.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile.content).toContain('afterSeq?: string;');
+    expect(apiFile.content).toContain('page?: number;');
+    expect(modelFile.content).toContain('id?: string;');
+    expect(modelFile.content).toContain('legacySeq?: string;');
+    expect(modelFile.content).toContain('page?: number;');
+  });
+
   it('should import referenced TypeScript path parameter schemas', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(baseConfig, {
@@ -7130,6 +7188,11 @@ describe('OpenAPI Security And Compliance', () => {
     expect(buildRuntimeFile?.content).toContain("import { rollup } from 'rollup';");
     expect(buildRuntimeFile?.content).toContain('maxRetries: 5');
     expect(buildRuntimeFile?.content).toContain('retryDelay: 100');
+    expect(buildRuntimeFile?.content).toContain('await removeTypeOnlyRuntimeReExports(path.join(tempEsmDir, \'index.js\'));');
+    expect(buildRuntimeFile?.content).toContain('async function removeTypeOnlyRuntimeReExports(entryFile) {');
+    expect(buildRuntimeFile?.content).toContain('source.split(/\\r?\\n/u)');
+    expect(buildRuntimeFile?.content).toContain("runtimeLines.join('\\n')");
+    expect(buildRuntimeFile?.content).toContain("if (line.trim() === \"export * from './types';\") {");
     expect(result.files.some((file) => file.path === 'vite.config.ts')).toBe(false);
 
     const packageJson = JSON.parse(packageJsonFile.content) as {

@@ -75,7 +75,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sdkwork/spring-ai-plus.git",
-    "directory": "spring-ai-plus-business/sdk/sdkwork-sdk-generator"
+    "directory": "sdk/sdkwork-sdk-generator"
   },
   "bugs": {
     "url": "https://github.com/sdkwork/spring-ai-plus/issues"

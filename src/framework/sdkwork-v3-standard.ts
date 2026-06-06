@@ -2,6 +2,8 @@ import type { ApiOperation, ApiSpec, SdkType } from './types.js';
 import { normalizeOpenApiPathItemOperations } from './http-methods.js';
 
 const ACCESS_TOKEN_HEADER = 'Access-Token';
+const API_KEY_HEADER = 'X-API-Key';
+const API_KEY_SCHEME = 'ApiKey';
 const AUTH_TOKEN_SCHEME = 'AuthToken';
 const ACCESS_TOKEN_SCHEME = 'AccessToken';
 
@@ -30,29 +32,20 @@ export function validateSdkworkV3Standard(
   options: SdkworkV3StandardValidationOptions,
 ): string[] {
   const issues: string[] = [];
-  const expectedPrefix = resolveExpectedPrefix(options.sdkType);
+  const expectedPrefix = resolveExpectedPrefix(options.sdkType, options.apiPrefix);
   const configuredPrefix = normalizePath(options.apiPrefix || expectedPrefix);
 
   if (configuredPrefix !== expectedPrefix) {
     issues.push(`apiPrefix must be "${expectedPrefix}" for sdkwork-v3 ${options.sdkType} SDKs.`);
   }
-
-  const securitySchemes = spec.components?.securitySchemes || {};
-  const authScheme = securitySchemes[AUTH_TOKEN_SCHEME];
-  if (authScheme?.type !== 'http' || authScheme.scheme?.toLowerCase() !== 'bearer') {
-    issues.push(`components.securitySchemes.${AUTH_TOKEN_SCHEME} must be an HTTP bearer scheme.`);
-  }
-
-  const accessScheme = securitySchemes[ACCESS_TOKEN_SCHEME];
-  if (
-    accessScheme?.type !== 'apiKey'
-    || accessScheme.in !== 'header'
-    || accessScheme.name !== ACCESS_TOKEN_HEADER
-  ) {
+  if (isCustomOpenApi(options.sdkType) && isForbiddenOpenApiPrefix(configuredPrefix)) {
     issues.push(
-      `components.securitySchemes.${ACCESS_TOKEN_SCHEME} must be an apiKey header named "${ACCESS_TOKEN_HEADER}".`,
+      'apiPrefix must not be "/app/v3/api" or "/backend/v3/api" for sdkwork-v3 custom open-api SDKs.',
     );
   }
+
+  const securitySchemes = spec.components?.securitySchemes || {};
+  validateSecuritySchemes(securitySchemes, options.sdkType, issues);
 
   for (const [rawPath, pathItem] of Object.entries(spec.paths || {})) {
     const path = normalizePath(rawPath);
@@ -68,7 +61,7 @@ export function validateSdkworkV3Standard(
       validateOperationId(operationLabel, apiOperation.operationId, issues);
       validateTags(operationLabel, apiOperation.tags, issues);
       validateErrorResponses(operationLabel, apiOperation, issues);
-      validateSecurity(operationLabel, apiOperation, issues);
+      validateSecurity(operationLabel, apiOperation, options.sdkType, issues);
 
       if (options.sdkType === 'backend' && isBackendAuthEndpoint(path, expectedPrefix)) {
         issues.push(`${operationLabel} must not expose auth/session endpoints in backend-api.`);
@@ -86,7 +79,7 @@ export function formatSdkworkV3StandardIssues(issues: string[]): string {
   ].join('\n');
 }
 
-function resolveExpectedPrefix(sdkType: SdkType): string {
+function resolveExpectedPrefix(sdkType: SdkType, apiPrefix?: string): string {
   if (sdkType === 'app') {
     return '/app/v3/api';
   }
@@ -96,7 +89,54 @@ function resolveExpectedPrefix(sdkType: SdkType): string {
   if (sdkType === 'im') {
     return '/im/v3/api';
   }
-  throw new Error(`sdkwork-v3 standard profile supports app, backend, and im SDKs only. Received: ${sdkType}`);
+  if (isCustomOpenApi(sdkType)) {
+    return normalizePath(apiPrefix || '');
+  }
+  throw new Error(`sdkwork-v3 standard profile supports app, backend, im, and custom open-api SDKs only. Received: ${sdkType}`);
+}
+
+function isCustomOpenApi(sdkType: SdkType): boolean {
+  return sdkType === 'custom';
+}
+
+function isForbiddenOpenApiPrefix(prefix: string): boolean {
+  return prefix === '/app/v3/api' || prefix === '/backend/v3/api';
+}
+
+function validateSecuritySchemes(
+  securitySchemes: Record<string, any>,
+  sdkType: SdkType,
+  issues: string[],
+): void {
+  if (isCustomOpenApi(sdkType)) {
+    const apiKeyScheme = securitySchemes[API_KEY_SCHEME];
+    if (
+      apiKeyScheme?.type !== 'apiKey'
+      || apiKeyScheme.in !== 'header'
+      || apiKeyScheme.name !== API_KEY_HEADER
+    ) {
+      issues.push(
+        `components.securitySchemes.${API_KEY_SCHEME} must be an apiKey header named "${API_KEY_HEADER}".`,
+      );
+    }
+    return;
+  }
+
+  const authScheme = securitySchemes[AUTH_TOKEN_SCHEME];
+  if (authScheme?.type !== 'http' || authScheme.scheme?.toLowerCase() !== 'bearer') {
+    issues.push(`components.securitySchemes.${AUTH_TOKEN_SCHEME} must be an HTTP bearer scheme.`);
+  }
+
+  const accessScheme = securitySchemes[ACCESS_TOKEN_SCHEME];
+  if (
+    accessScheme?.type !== 'apiKey'
+    || accessScheme.in !== 'header'
+    || accessScheme.name !== ACCESS_TOKEN_HEADER
+  ) {
+    issues.push(
+      `components.securitySchemes.${ACCESS_TOKEN_SCHEME} must be an apiKey header named "${ACCESS_TOKEN_HEADER}".`,
+    );
+  }
 }
 
 function validateOperationId(operationLabel: string, operationId: string | undefined, issues: string[]): void {
@@ -140,12 +180,27 @@ function validateErrorResponses(operationLabel: string, operation: ApiOperation,
   }
 }
 
-function validateSecurity(operationLabel: string, operation: ApiOperation, issues: string[]): void {
+function validateSecurity(
+  operationLabel: string,
+  operation: ApiOperation,
+  sdkType: SdkType,
+  issues: string[],
+): void {
   if (Array.isArray(operation.security) && operation.security.length === 0) {
     return;
   }
 
   const security = operation.security || [];
+  if (isCustomOpenApi(sdkType)) {
+    const hasApiKeyRequirement = security.some((requirement) => (
+      Object.prototype.hasOwnProperty.call(requirement, API_KEY_SCHEME)
+    ));
+    if (!hasApiKeyRequirement) {
+      issues.push(`${operationLabel} must require ${API_KEY_SCHEME}, or explicitly set security: [].`);
+    }
+    return;
+  }
+
   const hasDualTokenRequirement = security.some((requirement) => (
     Object.prototype.hasOwnProperty.call(requirement, AUTH_TOKEN_SCHEME)
     && Object.prototype.hasOwnProperty.call(requirement, ACCESS_TOKEN_SCHEME)

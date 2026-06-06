@@ -103,6 +103,9 @@ export function getTypeScriptType(schema, config, knownModels) {
     const type = normalized.type;
     const nullable = schema.nullable || normalized.nullable;
     const format = schema.format;
+    if (format === 'int64' || schema['x-sdkwork-int64-string'] === true) {
+        return nullable ? 'string | null' : 'string';
+    }
     const constInfo = getConstSchemaInfo(schema);
     if (constInfo) {
         const constType = renderTypeScriptConstType(constInfo.value);

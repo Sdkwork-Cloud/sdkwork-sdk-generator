@@ -1357,7 +1357,11 @@ ${exports}
   }
 
   private format(content: string): string {
-    return content.trim() + '\n';
+    return content
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => line.trimEnd())
+      .join('\n') + '\n';
   }
 
   private escapeSingleQuoted(value: string): string {

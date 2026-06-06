@@ -24,7 +24,7 @@ export class ModelGenerator {
         return {
             path: 'src/types/common.ts',
             content: this.format(`export interface BasePlusVO {
-  id?: string | number;
+  id?: string;
   createdAt?: string;
   updatedAt?: string;
   createdBy?: string;

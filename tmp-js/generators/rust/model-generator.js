@@ -1,4 +1,5 @@
-import { collectSchemaReferences, getConstSchemaInfo, getSchemaReferenceName, pickComposedSchema, resolveModelSchema, } from '../../framework/schema.js';
+import { resolveDiscriminatedUnionModel } from '../../framework/discriminated-union.js';
+import { collectSchemaReferences, getSchemaReferenceName, pickComposedSchema, resolveModelSchema, } from '../../framework/schema.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { sanitizeRustRawIdentifier } from './identifiers.js';
 export class ModelGenerator {
@@ -217,30 +218,15 @@ ${defaultImpl}`),
         return `${content.trim()}\n`;
     }
     resolveOneOfModel(name, schema, schemas, knownModels) {
-        if (!schema || typeof schema !== 'object' || !Array.isArray(schema.oneOf) || schema.oneOf.length === 0) {
+        const resolvedUnion = resolveDiscriminatedUnionModel(schema, schemas, RUST_CONFIG.namingConventions.modelName, knownModels);
+        if (!resolvedUnion) {
             return undefined;
         }
-        const discriminatorProperty = typeof schema.discriminator?.propertyName === 'string'
-            ? schema.discriminator.propertyName
-            : 'kind';
         const modelName = RUST_CONFIG.namingConventions.modelName(name);
         const variants = [];
         const usedVariantNames = new Set();
-        for (const entry of schema.oneOf) {
-            if (!entry || typeof entry !== 'object' || typeof entry.$ref !== 'string') {
-                return undefined;
-            }
-            const schemaName = getSchemaReferenceName(entry.$ref);
-            const variantModelName = RUST_CONFIG.namingConventions.modelName(schemaName);
-            if (!knownModels.has(variantModelName)) {
-                return undefined;
-            }
-            const variantSchema = resolveModelSchema(schemas[schemaName], schemas);
-            const discriminatorValue = this.resolveDiscriminatorValue(variantSchema, discriminatorProperty);
-            if (!discriminatorValue) {
-                return undefined;
-            }
-            const baseVariantName = this.resolveEnumVariantName(variantModelName, modelName);
+        for (const resolvedVariant of resolvedUnion.variants) {
+            const baseVariantName = this.resolveEnumVariantName(resolvedVariant.modelName, modelName);
             let variantName = baseVariantName;
             let suffix = 2;
             while (usedVariantNames.has(variantName)) {
@@ -249,28 +235,14 @@ ${defaultImpl}`),
             }
             usedVariantNames.add(variantName);
             variants.push({
-                discriminatorValue,
-                modelName: variantModelName,
+                discriminatorValue: resolvedVariant.discriminatorValue,
+                modelName: resolvedVariant.modelName,
                 variantName,
             });
         }
         return variants.length > 0
-            ? { discriminatorProperty, variants }
+            ? { discriminatorProperty: resolvedUnion.discriminatorProperty, variants }
             : undefined;
-    }
-    resolveDiscriminatorValue(schema, discriminatorProperty) {
-        const propertySchema = schema?.properties?.[discriminatorProperty];
-        if (!propertySchema || typeof propertySchema !== 'object') {
-            return undefined;
-        }
-        const constInfo = getConstSchemaInfo(propertySchema);
-        if (constInfo?.value != null) {
-            return String(constInfo.value);
-        }
-        if (Array.isArray(propertySchema.enum) && propertySchema.enum.length === 1 && propertySchema.enum[0] != null) {
-            return String(propertySchema.enum[0]);
-        }
-        return undefined;
     }
     resolveEnumVariantName(variantModelName, baseModelName) {
         const stripped = variantModelName.endsWith(baseModelName)
