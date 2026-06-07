@@ -306,14 +306,12 @@ function resolveJavaNormalizer(normalizedPath) {
     if (normalizedPath.endsWith('/http/HttpClient.java')) {
         return normalizeJavaHttpClient;
     }
-    if (normalizedPath.includes('/api/')
-        || normalizedPath.includes('/model/')
-        || normalizedPath.includes('/models/')
-        || normalizedPath.includes('/type/')
-        || normalizedPath.includes('/types/')) {
+    if (/\/api\/[^/]+Api\.java$/.test(normalizedPath)
+        || /\/models?\/[^/]+\.java$/.test(normalizedPath)
+        || /\/types?\/[^/]+\.java$/.test(normalizedPath)) {
         return undefined;
     }
-    if (/\/[^/]+\.java$/.test(normalizedPath) && !normalizedPath.endsWith('/api/ChatApi.java')) {
+    if (/\/[^/]*Client\.java$/.test(normalizedPath)) {
         return normalizeJavaSdkClient;
     }
     return undefined;

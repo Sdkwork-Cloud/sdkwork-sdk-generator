@@ -306,4 +306,63 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
     expect(combinedAuthSurface).not.toContain('apiKeyHeader');
     expect(combinedAuthSurface).not.toContain('apiKeyAsBearer');
   });
+
+  it('removes Java SDK auth API key methods when the package root contains api', async () => {
+    const appSpec: ApiSpec = {
+      ...spec,
+      paths: {
+        '/app/v3/api/portal/access': {
+          get: {
+            summary: 'Get portal access',
+            operationId: 'portal.access.get',
+            tags: ['portal'],
+            security: [
+              {
+                AuthToken: [],
+                AccessToken: [],
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        enabled: { type: 'boolean' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const result = await generateSdk(
+      {
+        ...createConfig('java'),
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        packageName: 'com.sdkwork:im-app-api-generated',
+        clientName: 'SdkworkImAppClient',
+      },
+      appSpec,
+    );
+
+    expect(result.errors).toEqual([]);
+    const files = allGeneratedContentByPath(result.files);
+    const clientFile = files.get(
+      'src/main/java/com/sdkwork/im/app/api/generated/SdkworkImAppClient.java',
+    ) ?? '';
+    const portalApiFile = files.get(
+      'src/main/java/com/sdkwork/im/app/api/generated/api/PortalApi.java',
+    ) ?? '';
+
+    expect(clientFile).toContain('class SdkworkImAppClient');
+    expect(clientFile).not.toContain('setApiKey');
+    expect(portalApiFile).toContain('class PortalApi');
+  });
 });
