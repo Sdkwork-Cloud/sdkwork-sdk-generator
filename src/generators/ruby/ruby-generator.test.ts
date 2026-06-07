@@ -12,7 +12,7 @@ const rubyConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
-  packageName: 'sdkwork-app-sdk',
+  packageName: 'sdkwork-notes-app-sdk',
 };
 
 const rubySpec: ApiSpec = {
@@ -169,7 +169,7 @@ describe('Ruby generator', () => {
     expect(generator).toBeDefined();
 
     const result = await generator!.generate({ ...rubyConfig, generateTests: true }, rubySpec);
-    const gemspecFile = result.files.find((file) => file.path === 'sdkwork-app-sdk.gemspec');
+    const gemspecFile = result.files.find((file) => file.path === 'sdkwork-notes-app-sdk.gemspec');
     const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.rb');
     const readme = result.files.find((file) => file.path === 'README.md');
 

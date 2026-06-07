@@ -1,3 +1,4 @@
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GoUsagePlanner, renderGoUsageSnippet, resolveGoExpectedRequestPath, } from './usage-planner.js';
 export class TestGenerator {
@@ -17,7 +18,7 @@ export class TestGenerator {
         ];
     }
     generateSmokeTest(plan, config) {
-        const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+        const moduleName = config.packageName || resolveDefaultGoModuleName(config);
         const moduleAlias = config.sdkType;
         const clientName = resolveSdkClientName(config);
         const expectedPath = resolveGoExpectedRequestPath(plan.operation.path, config.apiPrefix);

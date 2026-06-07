@@ -14,6 +14,7 @@ import {
   buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { generatePublishBinScripts } from '../../framework/publish.js';
 import { PythonUsagePlanner, renderPythonUsageSnippet } from './usage-planner.js';
@@ -60,7 +61,7 @@ export class PythonGenerator extends BaseGenerator {
 
   generateReadme(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
     const clientName = resolveSdkClientName(config);
-    const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+    const pkgName = config.packageName || resolveDefaultDistributionName(config);
     const packageRoot = getPythonPackageRoot(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);

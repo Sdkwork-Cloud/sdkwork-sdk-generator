@@ -12,7 +12,7 @@ const dartConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
-  packageName: 'sdkwork_app_sdk_dart',
+  packageName: 'sdkwork_notes_app_sdk_dart',
 };
 
 const dartSpec: ApiSpec = {
@@ -332,7 +332,7 @@ describe('Dart generator', () => {
 
     const result = await generator!.generate(dartConfig, dartSpec);
     const pubspec = result.files.find((file) => file.path === 'pubspec.yaml');
-    const rootLibrary = result.files.find((file) => file.path === 'lib/sdkwork_app_sdk_dart.dart');
+    const rootLibrary = result.files.find((file) => file.path === 'lib/sdkwork_notes_app_sdk_dart.dart');
     const clientFile = result.files.find((file) => file.path === 'lib/src/http/client.dart');
     const configFile = result.files.find((file) => file.path === 'lib/src/http/sdk_config.dart');
     const apiFile = result.files.find((file) => file.path === 'lib/src/api/user.dart');
@@ -344,7 +344,7 @@ describe('Dart generator', () => {
 
     expect(result.errors).toEqual([]);
     expect(pubspec).toBeDefined();
-    expect(pubspec!.content).toContain('name: sdkwork_app_sdk_dart');
+    expect(pubspec!.content).toContain('name: sdkwork_notes_app_sdk_dart');
     expect(pubspec!.content).toContain('homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
     expect(pubspec!.content).toContain('repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
     expect(pubspec!.content).toContain('http:');
@@ -392,7 +392,7 @@ describe('Dart generator', () => {
     expect(modelsFile!.content).not.toContain('final dynamic? data;');
     expect(readme).toBeDefined();
     expect(readme!.content).toContain('Dart');
-    expect(readme!.content).toContain('dart pub add sdkwork_app_sdk_dart');
+    expect(readme!.content).toContain('dart pub add sdkwork_notes_app_sdk_dart');
   });
 
   it('emits dart smoke tests and aligns README quick start when generateTests is enabled', async () => {
@@ -410,7 +410,7 @@ describe('Dart generator', () => {
     expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
     expect(smokeTestFile!.content).toContain("import 'dart:io';");
     expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
-    expect(smokeTestFile!.content).toContain("import 'package:sdkwork_app_sdk_dart/sdkwork_app_sdk_dart.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:sdkwork_notes_app_sdk_dart/sdkwork_notes_app_sdk_dart.dart';");
     expect(smokeTestFile!.content).toContain('final client = SdkworkAppClient(');
     expect(smokeTestFile!.content).toContain('final result = await client.user.getUserProfile();');
     expect(smokeTestFile!.content).toContain("expect(result?.code, 'ok');");

@@ -1,4 +1,5 @@
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 import { normalizeOperationId, resolveScopedMethodNames, stripTagPrefixFromOperationId, } from '../../framework/naming.js';
 import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
@@ -50,7 +51,7 @@ export class ApiGenerator {
         return files;
     }
     getModuleName(config) {
-        return config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+        return config.packageName || resolveDefaultGoModuleName(config);
     }
     generateApiFile(tag, resolvedTagName, operations, config, knownModels) {
         operations = selectCanonicalOpenAIStyleOperations(tag, operations, config);

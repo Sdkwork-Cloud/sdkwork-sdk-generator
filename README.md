@@ -53,7 +53,7 @@ For multi-language batch generation, resolve the version once and pass it back w
 If your multi-language SDK family uses a custom TypeScript npm package as the published version anchor, pass it explicitly:
 
 ```bash
-sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l python --package-name sdkwork-app-sdk-python --npm-package-name @acme/unified-app-sdk
+sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l python --package-name sdkwork-notes-app-sdk-python --npm-package-name @acme/unified-app-sdk
 ```
 
 To preview what regeneration would change without touching the filesystem, use dry-run mode:
@@ -151,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Backend",
             )
             .sdk_type(SdkType::Backend)
-            .package_name("sdkwork-backend-sdk"),
+            .package_name("sdkwork-notes-backend-sdk"),
             GeneratedPackageFormat::Zip,
         )
         .await?;
@@ -265,7 +265,7 @@ import { buildExecutionHandoff } from '@sdkwork/sdk-generator';
 | `--npm-registry` | Registry used for published TypeScript SDK version checks | No | `https://registry.npmjs.org` |
 | `--npm-package-name` | Override the TypeScript npm package used as the published version baseline | No | Auto-derived |
 | `--sdk-root` | Workspace root used to scan sibling generated SDK versions | No | - |
-| `--sdk-name` | Workspace prefix, for example `sdkwork-app-sdk` | No | - |
+| `--sdk-name` | Workspace prefix, for example `sdkwork-notes-app-sdk` | No | - |
 | `--no-sync-published-version` | Skip published npm version checks when resolving SDK version | No | `false` |
 | `--base-url` | Base URL for API | No | From spec |
 | `--api-prefix` | API path prefix | No | empty string |
@@ -585,7 +585,7 @@ sdk/
 sdk/
 |-- lib/
 |   |-- app_client.dart       # Main SDK client
-|   |-- sdkwork_app_sdk_dart.dart
+|   |-- sdkwork_notes_app_sdk_dart.dart
 |   |-- src/
 |   |   |-- api/
 |   |   |   |-- paths.dart
@@ -696,7 +696,7 @@ sdk/
 |   |      |   -- user.rb
 |   |      -- models/
 |   |          -- user.rb
-|-- sdkwork-app-sdk.gemspec
+|-- sdkwork-notes-app-sdk.gemspec
 |-- Gemfile
 |-- sdkwork-sdk.json
 -- README.md

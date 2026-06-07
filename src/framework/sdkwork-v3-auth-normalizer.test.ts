@@ -1,0 +1,309 @@
+import { describe, expect, it } from 'vitest';
+
+import { generateSdk } from '../index.js';
+import type { ApiSpec, GeneratorConfig, Language } from './types.js';
+
+const languages: Language[] = [
+  'typescript',
+  'flutter',
+  'rust',
+  'java',
+  'csharp',
+  'swift',
+  'kotlin',
+  'go',
+  'python',
+];
+
+const languageLabels: Record<Language, string> = {
+  typescript: 'TypeScript',
+  dart: 'Dart',
+  python: 'Python',
+  java: 'Java',
+  csharp: 'C#',
+  go: 'Go',
+  rust: 'Rust',
+  swift: 'Swift',
+  flutter: 'Flutter',
+  kotlin: 'Kotlin',
+  php: 'PHP',
+  ruby: 'Ruby',
+};
+
+const spec: ApiSpec = {
+  openapi: '3.1.0',
+  info: {
+    title: 'SDKWork IM API',
+    version: '1.0.0',
+  },
+  paths: {
+    '/im/v3/api/chat/conversations': {
+      get: {
+        summary: 'List conversations',
+        operationId: 'conversations.list',
+        tags: ['chat'],
+        security: [
+          {
+            AuthToken: [],
+            AccessToken: [],
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'OK',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    securitySchemes: {
+      AuthToken: {
+        type: 'http',
+        scheme: 'bearer',
+      },
+      AccessToken: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'Access-Token',
+      },
+    },
+    schemas: {},
+  },
+};
+
+function createConfig(language: Language): GeneratorConfig {
+  return {
+    name: 'SdkworkImSdk',
+    version: '1.0.0',
+    language,
+    sdkType: 'im',
+    outputPath: './test-output',
+    apiSpecPath: './openapi.json',
+    baseUrl: 'https://chat.example.com/sdkwork/chat',
+    apiPrefix: '/im/v3/api',
+    packageName: language === 'typescript' ? '@sdkwork/im-sdk-generated' : undefined,
+    options: {
+      standardProfile: 'sdkwork-v3',
+    },
+  };
+}
+
+function allGeneratedContentByPath(resultFiles: Array<{ path: string; content: string }>): Map<string, string> {
+  return new Map(resultFiles.map((file) => [file.path, file.content]));
+}
+
+function isSdkAuthSurfaceFile(path: string): boolean {
+  const normalizedPath = path.replace(/\\/g, '/');
+  if (
+    normalizedPath.startsWith('.sdkwork/')
+    || normalizedPath.startsWith('bin/')
+    || normalizedPath.startsWith('custom/')
+    || normalizedPath.startsWith('tests/')
+    || normalizedPath === 'LICENSE'
+    || normalizedPath === 'CHANGELOG.md'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+describe('sdkwork-v3 dual-token auth surface normalization', () => {
+  it.each(languages)('generates %s IM SDK output without API key auth surface', async (language) => {
+    const result = await generateSdk(createConfig(language), spec);
+    expect(result.errors).toEqual([]);
+
+    const files = allGeneratedContentByPath(result.files);
+    const combined = [...files.entries()]
+      .filter(([path]) => isSdkAuthSurfaceFile(path))
+      .map(([path, content]) => `--- ${path} ---\n${content}`)
+      .join('\n');
+
+    expect(combined).not.toContain('setApiKey');
+    expect(combined).not.toContain('set_api_key');
+    expect(combined).not.toContain('SetApiKey');
+    expect(combined).not.toContain('apiKey?:');
+    expect(combined).not.toContain('apiKeyHeader');
+    expect(combined).not.toContain('apiKeyAsBearer');
+    expect(combined).not.toContain('API_KEY');
+    expect(combined).not.toContain('your-api-key');
+    expect(combined).not.toContain('Mode A: API Key');
+    expect(combined).not.toContain('Authentication Modes');
+    expect(combined).not.toContain(`Professional ${languageLabels[language]} SDK for SDKWork API`);
+    expect(combined).toContain('Authorization: Bearer <authToken>');
+    expect(combined).toContain('Access-Token: <accessToken>');
+  });
+
+  it('preserves business API key resource names in backend SDK output', async () => {
+    const backendSpec: ApiSpec = {
+      ...spec,
+      paths: {
+        '/backend/v3/api/admin/api_key_groups': {
+          get: {
+            summary: 'List API key groups',
+            operationId: 'apiKeyGroups.list',
+            tags: ['admin'],
+            security: [
+              {
+                AuthToken: [],
+                AccessToken: [],
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        items: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              id: { type: 'string' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const result = await generateSdk(
+      {
+        ...createConfig('typescript'),
+        sdkType: 'backend',
+        apiPrefix: '/backend/v3/api',
+        packageName: '@sdkwork/im-backend-sdk-generated',
+      },
+      backendSpec,
+    );
+
+    expect(result.errors).toEqual([]);
+    const combined = [...allGeneratedContentByPath(result.files).entries()]
+      .filter(([path]) => isSdkAuthSurfaceFile(path))
+      .map(([path, content]) => `--- ${path} ---\n${content}`)
+      .join('\n');
+
+    expect(combined).toContain('apiKeyGroups');
+    expect(combined).not.toContain('setApiKey');
+    expect(combined).not.toContain('apiKey?:');
+    expect(combined).not.toContain('apiKeyHeader');
+    expect(combined).not.toContain('apiKeyAsBearer');
+  });
+
+  it('preserves Java business credential fields named apiKey while removing SDK auth API key methods', async () => {
+    const backendSpec: ApiSpec = {
+      ...spec,
+      paths: {
+        '/backend/v3/api/admin/channels': {
+          post: {
+            summary: 'Create admin channel',
+            operationId: 'channels.create',
+            tags: ['admin'],
+            security: [
+              {
+                AuthToken: [],
+                AccessToken: [],
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    required: ['credentials'],
+                    properties: {
+                      credentials: {
+                        $ref: '#/components/schemas/AdminChannelCredentialInput',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        ...spec.components,
+        schemas: {
+          AdminChannelCredentialInput: {
+            type: 'object',
+            required: ['apiKey'],
+            properties: {
+              apiKey: {
+                type: 'string',
+                minLength: 1,
+              },
+            },
+          },
+        },
+      },
+    };
+    const result = await generateSdk(
+      {
+        ...createConfig('java'),
+        sdkType: 'backend',
+        apiPrefix: '/backend/v3/api',
+        packageName: 'com.sdkwork.clawrouter:clawrouter-backend-sdk',
+      },
+      backendSpec,
+    );
+
+    expect(result.errors).toEqual([]);
+    const files = allGeneratedContentByPath(result.files);
+    const modelFile = files.get('src/main/java/com/sdkwork/clawrouter/backend/model/AdminChannelCredentialInput.java') ?? '';
+    const combinedAuthSurface = [...files.entries()]
+      .filter(([path]) => isSdkAuthSurfaceFile(path) && !path.includes('/model/'))
+      .map(([path, content]) => `--- ${path} ---\n${content}`)
+      .join('\n');
+
+    expect(modelFile).toContain('setApiKey');
+    expect(modelFile).toContain('getApiKey');
+    expect(combinedAuthSurface).not.toContain('setApiKey');
+    expect(combinedAuthSurface).not.toContain('apiKeyHeader');
+    expect(combinedAuthSurface).not.toContain('apiKeyAsBearer');
+  });
+});

@@ -29,6 +29,8 @@ export interface GeneratorConfig {
   packageName?: string;
   namespace?: string;
   commonPackage?: string;
+  clientName?: string;
+  legacyClientName?: string;
   generateReadme?: boolean;
   generateTests?: boolean;
   options?: GeneratorOptions;

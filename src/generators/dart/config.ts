@@ -1,4 +1,5 @@
 import type { LanguageConfig } from '../../framework/base.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import type { ApiSchema, GeneratorConfig } from '../../framework/types.js';
 import { toSafeCamelIdentifier, toSafePascalIdentifier } from '../../framework/identifiers.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
@@ -196,5 +197,5 @@ export function getDartPackageName(config: GeneratorConfig): string {
   if (raw) {
     return toSnakeCase(raw);
   }
-  return `sdkwork_${DART_CONFIG.namingConventions.packageName(config.sdkType)}_sdk_dart`;
+  return toSnakeCase(`${resolveDefaultDistributionName(config)}-dart`);
 }

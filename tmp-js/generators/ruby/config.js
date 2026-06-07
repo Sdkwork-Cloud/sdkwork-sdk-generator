@@ -1,4 +1,5 @@
 import { toSafeSnakeIdentifier } from '../../framework/identifiers.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const RUBY_CONFIG = {
@@ -143,7 +144,7 @@ export function getRubyGemName(config) {
     if (rawName) {
         return rawName;
     }
-    return `sdkwork-${config.sdkType}-sdk`;
+    return resolveDefaultDistributionName(config);
 }
 export function getRubyModuleSegments(config) {
     return ['Sdkwork', `${resolveSdkTypePascal(config)}Sdk`];

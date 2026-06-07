@@ -1,10 +1,11 @@
 import { buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { resolveDefaultTypeScriptPackageName } from '../../framework/package-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { TypeScriptUsagePlanner, renderTypeScriptUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
-        const pkgName = config.packageName || `@sdkwork/${config.sdkType}-sdk`;
+        const pkgName = config.packageName || resolveDefaultTypeScriptPackageName(config);
         const planner = new TypeScriptUsagePlanner(ctx, undefined, config);
         const quickStartPlan = planner.selectQuickStartPlan();
         const quickStartModule = quickStartPlan?.moduleName || 'example';

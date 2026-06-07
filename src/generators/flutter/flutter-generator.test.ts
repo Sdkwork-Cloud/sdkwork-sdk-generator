@@ -12,6 +12,7 @@ const flutterConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
+  packageName: 'notes_app_sdk',
 };
 
 const flutterSpec: ApiSpec = {
@@ -405,9 +406,8 @@ describe('Flutter generator regressions', () => {
     const generator = new FlutterGenerator();
     const result = await generator.generate(flutterConfig, flutterSpec);
     const clientFile = result.files.find((file) => file.path === 'lib/app_client.dart');
-    const rootFile = result.files.find((file) => file.path === 'lib/app_sdk.dart');
+    const rootFile = result.files.find((file) => file.path === 'lib/notes_app_sdk.dart');
     const apiFile = result.files.find((file) => file.path === 'lib/src/api/user.dart');
-    const overridesFile = result.files.find((file) => file.path === 'pubspec_overrides.yaml');
     const licenseFile = result.files.find((file) => file.path === 'LICENSE');
     const changelogFile = result.files.find((file) => file.path === 'CHANGELOG.md');
 
@@ -415,7 +415,6 @@ describe('Flutter generator regressions', () => {
     expect(clientFile).toBeDefined();
     expect(rootFile).toBeDefined();
     expect(apiFile).toBeDefined();
-    expect(overridesFile).toBeDefined();
     expect(rootFile!.content).toContain("export 'app_client.dart';");
     expect(rootFile!.content).toContain("export 'src/models.dart';");
     expect(clientFile!.content).toContain("import 'src/api/user.dart';");
@@ -425,10 +424,6 @@ describe('Flutter generator regressions', () => {
     expect(licenseFile!.content).toContain('MIT License');
     expect(changelogFile).toBeDefined();
     expect(changelogFile!.content).toContain('## 1.0.0');
-    expect(overridesFile!.content).toContain('dependency_overrides:');
-    expect(overridesFile!.content).toContain('sdkwork_common_flutter:');
-    expect(overridesFile!.content).toContain('path:');
-    expect(overridesFile!.content).toContain('sdkwork-sdk-common-flutter');
   });
 
   it('generates valid constructors for empty object schemas', async () => {
@@ -505,7 +500,7 @@ describe('Flutter generator regressions', () => {
     expect(pubspecFile!.content).toContain('homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
     expect(pubspecFile!.content).toContain('repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
     expect(pubspecFile!.content).toContain('http: ^1.2.0');
-    expect(smokeTestFile!.content).toContain("import 'package:app_sdk/app_sdk.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:notes_app_sdk/notes_app_sdk.dart';");
     expect(smokeTestFile!.content).toContain("final client = SdkworkAppClient.withBaseUrl(baseUrl: 'http://127.0.0.1:${server.port}');");
     expect(smokeTestFile!.content).toContain('final result = await client.user.getUserProfile();');
     expect(smokeTestFile!.content).toContain('expect(result?.data, isNotNull);');

@@ -12,7 +12,7 @@ const phpConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
-  packageName: 'sdkwork/app-sdk',
+  packageName: 'sdkwork/notes-app-sdk',
 };
 
 const phpSpec: ApiSpec = {

@@ -1,5 +1,6 @@
 import type { LanguageConfig } from '../../framework/base.js';
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { resolveDefaultComposerPackageName } from '../../framework/package-identity.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
@@ -199,5 +200,5 @@ export function getPhpPackageName(config: GeneratorConfig): string {
   if (rawName) {
     return rawName;
   }
-  return `sdkwork/${config.sdkType}-sdk`;
+  return resolveDefaultComposerPackageName(config);
 }

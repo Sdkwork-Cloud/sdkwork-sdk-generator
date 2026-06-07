@@ -75,7 +75,7 @@ describe('versioning', () => {
     const root = mkdtempSync(join(tmpdir(), 'sdkwork-versioning-ruby-'));
     mkdirSync(root, { recursive: true });
     writeFileSync(
-      join(root, 'sdkwork-app-sdk.gemspec'),
+      join(root, 'sdkwork-notes-app-sdk.gemspec'),
       'Gem::Specification.new do |spec|\n  spec.version = "1.4.2"\nend\n',
       'utf-8'
     );
@@ -139,15 +139,15 @@ describe('versioning', () => {
 
   it('should include the published npm version when resolving from a workspace root', async () => {
     const root = mkdtempSync(join(tmpdir(), 'sdkwork-versioning-'));
-    mkdirSync(join(root, 'sdkwork-app-sdk-typescript'), { recursive: true });
-    mkdirSync(join(root, 'sdkwork-app-sdk-python'), { recursive: true });
+    mkdirSync(join(root, 'sdkwork-notes-app-sdk-typescript'), { recursive: true });
+    mkdirSync(join(root, 'sdkwork-notes-app-sdk-python'), { recursive: true });
     writeFileSync(
-      join(root, 'sdkwork-app-sdk-typescript', 'package.json'),
+      join(root, 'sdkwork-notes-app-sdk-typescript', 'package.json'),
       JSON.stringify({ version: '1.0.0' }, null, 2),
       'utf-8'
     );
     writeFileSync(
-      join(root, 'sdkwork-app-sdk-python', 'pyproject.toml'),
+      join(root, 'sdkwork-notes-app-sdk-python', 'pyproject.toml'),
       'version = "1.0.0"\n',
       'utf-8'
     );
@@ -165,9 +165,9 @@ describe('versioning', () => {
     try {
       const resolved = await resolveSdkVersion({
         sdkRoot: root,
-        sdkName: 'sdkwork-app-sdk',
+        sdkName: 'sdkwork-notes-app-sdk',
         sdkType: 'app',
-        packageName: '@sdkwork/app-sdk',
+        packageName: '@sdkwork/notes-app-sdk',
       });
 
       expect(resolved.publishedVersion).toBe('1.0.3');
@@ -178,6 +178,7 @@ describe('versioning', () => {
   });
 
   it('should return a fixed requested version without checking workspace or npm baselines', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'sdkwork-versioning-fixed-'));
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => {
       throw new Error('fetch should not be called when version is fixed');
@@ -185,10 +186,10 @@ describe('versioning', () => {
 
     try {
       const resolved = await resolveSdkVersion({
-        sdkRoot: 'D:/does-not-matter',
-        sdkName: 'sdkwork-app-sdk',
+        sdkRoot: root,
+        sdkName: 'sdkwork-notes-app-sdk',
         sdkType: 'app',
-        packageName: '@sdkwork/app-sdk',
+        packageName: '@sdkwork/notes-app-sdk',
         requestedVersion: '1.0.4',
         fixedVersion: true,
       });
@@ -203,24 +204,24 @@ describe('versioning', () => {
 
   it('should ignore sdk workspace siblings that do not map to supported languages', async () => {
     const root = mkdtempSync(join(tmpdir(), 'sdkwork-versioning-ignore-'));
-    mkdirSync(join(root, 'sdkwork-app-sdk-typescript'), { recursive: true });
-    mkdirSync(join(root, 'sdkwork-app-sdk-docs'), { recursive: true });
+    mkdirSync(join(root, 'sdkwork-notes-app-sdk-typescript'), { recursive: true });
+    mkdirSync(join(root, 'sdkwork-notes-app-sdk-docs'), { recursive: true });
     writeFileSync(
-      join(root, 'sdkwork-app-sdk-typescript', 'package.json'),
+      join(root, 'sdkwork-notes-app-sdk-typescript', 'package.json'),
       JSON.stringify({ version: '1.0.0' }, null, 2),
       'utf-8'
     );
     writeFileSync(
-      join(root, 'sdkwork-app-sdk-docs', 'sdkwork-sdk.json'),
+      join(root, 'sdkwork-notes-app-sdk-docs', 'sdkwork-sdk.json'),
       JSON.stringify({ version: '9.9.9', language: 'docs' }, null, 2),
       'utf-8'
     );
 
     const resolved = await resolveSdkVersion({
       sdkRoot: root,
-      sdkName: 'sdkwork-app-sdk',
+      sdkName: 'sdkwork-notes-app-sdk',
       sdkType: 'app',
-      packageName: '@sdkwork/app-sdk',
+      packageName: '@sdkwork/notes-app-sdk',
       syncPublishedVersion: false,
     });
 
@@ -247,11 +248,11 @@ describe('versioning', () => {
       const resolved = await resolveSdkVersion({
         language: 'python',
         sdkType: 'app',
-        packageName: 'sdkwork-app-sdk-python',
+        packageName: 'sdkwork-notes-app-sdk-python',
       });
 
       expect(requestedUrls).toHaveLength(1);
-      expect(requestedUrls[0]).toContain(encodeURIComponent('@sdkwork/app-sdk'));
+      expect(requestedUrls[0]).toContain(encodeURIComponent('@sdkwork/notes-app-sdk'));
       expect(resolved.publishedVersion).toBe('2.0.0');
       expect(resolved.version).toBe('2.0.1');
     } finally {
@@ -309,7 +310,7 @@ describe('versioning', () => {
       const resolved = await resolveSdkVersion({
         language: 'python',
         sdkType: 'app',
-        packageName: 'sdkwork-app-sdk-python',
+        packageName: 'sdkwork-notes-app-sdk-python',
         npmPackageName: '@acme/unified-app-sdk',
       });
 

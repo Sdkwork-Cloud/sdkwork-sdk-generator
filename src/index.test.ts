@@ -438,7 +438,7 @@ describe('Generator registry', () => {
       ...baseConfig,
       sdkType: 'desktop' as any,
     }, mockSpec)).rejects.toThrow(
-      'Unsupported SDK type: desktop. Supported: app, backend, ai, custom'
+      'Unsupported SDK type: desktop. Supported: app, backend, im, ai, custom'
     );
   });
 
@@ -497,7 +497,7 @@ describe('Rust Generator', () => {
         ...baseConfig,
         language: 'rust',
         sdkType: 'app',
-        packageName: 'sdkwork-app-sdk',
+        packageName: 'sdkwork-notes-app-sdk',
       },
       mockSpec
     );
@@ -514,7 +514,7 @@ describe('Rust Generator', () => {
     expect(readme).toBeDefined();
     expect(readme!.content).toContain('Rust');
     expect(readme!.content).toContain('SdkworkAppClient');
-    expect(readme!.content).toContain('cargo add sdkwork-app-sdk');
+    expect(readme!.content).toContain('cargo add sdkwork-notes-app-sdk');
   });
 });
 
@@ -528,7 +528,7 @@ describe('PHP And Ruby Generators', () => {
         ...baseConfig,
         language: 'php',
         sdkType: 'app',
-        packageName: 'sdkwork/app-sdk',
+        packageName: 'sdkwork/notes-app-sdk',
       },
       mockSpec
     );
@@ -545,7 +545,7 @@ describe('PHP And Ruby Generators', () => {
     expect(readme).toBeDefined();
     expect(readme!.content).toContain('PHP');
     expect(readme!.content).toContain('SdkworkAppClient');
-    expect(readme!.content).toContain('composer require sdkwork/app-sdk');
+    expect(readme!.content).toContain('composer require sdkwork/notes-app-sdk');
   });
 
   it('should generate gem-based sdk output for ruby app clients', async () => {
@@ -557,13 +557,13 @@ describe('PHP And Ruby Generators', () => {
         ...baseConfig,
         language: 'ruby',
         sdkType: 'app',
-        packageName: 'sdkwork-app-sdk',
+        packageName: 'sdkwork-notes-app-sdk',
       },
       mockSpec
     );
 
     expect(result.errors).toEqual([]);
-    expect(result.files.some((file) => file.path === 'sdkwork-app-sdk.gemspec')).toBe(true);
+    expect(result.files.some((file) => file.path === 'sdkwork-notes-app-sdk.gemspec')).toBe(true);
     expect(result.files.some((file) => file.path === 'Gemfile')).toBe(true);
     expect(result.files.some((file) => file.path === 'lib/sdkwork/app_sdk.rb')).toBe(true);
     expect(result.files.some((file) => file.path === 'lib/sdkwork/app_sdk/client.rb')).toBe(true);
@@ -575,7 +575,7 @@ describe('PHP And Ruby Generators', () => {
     expect(readme).toBeDefined();
     expect(readme!.content).toContain('Ruby');
     expect(readme!.content).toContain('SdkworkAppClient');
-    expect(readme!.content).toContain('gem install sdkwork-app-sdk');
+    expect(readme!.content).toContain('gem install sdkwork-notes-app-sdk');
   });
 });
 
@@ -3232,7 +3232,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/models/schema_model.py',
+        filePath: 'sdkwork_test_backend_sdk/models/schema_model.py',
         expected: [
           'nullable_name: Optional[str] = None',
           'nullable_count: Optional[int] = None',
@@ -3260,7 +3260,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/model/SchemaModel.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/model/SchemaModel.java',
         expected: [
           'private String nullableName;',
           'private Integer nullableCount;',
@@ -3274,7 +3274,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/SchemaModel.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/SchemaModel.kt',
         expected: [
           'val nullableName: String? = null',
           'val nullableCount: Int? = null',
@@ -3350,7 +3350,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/models/composed_user.py',
+        filePath: 'sdkwork_test_backend_sdk/models/composed_user.py',
         expected: [
           'id: str',
           'email: str',
@@ -3376,7 +3376,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/model/ComposedUser.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/model/ComposedUser.java',
         expected: [
           'private String id;',
           'private String createdAt;',
@@ -3389,7 +3389,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/ComposedUser.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/ComposedUser.kt',
         expected: [
           'val id: String? = null',
           'val createdAt: String? = null',
@@ -3446,9 +3446,9 @@ describe('OpenAPI Security And Compliance', () => {
         filePath: 'lib/src/models.dart',
         expected: [
           'class ComposedUser',
-          'final String? id;',
+          'final String id;',
           'final String? createdAt;',
-          'final String? email;',
+          'final String email;',
           'final String? displayName;',
           'final List<String>? roles;',
         ],
@@ -3529,7 +3529,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/api/event.py',
+        filePath: 'sdkwork_test_backend_sdk/api/event.py',
         expected: [
           'from ..models import Event',
           'def stream_events(self) -> List[Event]:',
@@ -3549,7 +3549,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/api/EventApi.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/api/EventApi.java',
         expected: [
           'public List<Event> streamEvents() throws Exception',
           'return client.convertValue(raw, new TypeReference<List<Event>>() {});',
@@ -3559,7 +3559,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/api/EventApi.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/api/EventApi.kt',
         expected: [
           'suspend fun streamEvents(): List<Event>?',
           'return client.convertValue(raw, object : TypeReference<List<Event>>() {})',
@@ -3634,7 +3634,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/models/timeline_envelope.py',
+        filePath: 'sdkwork_test_backend_sdk/models/timeline_envelope.py',
         expected: [
           'from .timeline_event import TimelineEvent',
           'tuple: Optional[Tuple[str, TimelineEvent, int]] = None',
@@ -3653,7 +3653,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/model/TimelineEnvelope.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/model/TimelineEnvelope.java',
         expected: [
           'private List<Object> tuple;',
         ],
@@ -3662,7 +3662,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/TimelineEnvelope.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/TimelineEnvelope.kt',
         expected: [
           'val tuple: List<Any>? = null',
         ],
@@ -3771,7 +3771,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/models/audit_envelope.py',
+        filePath: 'sdkwork_test_backend_sdk/models/audit_envelope.py',
         expected: [
           'from .audit_envelope_audit_actor import AuditEnvelopeAuditActor',
           'from .audit_envelope_audit_event import AuditEnvelopeAuditEvent',
@@ -3817,7 +3817,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/model/AuditEnvelope.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/model/AuditEnvelope.java',
         expected: [
           'private AuditEnvelopeAuditEvent event;',
           'private AuditEnvelopeAuditActor actor;',
@@ -3834,7 +3834,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/AuditEnvelope.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/AuditEnvelope.kt',
         expected: [
           'val event: AuditEnvelopeAuditEvent? = null',
           'val actor: AuditEnvelopeAuditActor? = null',
@@ -3899,7 +3899,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new FlutterGenerator(),
         filePath: 'lib/src/models.dart',
         expected: [
-          'final AuditEnvelopeAuditEvent? event;',
+          'final AuditEnvelopeAuditEvent event;',
           'final AuditEnvelopeAuditActor? actor;',
           'final AuditEnvelopeAuditMetadata? metadata;',
           'final AuditRootNote? rootNote;',
@@ -3976,7 +3976,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/models/const_envelope.py',
+        filePath: 'sdkwork_test_backend_sdk/models/const_envelope.py',
         expected: [
           'from typing import TYPE_CHECKING, Optional, List, Dict, Any, Literal',
           "kind: Literal['audit']",
@@ -4002,7 +4002,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/model/ConstEnvelope.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/model/ConstEnvelope.java',
         expected: [
           'private String kind;',
           'private Integer version;',
@@ -4014,7 +4014,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/ConstEnvelope.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/ConstEnvelope.kt',
         expected: [
           'val kind: String? = null',
           'val version: Int? = null',
@@ -4064,10 +4064,10 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new FlutterGenerator(),
         filePath: 'lib/src/models.dart',
         expected: [
-          'final String? kind;',
-          'final int? version;',
+          'final String kind;',
+          'final int version;',
           'final double? ratio;',
-          'final bool? enabled;',
+          'final bool enabled;',
         ],
         forbidden: ['final dynamic kind;', 'final dynamic version;', 'final dynamic enabled;'],
       },
@@ -4147,7 +4147,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
-        filePath: 'sdkwork_backend_sdk/models/escaped_envelope.py',
+        filePath: 'sdkwork_test_backend_sdk/models/escaped_envelope.py',
         expected: [
           'from .audit_event import AuditEvent',
           'from .audit_meta import AuditMeta',
@@ -4169,7 +4169,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
-        filePath: 'src/main/java/com/sdkwork/backend/model/EscapedEnvelope.java',
+        filePath: 'src/main/java/com/sdkwork/test/backend/model/EscapedEnvelope.java',
         expected: [
           'private AuditEvent event;',
           'private AuditMeta meta;',
@@ -4179,7 +4179,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        filePath: 'src/main/kotlin/com/sdkwork/backend/EscapedEnvelope.kt',
+        filePath: 'src/main/kotlin/com/sdkwork/test/backend/EscapedEnvelope.kt',
         expected: [
           'val event: AuditEvent? = null',
           'val meta: AuditMeta? = null',
@@ -4222,7 +4222,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new FlutterGenerator(),
         filePath: 'lib/src/models.dart',
         expected: [
-          'final AuditEvent? event;',
+          'final AuditEvent event;',
           'final AuditMeta? meta;',
         ],
         forbidden: ['Audit1Event', 'Audit0Meta', 'final dynamic event;', 'final dynamic meta;'],
@@ -4669,7 +4669,7 @@ describe('OpenAPI Security And Compliance', () => {
 
     const generator = new PythonGenerator();
     const result = await generator.generate({ ...baseConfig, language: 'python' }, parameterSerializationSpec);
-    const apiFile = result.files.find((file) => file.path === 'sdkwork_backend_sdk/api/resource.py');
+    const apiFile = result.files.find((file) => file.path === 'sdkwork_test_backend_sdk/api/resource.py');
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
@@ -4807,7 +4807,7 @@ describe('OpenAPI Security And Compliance', () => {
     };
 
     const javaResult = await new JavaGenerator().generate({ ...baseConfig, language: 'java' }, parameterSerializationSpec);
-    const javaApi = javaResult.files.find((file) => file.path === 'src/main/java/com/sdkwork/backend/api/ResourceApi.java');
+    const javaApi = javaResult.files.find((file) => file.path === 'src/main/java/com/sdkwork/test/backend/api/ResourceApi.java');
 
     expect(javaResult.errors).toEqual([]);
     expect(javaApi).toBeDefined();
@@ -4823,7 +4823,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(javaApi!.content).not.toContain('Map<String, Object> params');
 
     const kotlinResult = await new KotlinGenerator().generate({ ...baseConfig, language: 'kotlin' }, parameterSerializationSpec);
-    const kotlinApi = kotlinResult.files.find((file) => file.path === 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt');
+    const kotlinApi = kotlinResult.files.find((file) => file.path === 'src/main/kotlin/com/sdkwork/test/backend/api/ResourceApi.kt');
 
     expect(kotlinResult.errors).toEqual([]);
     expect(kotlinApi).toBeDefined();
@@ -5020,7 +5020,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tsApi.content).not.toContain('params?: QueryParams');
 
     const pythonResult = await new PythonGenerator().generate({ ...baseConfig, language: 'python' }, simpleQuerySpec);
-    const pythonApi = getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/api/resource.py');
+    const pythonApi = getGeneratedFile(pythonResult.files, 'sdkwork_test_backend_sdk/api/resource.py');
     expect(pythonResult.errors).toEqual([]);
     expect(pythonApi.content).toContain('def list_resources(self, page: int, limit: Optional[int] = None, sort: Optional[str] = None) -> None:');
     expect(pythonApi.content).toContain('query = build_query_string([');
@@ -5038,7 +5038,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(goApi.content).not.toContain('query map[string]interface{}');
 
     const javaResult = await new JavaGenerator().generate({ ...baseConfig, language: 'java' }, simpleQuerySpec);
-    const javaApi = getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/api/ResourceApi.java');
+    const javaApi = getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/test/backend/api/ResourceApi.java');
     expect(javaResult.errors).toEqual([]);
     expect(javaApi.content).toContain('public Void listResources(Integer page, Integer limit, String sort) throws Exception');
     expect(javaApi.content).toContain('String query = buildQueryString(List.of(');
@@ -5047,7 +5047,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(javaApi.content).not.toContain('Map<String, Object> params');
 
     const kotlinResult = await new KotlinGenerator().generate({ ...baseConfig, language: 'kotlin' }, simpleQuerySpec);
-    const kotlinApi = getGeneratedFile(kotlinResult.files, 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt');
+    const kotlinApi = getGeneratedFile(kotlinResult.files, 'src/main/kotlin/com/sdkwork/test/backend/api/ResourceApi.kt');
     expect(kotlinResult.errors).toEqual([]);
     expect(kotlinApi.content).toContain('suspend fun listResources(page: Int, limit: Int? = null, sort: String? = null): Unit');
     expect(kotlinApi.content).toContain('val query = buildQueryString(listOf(');
@@ -5126,7 +5126,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const },
-        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        apiPath: 'sdkwork_test_backend_sdk/api/resource.py',
         expected: [
           'def list_resources(self, x_trace_id: str, session_id: Optional[str] = None) -> None:',
           'request_headers = build_request_headers(',
@@ -5178,7 +5178,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const },
-        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        apiPath: 'src/main/java/com/sdkwork/test/backend/api/ResourceApi.java',
         expected: [
           'public Void listResources(String xTraceId, String sessionId)',
           'Map<String, String> requestHeaders = buildRequestHeaders(',
@@ -5191,7 +5191,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const },
-        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        apiPath: 'src/main/kotlin/com/sdkwork/test/backend/api/ResourceApi.kt',
         expected: [
           'suspend fun listResources(xTraceId: String, sessionId: String? = null)',
           'val requestHeaders = buildRequestHeaders(',
@@ -5315,7 +5315,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const },
-        apiPath: 'sdkwork_backend_sdk/api/chat.py',
+        apiPath: 'sdkwork_test_backend_sdk/api/chat.py',
         expected: [
           'def stop(self, conversation_id: str, conversation_id_: Optional[str] = None) -> None:',
           "'name': 'conversation_id', 'value': conversation_id",
@@ -5359,7 +5359,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const },
-        apiPath: 'src/main/java/com/sdkwork/backend/api/ChatApi.java',
+        apiPath: 'src/main/java/com/sdkwork/test/backend/api/ChatApi.java',
         expected: [
           'public Void stop(String conversationId, String conversationId_) throws Exception',
           'new QueryParameterSpec("conversation_id", conversationId, "form", true, false, null)',
@@ -5370,7 +5370,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const },
-        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ChatApi.kt',
+        apiPath: 'src/main/kotlin/com/sdkwork/test/backend/api/ChatApi.kt',
         expected: [
           'suspend fun stop(conversationId: String, conversationId_: String? = null): Unit',
           'QueryParameterSpec("conversation_id", conversationId, "form", true, false, null)',
@@ -5473,7 +5473,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const },
-        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        apiPath: 'sdkwork_test_backend_sdk/api/resource.py',
         expected: [
           'def read_serialized(self, tenant: str, labels: Dict[str, str], matrix: List[str], x_trace_parts: Dict[str, str], session: Optional[Dict[str, Any]] = None) -> None:',
           "serialize_path_parameter(tenant, {'name': 'tenant', 'style': 'simple', 'explode': False})",
@@ -5503,7 +5503,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const },
-        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        apiPath: 'src/main/java/com/sdkwork/test/backend/api/ResourceApi.java',
         expected: [
           'public Void readSerialized(String tenant, Map<String, String> labels, List<String> matrix, Map<String, String> xTraceParts, Map<String, Object> session) throws Exception',
           'serializePathParameter(tenant, new PathParameterSpec("tenant", "simple", false))',
@@ -5518,7 +5518,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const },
-        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        apiPath: 'src/main/kotlin/com/sdkwork/test/backend/api/ResourceApi.kt',
         expected: [
           'suspend fun readSerialized(tenant: String, labels: Map<String, String>, matrix: List<String>, xTraceParts: Map<String, String>, session: Map<String, Any>? = null): Unit',
           'serializePathParameter(tenant, PathParameterSpec("tenant", "simple", false))',
@@ -6794,7 +6794,7 @@ describe('OpenAPI Security And Compliance', () => {
       { ...baseConfig, language: 'java' },
       managementTagSpec
     );
-    const javaClient = javaResult.files.find((f) => f.path === 'src/main/java/com/sdkwork/backend/SdkworkBackendClient.java');
+    const javaClient = javaResult.files.find((f) => f.path === 'src/main/java/com/sdkwork/test/backend/SdkworkBackendClient.java');
     expect(javaClient).toBeDefined();
     expect(javaClient!.content).toContain('public TenantApi getTenant()');
     expect(javaClient!.content).not.toContain('getTenantManagement');
@@ -6959,17 +6959,17 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(javaResult.errors).toEqual([]);
     expect(
-      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatApi.java')
+      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/test/ai/api/ChatApi.java')
     ).toBe(true);
     expect(
-      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/ai/api/ManagementApi.java')
+      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/test/ai/api/ManagementApi.java')
     ).toBe(false);
     expect(
-      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatCompletionsApi.java')
+      javaResult.files.some((f) => f.path === 'src/main/java/com/sdkwork/test/ai/api/ChatCompletionsApi.java')
     ).toBe(false);
 
     const javaChatApi = javaResult.files.find(
-      (f) => f.path === 'src/main/java/com/sdkwork/ai/api/ChatApi.java'
+      (f) => f.path === 'src/main/java/com/sdkwork/test/ai/api/ChatApi.java'
     );
     expect(javaChatApi).toBeDefined();
     expect(javaChatApi!.content).toContain(' create() throws Exception');
@@ -6987,10 +6987,10 @@ describe('OpenAPI Security And Compliance', () => {
         language: 'python' as const,
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
-        clientPath: 'sdkwork_ai_sdk/client.py',
+        clientPath: 'sdkwork_test_ai_sdk/client.py',
         clientExpected: ['self.files: FilesApi', 'self.batches: BatchesApi', 'self.responses: ResponsesApi'],
         clientForbidden: ['self.file:', 'self.batch:', 'self.response:'],
-        chatPath: 'sdkwork_ai_sdk/api/chat.py',
+        chatPath: 'sdkwork_test_ai_sdk/api/chat.py',
         chatExpected: ['def create(self)', 'def retrieve(self, completion_id: str)', 'def list_messages(self, completion_id: str)'],
         chatForbidden: ['create_chat_completion', 'get_chat_completion', 'list_chat_completion_messages'],
       },
@@ -7009,10 +7009,10 @@ describe('OpenAPI Security And Compliance', () => {
         language: 'java' as const,
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
-        clientPath: 'src/main/java/com/sdkwork/ai/SdkworkAiClient.java',
+        clientPath: 'src/main/java/com/sdkwork/test/ai/SdkworkAiClient.java',
         clientExpected: ['private FilesApi files;', 'private BatchesApi batches;', 'private ResponsesApi responses;', 'public FilesApi getFiles()'],
         clientForbidden: ['private FileApi file;', 'private BatchApi batch;', 'private ResponseApi response;', 'public FileApi getFile()'],
-        chatPath: 'src/main/java/com/sdkwork/ai/api/ChatApi.java',
+        chatPath: 'src/main/java/com/sdkwork/test/ai/api/ChatApi.java',
         chatExpected: [' create() throws Exception', ' retrieve(String completionId) throws Exception', ' listMessages(String completionId) throws Exception'],
         chatForbidden: ['createChatCompletion', 'getChatCompletion', 'listChatCompletionMessages'],
       },
@@ -7020,10 +7020,10 @@ describe('OpenAPI Security And Compliance', () => {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
-        clientPath: 'src/main/kotlin/com/sdkwork/ai/SdkworkAiClient.kt',
+        clientPath: 'src/main/kotlin/com/sdkwork/test/ai/SdkworkAiClient.kt',
         clientExpected: ['files: FilesApi', 'batches: BatchesApi', 'responses: ResponsesApi'],
         clientForbidden: ['file: FileApi', 'batch: BatchApi', 'response: ResponseApi'],
-        chatPath: 'src/main/kotlin/com/sdkwork/ai/api/ChatApi.kt',
+        chatPath: 'src/main/kotlin/com/sdkwork/test/ai/api/ChatApi.kt',
         chatExpected: ['fun create()', 'fun retrieve(completionId: String)', 'fun listMessages(completionId: String)'],
         chatForbidden: ['createChatCompletion', 'getChatCompletion', 'listChatCompletionMessages'],
       },
@@ -7127,7 +7127,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
-        path: 'sdkwork_ai_sdk/api/batches.py',
+        path: 'sdkwork_test_ai_sdk/api/batches.py',
         expected: ['def list(self)', 'def create(self)'],
         forbidden: ['def get_list', 'def post_create', '"/ai/v3/v1/batches"', '"/v1/batches"'],
       },
@@ -7141,7 +7141,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const, sdkType: 'ai' as const, apiPrefix: '/ai/v3' },
-        path: 'src/main/java/com/sdkwork/ai/api/BatchesApi.java',
+        path: 'src/main/java/com/sdkwork/test/ai/api/BatchesApi.java',
         expected: [' list() throws Exception', ' create() throws Exception'],
         forbidden: ['getList', 'postCreate', 'ApiPaths.aiPath("/v1/batches")'],
       },
@@ -7414,7 +7414,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const },
-        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        apiPath: 'sdkwork_test_backend_sdk/api/resource.py',
         expectedSnippets: [
           'def list_resources',
           'self._client.request(\'HEAD\'',
@@ -7602,7 +7602,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const },
-        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        apiPath: 'sdkwork_test_backend_sdk/api/resource.py',
         expectedSnippets: [
           'def query_resources(self, raw_query_string: str)',
           '_append_query_string(f"/api/v1/resources", raw_query_string)',
@@ -7647,7 +7647,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const },
-        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        apiPath: 'src/main/java/com/sdkwork/test/backend/api/ResourceApi.java',
         expectedSnippets: [
           'public Void queryResources(String rawQueryString)',
           'ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), rawQueryString)',
@@ -7656,7 +7656,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const },
-        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        apiPath: 'src/main/kotlin/com/sdkwork/test/backend/api/ResourceApi.kt',
         expectedSnippets: [
           'suspend fun queryResources(rawQueryString: String): Unit',
           'ApiPaths.appendQueryString(ApiPaths.backendPath("/resources"), rawQueryString)',
@@ -7740,7 +7740,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new PythonGenerator(),
         config: { ...baseConfig, language: 'python' as const },
-        apiPath: 'sdkwork_backend_sdk/api/resource.py',
+        apiPath: 'sdkwork_test_backend_sdk/api/resource.py',
         expectedSnippet: "self._client.request('x-example-method'",
       },
       {
@@ -7770,13 +7770,13 @@ describe('OpenAPI Security And Compliance', () => {
       {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const },
-        apiPath: 'src/main/java/com/sdkwork/backend/api/ResourceApi.java',
+        apiPath: 'src/main/java/com/sdkwork/test/backend/api/ResourceApi.java',
         expectedSnippet: 'client.request("x-example-method"',
       },
       {
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const },
-        apiPath: 'src/main/kotlin/com/sdkwork/backend/api/ResourceApi.kt',
+        apiPath: 'src/main/kotlin/com/sdkwork/test/backend/api/ResourceApi.kt',
         expectedSnippet: 'client.request("x-example-method"',
       },
       {
@@ -8078,7 +8078,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new JavaGenerator(),
         config: { ...baseConfig, language: 'java' as const, generateTests: true },
         readmePath: 'README.md',
-        smokePath: 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java',
+        smokePath: 'src/test/java/com/sdkwork/test/backend/GeneratedSdkSmokeTest.java',
         expectedReadme: [
           'String xTraceId = "X-Trace-Id";',
           'String sessionId = "session_id";',
@@ -8098,7 +8098,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new KotlinGenerator(),
         config: { ...baseConfig, language: 'kotlin' as const, generateTests: true },
         readmePath: 'README.md',
-        smokePath: 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt',
+        smokePath: 'src/test/kotlin/com/sdkwork/test/backend/GeneratedSdkSmokeTest.kt',
         expectedReadme: [
           'val xTraceId = "X-Trace-Id"',
           'val sessionId = "session_id"',
@@ -8289,7 +8289,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
     expect(smokeTestFile!.content).toContain("import 'dart:io';");
     expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
-    expect(smokeTestFile!.content).toContain("import 'package:sdkwork_backend_sdk_dart/sdkwork_backend_sdk_dart.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:sdkwork_test_backend_sdk_dart/sdkwork_test_backend_sdk_dart.dart';");
     expect(smokeTestFile!.content).toContain('final client = SdkworkBackendClient(');
     expect(smokeTestFile!.content).toContain('await client.user.listUsers();');
     expect(smokeTestFile!.content).toContain("expect(capturedPath, '/api/v1/users');");
@@ -8336,7 +8336,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(cargoFile).toBeDefined();
     expect(smokeTestFile).toBeDefined();
     expect(cargoFile!.content).toContain('tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }');
-    expect(smokeTestFile!.content).toContain('use sdkwork_backend_sdk::{SdkworkBackendClient, SdkworkConfig};');
+    expect(smokeTestFile!.content).toContain('use sdkwork_test_backend_sdk::{SdkworkBackendClient, SdkworkConfig};');
     expect(smokeTestFile!.content).toContain('#[tokio::test]');
     expect(smokeTestFile!.content).toContain('client.user().list_users().await?;');
     expect(smokeTestFile!.content).toContain('assert_eq!(captured.path, "/api/v1/users");');
@@ -8474,7 +8474,7 @@ describe('OpenAPI Security And Compliance', () => {
   it('should generate standardized Ruby smoke tests when generateTests is enabled', async () => {
     const generator = new RubyGenerator();
     const result = await generator.generate({ ...baseConfig, language: 'ruby', generateTests: true }, mockSpec);
-    const gemspecFile = result.files.find((file) => file.path === 'sdkwork-backend-sdk.gemspec');
+    const gemspecFile = result.files.find((file) => file.path === 'sdkwork-test-backend-sdk.gemspec');
     const smokeTestFile = result.files.find((file) => file.path === 'test/generated_sdk_smoke_test.rb');
 
     expect(result.errors).toEqual([]);
@@ -8617,7 +8617,7 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(smokeTestFile).toBeDefined();
-    expect(smokeTestFile!.content).toContain('sdktypes "github.com/sdkwork/backend-sdk/types"');
+    expect(smokeTestFile!.content).toContain('sdktypes "github.com/sdkwork/test-backend-sdk/types"');
     expect(smokeTestFile!.content).toContain('body := &sdktypes.PlusTenantQueryListForm{');
     expect(smokeTestFile!.content).toContain('Keyword: "keyword",');
     expect(smokeTestFile!.content).toContain('params := map[string]interface{}{');
@@ -8797,17 +8797,17 @@ describe('OpenAPI Security And Compliance', () => {
     );
 
     expect(pythonResult.errors).toEqual([]);
-    expect(pythonResult.files.some((file) => file.path === 'sdkwork_backend_sdk/models/string_alias.py')).toBe(false);
-    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
+    expect(pythonResult.files.some((file) => file.path === 'sdkwork_test_backend_sdk/models/string_alias.py')).toBe(false);
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_test_backend_sdk/models/user.py').content).toContain(
       'nickname: Optional[str] = None',
     );
-    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_test_backend_sdk/models/user.py').content).toContain(
       'tags: Optional[List[str]] = None',
     );
-    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/models/user.py').content).toContain(
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_test_backend_sdk/models/user.py').content).toContain(
       'metadata: Optional[Dict[str, str]] = None',
     );
-    expect(getGeneratedFile(pythonResult.files, 'sdkwork_backend_sdk/api/alias.py').content).toContain(
+    expect(getGeneratedFile(pythonResult.files, 'sdkwork_test_backend_sdk/api/alias.py').content).toContain(
       'def send_scalar(self, body: str) -> str:',
     );
 
@@ -8816,18 +8816,18 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(javaResult.errors).toEqual([]);
     expect(
-      javaResult.files.some((file) => file.path === 'src/main/java/com/sdkwork/backend/model/StringAlias.java'),
+      javaResult.files.some((file) => file.path === 'src/main/java/com/sdkwork/test/backend/model/StringAlias.java'),
     ).toBe(false);
-    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/model/User.java').content).toContain(
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/test/backend/model/User.java').content).toContain(
       'private String nickname;',
     );
-    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/model/User.java').content).toContain(
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/test/backend/model/User.java').content).toContain(
       'private List<String> tags;',
     );
-    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/model/User.java').content).toContain(
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/test/backend/model/User.java').content).toContain(
       'private Map<String, String> metadata;',
     );
-    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/backend/api/AliasApi.java').content).toContain(
+    expect(getGeneratedFile(javaResult.files, 'src/main/java/com/sdkwork/test/backend/api/AliasApi.java').content).toContain(
       'public String sendScalar(String body) throws Exception {',
     );
 
@@ -8878,9 +8878,9 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(kotlinResult.errors).toEqual([]);
     expect(
-      kotlinResult.files.some((file) => file.path === 'src/main/kotlin/com/sdkwork/backend/model/StringAlias.kt'),
+      kotlinResult.files.some((file) => file.path === 'src/main/kotlin/com/sdkwork/test/backend/model/StringAlias.kt'),
     ).toBe(false);
-    expect(getGeneratedFile(kotlinResult.files, 'src/main/kotlin/com/sdkwork/backend/api/AliasApi.kt').content).toContain(
+    expect(getGeneratedFile(kotlinResult.files, 'src/main/kotlin/com/sdkwork/test/backend/api/AliasApi.kt').content).toContain(
       'suspend fun sendScalar(body: String): String?',
     );
 
@@ -8947,7 +8947,7 @@ describe('OpenAPI Security And Compliance', () => {
     const result = await generator.generate({ ...baseConfig, language: 'java', generateTests: true }, mockSpec);
     const pomFile = result.files.find((file) => file.path === 'pom.xml');
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java'
+      (file) => file.path === 'src/test/java/com/sdkwork/test/backend/GeneratedSdkSmokeTest.java'
     );
 
     expect(result.errors).toEqual([]);
@@ -8955,7 +8955,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(smokeTestFile).toBeDefined();
     expect(pomFile!.content).toContain('<artifactId>junit-jupiter</artifactId>');
     expect(pomFile!.content).toContain('<artifactId>maven-surefire-plugin</artifactId>');
-    expect(smokeTestFile!.content).toContain('package com.sdkwork.backend;');
+    expect(smokeTestFile!.content).toContain('package com.sdkwork.test.backend;');
     expect(smokeTestFile!.content).toContain('import org.junit.jupiter.api.Test;');
     expect(smokeTestFile!.content).toContain('import com.sun.net.httpserver.HttpServer;');
     expect(smokeTestFile!.content).toContain('SdkworkBackendClient client = new SdkworkBackendClient(config);');
@@ -8967,7 +8967,7 @@ describe('OpenAPI Security And Compliance', () => {
     const generator = new JavaGenerator();
     const result = await generator.generate({ ...baseConfig, language: 'java', generateTests: true }, postBodyAndQuerySpec);
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java'
+      (file) => file.path === 'src/test/java/com/sdkwork/test/backend/GeneratedSdkSmokeTest.java'
     );
 
     expect(result.errors).toEqual([]);
@@ -8987,7 +8987,7 @@ describe('OpenAPI Security And Compliance', () => {
     const generator = new JavaGenerator();
     const result = await generator.generate({ ...baseConfig, language: 'java', generateTests: true }, composedQueryParameterSpec);
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/java/com/sdkwork/backend/GeneratedSdkSmokeTest.java'
+      (file) => file.path === 'src/test/java/com/sdkwork/test/backend/GeneratedSdkSmokeTest.java'
     );
 
     expect(result.errors).toEqual([]);
@@ -9002,7 +9002,7 @@ describe('OpenAPI Security And Compliance', () => {
     const result = await generator.generate({ ...baseConfig, language: 'kotlin', generateTests: true }, mockSpec);
     const buildFile = result.files.find((file) => file.path === 'build.gradle.kts');
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt'
+      (file) => file.path === 'src/test/kotlin/com/sdkwork/test/backend/GeneratedSdkSmokeTest.kt'
     );
 
     expect(result.errors).toEqual([]);
@@ -9010,7 +9010,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(smokeTestFile).toBeDefined();
     expect(buildFile!.content).toContain('testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")');
     expect(buildFile!.content).toContain('testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")');
-    expect(smokeTestFile!.content).toContain('package com.sdkwork.backend');
+    expect(smokeTestFile!.content).toContain('package com.sdkwork.test.backend');
     expect(smokeTestFile!.content).toContain('import com.sun.net.httpserver.HttpServer');
     expect(smokeTestFile!.content).toContain('runBlocking');
     expect(smokeTestFile!.content).toContain('val client = SdkworkBackendClient(config)');
@@ -9022,7 +9022,7 @@ describe('OpenAPI Security And Compliance', () => {
     const generator = new KotlinGenerator();
     const result = await generator.generate({ ...baseConfig, language: 'kotlin', generateTests: true }, postBodyAndQuerySpec);
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt'
+      (file) => file.path === 'src/test/kotlin/com/sdkwork/test/backend/GeneratedSdkSmokeTest.kt'
     );
 
     expect(result.errors).toEqual([]);
@@ -9042,7 +9042,7 @@ describe('OpenAPI Security And Compliance', () => {
     const generator = new KotlinGenerator();
     const result = await generator.generate({ ...baseConfig, language: 'kotlin', generateTests: true }, composedQueryParameterSpec);
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/kotlin/com/sdkwork/backend/GeneratedSdkSmokeTest.kt'
+      (file) => file.path === 'src/test/kotlin/com/sdkwork/test/backend/GeneratedSdkSmokeTest.kt'
     );
 
     expect(result.errors).toEqual([]);
@@ -9065,7 +9065,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(smokeTestFile!.content).not.toContain("import 'dart:convert';");
     expect(smokeTestFile!.content).toContain("import 'dart:io';");
     expect(smokeTestFile!.content).toContain("import 'package:test/test.dart';");
-    expect(smokeTestFile!.content).toContain("import 'package:backend_sdk/backend_sdk.dart';");
+    expect(smokeTestFile!.content).toContain("import 'package:test_backend_sdk/test_backend_sdk.dart';");
     expect(smokeTestFile!.content).toContain("final client = SdkworkBackendClient.withBaseUrl(baseUrl: 'http://127.0.0.1:${server.port}');");
     expect(smokeTestFile!.content).toContain('await client.user.listUsers();');
     expect(smokeTestFile!.content).toContain("expect(capturedPath, '/api/v1/users');");
@@ -9251,7 +9251,7 @@ describe('OpenAPI Security And Compliance', () => {
 
     const result = await generator.generate({ ...baseConfig, language: 'java' }, formSpec);
     const apiFile = result.files.find(
-      (file) => file.path === 'src/main/java/com/sdkwork/backend/api/AuthApi.java'
+      (file) => file.path === 'src/main/java/com/sdkwork/test/backend/api/AuthApi.java'
     );
 
     expect(result.errors).toEqual([]);
@@ -9307,7 +9307,7 @@ describe('OpenAPI Security And Compliance', () => {
       {
         configLanguage: 'kotlin' as const,
         generator: new KotlinGenerator(),
-        expectedPath: 'src/main/kotlin/com/sdkwork/backend/api/AuthApi.kt',
+        expectedPath: 'src/main/kotlin/com/sdkwork/test/backend/api/AuthApi.kt',
       },
       {
         configLanguage: 'swift' as const,

@@ -1,10 +1,11 @@
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { SWIFT_CONFIG } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
+        const legacyClientName = resolveLegacySdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
@@ -12,7 +13,7 @@ export class HttpClientGenerator {
         const commonPkg = resolveSwiftCommonPackage(config);
         return [
             this.generateHttpClient(config, apiKeyHeader, apiKeyUseBearer, commonPkg.productName),
-            this.generateSdkClient(clientName, tags, resolvedTagNames, config, commonPkg.productName),
+            this.generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config, commonPkg.productName),
         ];
     }
     generateHttpClient(config, apiKeyHeader, apiKeyUseBearer, commonProductName) {
@@ -486,7 +487,7 @@ public class HttpClient {
             description: 'HTTP client implementation',
         };
     }
-    generateSdkClient(clientName, tags, resolvedTagNames, config, commonProductName) {
+    generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config, commonProductName) {
         const modules = tags.map(tag => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
             const propName = SWIFT_CONFIG.namingConventions.propertyName(resolvedTagName);
@@ -499,6 +500,7 @@ public class HttpClient {
             const className = `${SWIFT_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
             return `        self.${propName} = ${className}(client: httpClient)`;
         }).join('\n');
+        const legacyAlias = legacyClientName ? `\npublic typealias ${legacyClientName} = ${clientName}\n` : '';
         return {
             path: `Sources/${clientName}.swift`,
             content: this.format(`import Foundation
@@ -538,6 +540,7 @@ ${inits}
         return self
     }
 }
+${legacyAlias}
 `),
             language: 'swift',
             description: 'Main SDK class',

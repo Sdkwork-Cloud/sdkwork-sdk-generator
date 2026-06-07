@@ -419,7 +419,7 @@ components:
       license: 'MIT',
       syncPublishedVersion: false,
     })).rejects.toThrow(
-      'Unsupported SDK type: desktop. Supported: app, backend, ai, custom'
+      'Unsupported SDK type: desktop. Supported: app, backend, im, ai, custom'
     );
 
     expect(existsSync(outputDir)).toBe(false);
@@ -452,7 +452,7 @@ components:
         name: 'TestSDK',
         type: 'app',
         language: 'python',
-        packageName: 'sdkwork-app-sdk-python',
+        packageName: 'sdkwork-notes-app-sdk-python',
         npmPackageName: '@acme/unified-app-sdk',
         license: 'MIT',
         dryRun: true,

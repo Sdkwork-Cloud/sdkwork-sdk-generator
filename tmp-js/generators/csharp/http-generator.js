@@ -1,20 +1,25 @@
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveCSharpCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { CSHARP_CONFIG, getCSharpNamespace } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
         const namespace = getCSharpNamespace(config);
         const clientName = resolveSdkClientName(config);
+        const legacyClientName = resolveLegacySdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         const commonPkg = resolveCSharpCommonPackage(config);
-        return [
+        const files = [
             this.generateHttpClient(namespace, apiKeyHeader, apiKeyUseBearer, commonPkg.namespace),
             this.generateSdkClient(clientName, tags, resolvedTagNames, namespace, config, commonPkg.namespace),
         ];
+        if (legacyClientName) {
+            files.push(this.generateLegacySdkClient(legacyClientName, clientName, namespace, commonPkg.namespace));
+        }
+        return files;
     }
     generateHttpClient(namespace, apiKeyHeader, apiKeyUseBearer, commonNamespace) {
         return {
@@ -515,5 +520,30 @@ ${inits}
     }
     format(content) {
         return content.trim() + '\n';
+    }
+    generateLegacySdkClient(legacyClientName, clientName, namespace, commonNamespace) {
+        return {
+            path: `${legacyClientName}.cs`,
+            content: this.format(`using ${commonNamespace};
+
+namespace ${namespace}
+{
+    public class ${legacyClientName} : ${clientName}
+    {
+        public ${legacyClientName}(string baseUrl)
+            : base(baseUrl)
+        {
+        }
+
+        public ${legacyClientName}(SdkConfig config)
+            : base(config)
+        {
+        }
+    }
+}
+`),
+            language: 'csharp',
+            description: 'Legacy SDK client compatibility class',
+        };
     }
 }

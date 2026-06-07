@@ -3,6 +3,7 @@ import { buildSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.
 import { normalizeOperationId, normalizeTagName } from './naming.js';
 import { findUnexpectedPathItemOperationFields, normalizeOpenApiPathItemOperations, } from './http-methods.js';
 import { formatSdkworkV3StandardIssues, validateSdkworkV3Standard, } from './sdkwork-v3-standard.js';
+import { normalizeSdkworkV3AuthSurface } from './sdkwork-v3-auth-normalizer.js';
 import { parseLocalJsonPointerRef, resolveLocalJsonPointerReference, getSchemaReferenceName, normalizeSchemaTypeValue, resolveSchemaType, toLocalJsonPointerRef, } from './schema.js';
 export * from './types.js';
 export class BaseGenerator {
@@ -87,7 +88,7 @@ export class BaseGenerator {
                 code: 'GENERATION_ERROR',
             });
         }
-        const finalizedFiles = this.finalizeGeneratedFiles(files);
+        const finalizedFiles = this.finalizeGeneratedFiles(normalizeSdkworkV3AuthSurface(files, this.config));
         const schemaCount = this.ctx ? Object.keys(this.ctx.schemas).length : 0;
         const apiCount = this.ctx ? Object.keys(this.ctx.apiGroups).length : 0;
         const typeCount = finalizedFiles.filter(f => f.path.includes('/types/') || f.path.includes('models')).length;

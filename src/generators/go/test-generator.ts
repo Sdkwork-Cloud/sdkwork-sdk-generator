@@ -1,4 +1,5 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import {
@@ -27,7 +28,7 @@ export class TestGenerator {
   }
 
   private generateSmokeTest(plan: GoUsagePlan, config: GeneratorConfig): string {
-    const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+    const moduleName = config.packageName || resolveDefaultGoModuleName(config);
     const moduleAlias = config.sdkType;
     const clientName = resolveSdkClientName(config);
     const expectedPath = resolveGoExpectedRequestPath(plan.operation.path, config.apiPrefix);

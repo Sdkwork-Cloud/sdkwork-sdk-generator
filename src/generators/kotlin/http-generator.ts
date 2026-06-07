@@ -3,23 +3,28 @@ import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { KOTLIN_CONFIG } from './config.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const identity = resolveJvmSdkIdentity(config);
     const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveJvmCommonPackage(config);
 
-    return [
+    const files = [
       this.generateHttpClient(identity, apiKeyHeader, apiKeyUseBearer, commonPkg.importRoot),
       this.generateSdkClient(clientName, tags, resolvedTagNames, identity, config, commonPkg.importRoot),
     ];
+    if (legacyClientName) {
+      files.push(this.generateLegacySdkClient(legacyClientName, clientName, identity, commonPkg.importRoot));
+    }
+    return files;
   }
 
   private generateHttpClient(
@@ -410,7 +415,7 @@ ${tags.map(tag => {
   return `import ${packageName.packageRoot}.api.${KOTLIN_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
 }).join('\n')}
 
-class ${clientName} {
+open class ${clientName} {
     private val httpClient: HttpClient
 
 ${modules}
@@ -448,6 +453,28 @@ ${inits}
 `),
       language: 'kotlin',
       description: 'Main SDK class',
+    };
+  }
+
+  private generateLegacySdkClient(
+    legacyClientName: string,
+    clientName: string,
+    packageName: ReturnType<typeof resolveJvmSdkIdentity>,
+    commonImportRoot: string,
+  ): GeneratedFile {
+    return {
+      path: `src/main/kotlin/${packageName.packagePath}/${legacyClientName}.kt`,
+      content: this.format(`package ${packageName.packageRoot}
+
+import ${commonImportRoot}.SdkConfig
+
+class ${legacyClientName} : ${clientName} {
+    constructor(baseUrl: String) : super(baseUrl)
+    constructor(config: SdkConfig) : super(config)
+}
+`),
+      language: 'kotlin',
+      description: 'Legacy SDK client compatibility class',
     };
   }
 

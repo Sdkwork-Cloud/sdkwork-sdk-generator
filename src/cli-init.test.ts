@@ -173,7 +173,7 @@ describe('runInitCommand', () => {
       name: 'TestSDK',
       type: 'desktop' as any,
       language: 'typescript',
-    })).rejects.toThrow('Unsupported SDK type: desktop. Supported: app, backend, ai, custom');
+    })).rejects.toThrow('Unsupported SDK type: desktop. Supported: app, backend, im, ai, custom');
 
     expect(existsSync(outputDir)).toBe(false);
   });

@@ -13,7 +13,7 @@ const pythonConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
-  packageName: 'sdkwork-app-sdk-python',
+  packageName: 'sdkwork-notes-app-sdk-python',
 };
 
 describe('Python generator regressions', () => {
@@ -23,10 +23,10 @@ describe('Python generator regressions', () => {
 
     const result = await generator!.generate(pythonConfig, discriminatedContentSpec);
     const contentPartFile = result.files.find(
-      (file) => file.path === 'sdkwork_app_sdk_python/models/content_part.py'
+      (file) => file.path === 'sdkwork_notes_app_sdk_python/models/content_part.py'
     );
     const mediaContentPartFile = result.files.find(
-      (file) => file.path === 'sdkwork_app_sdk_python/models/media_content_part.py'
+      (file) => file.path === 'sdkwork_notes_app_sdk_python/models/media_content_part.py'
     );
 
     expect(result.errors).toEqual([]);

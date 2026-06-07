@@ -18,6 +18,8 @@ export interface GenerateCommandOptions {
   packageName?: string;
   namespace?: string;
   commonPackage?: string;
+  clientName?: string;
+  legacyClientName?: string;
   sdkVersion?: string;
   fixedSdkVersion?: string;
   npmRegistry?: string;
@@ -122,6 +124,8 @@ async function executeGenerate(
     packageName: options.packageName,
     namespace: options.namespace,
     commonPackage: options.commonPackage,
+    clientName: options.clientName,
+    legacyClientName: options.legacyClientName,
     generateReadme: true,
     options: options.standardProfile
       ? { standardProfile: options.standardProfile }

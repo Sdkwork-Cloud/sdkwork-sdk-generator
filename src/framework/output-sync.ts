@@ -587,12 +587,6 @@ function generatedScanRootForPath(relativePath: string): string | null {
   if (segments[0] === 'Sources' && segments.length >= 2 && ['API', 'Models'].includes(segments[1])) {
     return `Sources/${segments[1]}`;
   }
-  if (segments[0] === 'sdkwork_app_sdk' && segments.length >= 2 && ['api', 'models'].includes(segments[1])) {
-    return `sdkwork_app_sdk/${segments[1]}`;
-  }
-  if (segments[0] === 'sdkwork_backend_sdk' && segments.length >= 2 && ['api', 'models'].includes(segments[1])) {
-    return `sdkwork_backend_sdk/${segments[1]}`;
-  }
   return null;
 }
 

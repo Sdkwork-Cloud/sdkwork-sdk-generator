@@ -91,13 +91,15 @@ program
   .option('--package-name <name>', 'Package name')
   .option('--namespace <name>', 'Namespace override for languages that support it, such as C# and PHP')
   .option('--common-package <spec>', 'Common package spec (language-specific, optional)')
+  .option('--client-name <name>', 'Primary SDK client class/type name')
+  .option('--legacy-client-name <name>', 'Legacy SDK client alias name')
   .option('--sdk-version <ver>', 'SDK version')
   .option('--fixed-sdk-version <ver>', 'Use an exact SDK version without auto-increment checks')
   .option('--standard-profile <profile>', 'Enable a strict OpenAPI standard profile, for example sdkwork-v3')
   .option('--npm-registry <url>', 'Registry used for published TypeScript SDK version checks', 'https://registry.npmjs.org')
   .option('--npm-package-name <name>', 'TypeScript npm package used as the published version baseline for multi-language releases')
   .option('--sdk-root <path>', 'SDK workspace root used to scan sibling language package versions')
-  .option('--sdk-name <name>', 'SDK workspace prefix, for example sdkwork-app-sdk')
+  .option('--sdk-name <name>', 'SDK workspace prefix, for example sdkwork-notes-app-sdk')
   .option('--no-sync-published-version', 'Skip published npm version checks when resolving sdk version')
   .option('--description <text>', 'Description')
   .option('--author <name>', 'Author')
@@ -141,6 +143,8 @@ program
         packageName: options.packageName,
         namespace: options.namespace,
         commonPackage: options.commonPackage,
+        clientName: options.clientName,
+        legacyClientName: options.legacyClientName,
         sdkVersion: options.sdkVersion,
         fixedSdkVersion: options.fixedSdkVersion,
         standardProfile: options.standardProfile,

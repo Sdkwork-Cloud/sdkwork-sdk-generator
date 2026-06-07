@@ -1,6 +1,7 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { createUniqueIdentifierMap, toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 import {
   normalizeOperationId,
   resolveScopedMethodNames,
@@ -93,7 +94,7 @@ export class ApiGenerator {
   }
 
   private getModuleName(config: GeneratorConfig): string {
-    return config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+    return config.packageName || resolveDefaultGoModuleName(config);
   }
 
   private generateApiFile(

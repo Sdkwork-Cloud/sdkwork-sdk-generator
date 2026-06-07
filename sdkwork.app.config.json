@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 3,
+  "kind": "sdkwork.app",
+  "app": {
+    "key": "sdkwork-sdk-generator",
+    "name": "SDKWork Sdk Generator",
+    "displayName": "SDKWork Sdk Generator",
+    "description": "SDKWork SDK Generator - Professional SDK code generator for TypeScript, Dart, Python, Go, Java, Kotlin, Swift, C#, Flutter, Rust, PHP, and Ruby",
+    "vendor": "SDKWork",
+    "officialWebsiteUrl": "https://sdkwork.com/apps/sdkwork-sdk-generator",
+    "supportUrl": "https://sdkwork.com/support",
+    "privacyPolicyUrl": "https://sdkwork.com/privacy",
+    "termsOfServiceUrl": "https://sdkwork.com/terms",
+    "iconUrl": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/assets/icon-1024.png",
+    "appType": "APP_HTML",
+    "versionSource": "package.json",
+    "identifiers": {
+      "packageName": null,
+      "bundleId": null,
+      "desktopAppId": "com.sdkwork.sdkwork.sdk.generator.desktop",
+      "containerImage": "registry.sdkwork.com/apps/sdkwork-sdk-generator"
+    }
+  },
+  "backend": {
+    "profileKey": "backend-root-admin",
+    "ownerMode": "tenant",
+    "grantMode": "current",
+    "platform": "WEB",
+    "appId": null,
+    "tenantId": "20001",
+    "organizationId": null
+  },
+  "runtime": {
+    "family": "web",
+    "framework": "node-service",
+    "runtimes": [
+      "WEB",
+      "BROWSER"
+    ],
+    "deliveryModes": [
+      "WEB_URL",
+      "DIRECT_DOWNLOAD"
+    ],
+    "defaultPlatform": "WEB",
+    "defaultArchitecture": "x64"
+  },
+  "media": {
+    "icons": {
+      "primary": {
+        "id": "sdkwork-sdk-generator-primary-icon",
+        "type": "ICON",
+        "purpose": "PRIMARY",
+        "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/assets/icon-1024.png",
+        "platform": "APP",
+        "locale": "en-US",
+        "width": 1024,
+        "height": 1024,
+        "format": "PNG",
+        "fileSizeBytes": 524288,
+        "alphaChannel": false,
+        "sortOrder": 0,
+        "enabled": true,
+        "metadata": {
+          "generatedPlaceholder": true
+        }
+      },
+      "platform": [],
+      "metadata": {
+        "generatedBy": "apps/scripts/initialize-sdkwork-app-standard-v3.mjs"
+      }
+    },
+    "screenshots": [
+      {
+        "id": "sdkwork-sdk-generator-web-screenshot",
+        "type": "SCREENSHOT",
+        "purpose": "CATALOG_SCREENSHOT",
+        "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/media/web-screenshot.png",
+        "platform": "WEB",
+        "locale": "en-US",
+        "deviceClass": "BROWSER",
+        "displayType": "WEB_DESKTOP",
+        "width": 1920,
+        "height": 1080,
+        "format": "PNG",
+        "fileSizeBytes": 1048576,
+        "alphaChannel": false,
+        "caption": "SDKWork Sdk Generator product screenshot.",
+        "sortOrder": 0,
+        "enabled": true,
+        "metadata": {
+          "generatedPlaceholder": true,
+          "altText": "SDKWork Sdk Generator app screenshot."
+        }
+      }
+    ],
+    "previews": [
+      {
+        "id": "sdkwork-sdk-generator-catalog-preview",
+        "type": "PREVIEW_IMAGE",
+        "purpose": "CATALOG_PREVIEW",
+        "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/media/preview-cover.png",
+        "platform": "WEB",
+        "locale": "en-US",
+        "width": 1600,
+        "height": 900,
+        "format": "PNG",
+        "fileSizeBytes": 786432,
+        "alphaChannel": false,
+        "caption": "SDKWork Sdk Generator preview.",
+        "sortOrder": 0,
+        "enabled": true,
+        "metadata": {
+          "generatedPlaceholder": true,
+          "altText": "SDKWork Sdk Generator preview cover."
+        }
+      }
+    ],
+    "metadata": {
+      "assetVersion": "1.0.9",
+      "defaultLocale": "en-US"
+    }
+  },
+  "publish": {
+    "status": "ACTIVE",
+    "installSkill": {
+      "name": "sdkwork-skills-app"
+    },
+    "platforms": [
+      "WEB"
+    ],
+    "installPlatforms": [
+      "WEB"
+    ],
+    "defaultPackageId": "web-production",
+    "storeUrl": "https://sdkwork.com/apps/sdkwork-sdk-generator",
+    "stores": [],
+    "config": {
+      "workspaceRoot": "apps/sdkwork-sdk-generator",
+      "framework": "node-service",
+      "managedBy": "apps/scripts/initialize-sdkwork-app-standard-v3.mjs"
+    }
+  },
+  "environments": {
+    "development": {
+      "accessUrl": "https://api-dev.sdkwork.com/apps/sdkwork-sdk-generator",
+      "deployUrl": "https://api-dev.sdkwork.com/apps/sdkwork-sdk-generator",
+      "deployEnv": "dev"
+    },
+    "test": {
+      "accessUrl": "https://api-test.sdkwork.com/apps/sdkwork-sdk-generator",
+      "deployUrl": "https://api-test.sdkwork.com/apps/sdkwork-sdk-generator",
+      "deployEnv": "test"
+    },
+    "production": {
+      "accessUrl": "https://api.sdkwork.com/apps/sdkwork-sdk-generator",
+      "deployUrl": "https://api.sdkwork.com/apps/sdkwork-sdk-generator",
+      "deployEnv": "production"
+    }
+  },
+  "artifacts": {
+    "installConfig": {
+      "defaultPackageId": "web-production",
+      "installCommand": "sdkwork install sdkwork-sdk-generator",
+      "launchCommand": "sdkwork open sdkwork-sdk-generator",
+      "uninstallCommand": "sdkwork uninstall sdkwork-sdk-generator",
+      "packages": [
+        {
+          "id": "web-production",
+          "name": "SDKWork Sdk Generator Web Bundle",
+          "sourceType": "WEB_URL",
+          "packageFormat": "ZIP",
+          "platform": "WEB",
+          "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/STABLE/1.0.9/web.zip",
+          "enabled": true,
+          "metadata": {},
+          "checksumAlgorithm": "SHA-256",
+          "checksum": "e8da8acee8da8acee8da8acee8da8acee8da8acee8da8acee8da8acee8da8ace"
+        },
+        {
+          "id": "desktop-windows",
+          "name": "SDKWork Sdk Generator Windows Bundle",
+          "sourceType": "BINARY_URL",
+          "packageFormat": "ZIP",
+          "platform": "DESKTOP_WINDOWS",
+          "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/STABLE/1.0.9/windows/x64/app.zip",
+          "enabled": true,
+          "metadata": {},
+          "architecture": "x64",
+          "checksumAlgorithm": "SHA-256",
+          "checksum": "6834635668346356683463566834635668346356683463566834635668346356"
+        },
+        {
+          "id": "desktop-macos",
+          "name": "SDKWork Sdk Generator macOS Bundle",
+          "sourceType": "BINARY_URL",
+          "packageFormat": "DMG",
+          "platform": "DESKTOP_MACOS",
+          "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/STABLE/1.0.9/macos/universal/app.dmg",
+          "enabled": true,
+          "metadata": {},
+          "architecture": "universal",
+          "checksumAlgorithm": "SHA-256",
+          "checksum": "2fc275062fc275062fc275062fc275062fc275062fc275062fc275062fc27506"
+        },
+        {
+          "id": "desktop-linux",
+          "name": "SDKWork Sdk Generator Linux Bundle",
+          "sourceType": "BINARY_URL",
+          "packageFormat": "APPIMAGE",
+          "platform": "DESKTOP_LINUX",
+          "url": "https://cdn.sdkwork.com/apps/sdkwork-sdk-generator/STABLE/1.0.9/linux/generic/x64/app.AppImage",
+          "enabled": true,
+          "metadata": {
+            "linux": {
+              "distro": "generic"
+            }
+          },
+          "architecture": "x64",
+          "checksumAlgorithm": "SHA-256",
+          "checksum": "2fb82a872fb82a872fb82a872fb82a872fb82a872fb82a872fb82a872fb82a87"
+        }
+      ],
+      "metadata": {
+        "workspaceRoot": "apps/sdkwork-sdk-generator",
+        "framework": "node-service",
+        "packageManager": "pnpm",
+        "migratedFromLegacyConfig": false
+      }
+    }
+  },
+  "release": {
+    "currentVersion": "1.0.9",
+    "defaultChannel": "STABLE",
+    "latest": {
+      "STABLE": "1.0.9"
+    },
+    "notes": [
+      {
+        "version": "1.0.9",
+        "releaseChannel": "STABLE",
+        "title": "SDKWork Sdk Generator 1.0.9",
+        "summary": "SDKWork Sdk Generator initialized standard release.",
+        "content": "Initial SDKWork App Standard v3 manifest for SDKWork Sdk Generator.",
+        "highlights": [
+          "SDKWork App Standard v3 configuration initialized",
+          "PlusApp projection metadata standardized",
+          "Download package matrix normalized"
+        ],
+        "packageIds": [
+          "web-production",
+          "desktop-windows",
+          "desktop-macos",
+          "desktop-linux"
+        ],
+        "publishedAt": "2026-05-07T00:00:00Z",
+        "current": true,
+        "forceUpdate": false,
+        "minSupportedVersion": "1.0.9",
+        "metadata": {}
+      }
+    ]
+  },
+  "security": {
+    "checksumRequired": false,
+    "signatureRequired": false,
+    "sbomRequired": false
+  },
+  "devApp": {
+    "build": {
+      "targets": []
+    },
+    "sourceRoot": "apps/sdkwork-sdk-generator"
+  },
+  "metadata": {
+    "standardOwner": "sdkwork-platform",
+    "initializedAt": "2026-05-07T00:00:00Z"
+  }
+}

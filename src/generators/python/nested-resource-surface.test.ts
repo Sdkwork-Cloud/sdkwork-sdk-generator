@@ -18,7 +18,7 @@ const baseConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
-  packageName: 'sdkwork-app-sdk-python',
+  packageName: 'sdkwork-notes-app-sdk-python',
   generateTests: true,
 };
 
@@ -113,12 +113,12 @@ describe('Python nested resource surface', () => {
 
     expect(result.errors).toEqual([]);
 
-    const clientFile = getGeneratedFile(result.files, 'sdkwork_app_sdk_python/client.py');
+    const clientFile = getGeneratedFile(result.files, 'sdkwork_notes_app_sdk_python/client.py');
     expect(clientFile.content).toContain('self.billing: BillingApi');
     expect(clientFile.content).not.toContain('self.account:');
     expect(clientFile.content).not.toContain('self.vip:');
 
-    const billingApi = getGeneratedFile(result.files, 'sdkwork_app_sdk_python/api/billing.py');
+    const billingApi = getGeneratedFile(result.files, 'sdkwork_notes_app_sdk_python/api/billing.py');
     expect(billingApi.content).toContain('class BillingApi:');
     expect(billingApi.content).toContain('self.account = BillingAccountApi(client)');
     expect(billingApi.content).toContain('class BillingAccountApi:');
@@ -132,7 +132,7 @@ describe('Python nested resource surface', () => {
     expect(billingApi.content).not.toContain('def account_summary_retrieve');
     expect(billingApi.content).not.toContain('def vip_purchase_renew');
 
-    const profileApi = getGeneratedFile(result.files, 'sdkwork_app_sdk_python/api/profile.py');
+    const profileApi = getGeneratedFile(result.files, 'sdkwork_notes_app_sdk_python/api/profile.py');
     expect(profileApi.content).toContain('def current(self) -> ProfileResult:');
     expect(profileApi.content).not.toContain('self.current =');
 

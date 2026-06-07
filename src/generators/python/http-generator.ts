@@ -3,11 +3,12 @@ import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { PYTHON_CONFIG, getPythonPackageRoot } from './config.js';
 import { resolvePythonCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
     const packageRoot = getPythonPackageRoot(config);
@@ -16,8 +17,8 @@ export class HttpClientGenerator {
 
     return [
       this.generateHttpClient(config, packageRoot, apiKeyHeader, apiKeyUseBearer),
-      this.generateSdkClient(clientName, tags, resolvedTagNames, config, packageRoot),
-      this.generatePackageInit(clientName, config, packageRoot),
+      this.generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config, packageRoot),
+      this.generatePackageInit(clientName, legacyClientName, config, packageRoot),
     ];
   }
 
@@ -123,6 +124,7 @@ class HttpClient(BaseHttpClient):
 
   private generateSdkClient(
     clientName: string,
+    legacyClientName: string | undefined,
     tags: string[],
     resolvedTagNames: Map<string, string>,
     config: GeneratorConfig,
@@ -148,6 +150,7 @@ class HttpClient(BaseHttpClient):
       const className = `${PYTHON_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
       return `        self.${propName} = ${className}(self._client)`;
     }).join('\n');
+    const legacyAlias = legacyClientName ? `\n${legacyClientName} = ${clientName}\n` : '';
 
     return {
       path: `${packageRoot}/client.py`,
@@ -194,16 +197,24 @@ ${inits}
 def create_client(config: SdkConfig) -> ${clientName}:
     """Create a new SDK client instance."""
     return ${clientName}(config)
+${legacyAlias}
 `),
       language: 'python',
       description: 'Main SDK client',
     };
   }
 
-  private generatePackageInit(clientName: string, config: GeneratorConfig, packageRoot: string): GeneratedFile {
+  private generatePackageInit(
+    clientName: string,
+    legacyClientName: string | undefined,
+    config: GeneratorConfig,
+    packageRoot: string,
+  ): GeneratedFile {
+    const clientImports = [clientName, legacyClientName, 'create_client'].filter(Boolean).join(', ');
+    const clientExports = [clientName, legacyClientName].filter(Boolean);
     return {
       path: `${packageRoot}/__init__.py`,
-      content: this.format(`from .client import ${clientName}, create_client
+      content: this.format(`from .client import ${clientImports}
 from .http_client import HttpClient, SdkConfig
 from .models import *
 from .api import *
@@ -211,7 +222,7 @@ from .api import *
 __version__ = "${config.version}"
 
 __all__ = [
-    '${clientName}',
+${clientExports.map((entry) => `    '${entry}',`).join('\n')}
     'create_client',
     'HttpClient',
     'SdkConfig',

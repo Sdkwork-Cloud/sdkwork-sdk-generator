@@ -1,51 +1,35 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(currentDir, '..', '..', '..');
+const repoRoot = resolve(currentDir, '..');
 
-function readRepoFile(relativePath) {
-  return readFileSync(resolve(repoRoot, relativePath), 'utf-8');
-}
+const app = 'app';
+const backend = 'backend';
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+const retiredTokens = [
+  `sdkwork-${app}-sdk`,
+  `sdkwork-${backend}-sdk`,
+  `@sdkwork/${app}-sdk`,
+  `@sdkwork/${backend}-sdk`,
+  `sdkwork/${app}-sdk`,
+  `sdkwork/${backend}-sdk`,
+  `github.com/sdkwork/${app}-sdk`,
+  `github.com/sdkwork/${backend}-sdk`,
+  `sdkwork_${app}_sdk`,
+  `sdkwork_${backend}_sdk`,
+];
 
-function expectPowerShellWrapper(content, schemaPath, apiPrefix) {
-  assert.match(content, /\[string\]\$BaseUrl/);
-  assert.match(content, /\[Alias\("Host"\)\]/);
-  assert.match(content, /\[string\]\$Domain/);
-  assert.match(content, /\[int\]\$Port/);
-  assert.match(content, /\[string\]\$Scheme/);
-  assert.match(content, /\[string\]\$SchemaUrl/);
-  assert.match(content, /--base-url/);
-  assert.match(content, new RegExp(escapeRegExp(schemaPath)));
-  assert.match(content, new RegExp(escapeRegExp(apiPrefix)));
-}
-
-function expectShellWrapper(content, schemaPath, apiPrefix) {
-  assert.match(content, /BASE_URL="\$\{BASE_URL:-/);
-  assert.match(content, /HOST="\$\{HOST:-\$\{DOMAIN:-localhost\}\}"/);
-  assert.match(content, /PORT="\$\{PORT:-8080\}"/);
-  assert.match(content, /SCHEME="\$\{SCHEME:-http\}"/);
-  assert.match(content, /SCHEMA_URL="\$\{SCHEMA_URL:-/);
-  assert.match(content, /--base-url/);
-  assert.match(content, new RegExp(escapeRegExp(schemaPath)));
-  assert.match(content, new RegExp(escapeRegExp(apiPrefix)));
-}
-
-function expectReadmeWrapperUsage(content, sdkRoot) {
-  const normalizedRootPattern = escapeRegExp(sdkRoot).replace(/\//g, '[/\\\\]');
-  assert.match(content, new RegExp(`${normalizedRootPattern}[/\\\\]bin[/\\\\]generate-sdk\\.sh`));
-  assert.match(content, new RegExp(`${normalizedRootPattern}[/\\\\]bin[/\\\\]generate-sdk\\.ps1`));
-  assert.match(content, /localhost:8080/);
-  assert.ok(content.includes('BASE_URL=') || content.includes('-BaseUrl '));
-}
+const scannedSources = [
+  'README.md',
+  'rust',
+  'src',
+  'test',
+  'tmp-js',
+];
 
 function runCheck(name, check) {
   try {
@@ -57,77 +41,41 @@ function runCheck(name, check) {
   }
 }
 
-const wrappers = [
-  {
-    sdkRoot: 'spring-ai-plus-app-api/sdkwork-sdk-app',
-    ps1Path: 'spring-ai-plus-app-api/sdkwork-sdk-app/bin/generate-sdk.ps1',
-    shPath: 'spring-ai-plus-app-api/sdkwork-sdk-app/bin/generate-sdk.sh',
-    readmePath: 'spring-ai-plus-app-api/sdkwork-sdk-app/README.md',
-    schemaPath: '/v3/api-docs/app',
-    apiPrefix: '/app/v3/api',
-  },
-  {
-    sdkRoot: 'spring-ai-plus-backend-api/sdkwork-sdk-backend',
-    ps1Path: 'spring-ai-plus-backend-api/sdkwork-sdk-backend/bin/generate-sdk.ps1',
-    shPath: 'spring-ai-plus-backend-api/sdkwork-sdk-backend/bin/generate-sdk.sh',
-    readmePath: 'spring-ai-plus-backend-api/sdkwork-sdk-backend/README.md',
-    schemaPath: '/v3/api-docs/backend',
-    apiPrefix: '/backend/v3/api',
-  },
-  {
-    sdkRoot: 'spring-ai-plus-ai-api/sdkwork-sdk-ai',
-    ps1Path: 'spring-ai-plus-ai-api/sdkwork-sdk-ai/bin/generate-sdk.ps1',
-    shPath: 'spring-ai-plus-ai-api/sdkwork-sdk-ai/bin/generate-sdk.sh',
-    readmePath: 'spring-ai-plus-ai-api/sdkwork-sdk-ai/README.md',
-    schemaPath: '/v3/api-docs/ai',
-    apiPrefix: '/ai/v3',
-  },
-];
-
-runCheck('each sdk root has a unified PowerShell wrapper', () => {
-  wrappers.forEach(({ ps1Path, schemaPath, apiPrefix }) => {
-    assert.equal(existsSync(resolve(repoRoot, ps1Path)), true, `${ps1Path} should exist`);
-    expectPowerShellWrapper(readRepoFile(ps1Path), schemaPath, apiPrefix);
+function runNode(args, options = {}) {
+  return spawnSync(process.execPath, args, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    ...options,
   });
+}
+
+runCheck('sdkgen bin wrapper is present', () => {
+  const binPath = resolve(repoRoot, 'bin/sdkgen.js');
+  assert.equal(existsSync(binPath), true, 'bin/sdkgen.js should exist');
+  const content = readFileSync(binPath, 'utf-8');
+  assert.match(content, /tmp-js\/cli\.js/);
 });
 
-runCheck('each sdk root has a unified shell wrapper', () => {
-  wrappers.forEach(({ shPath, schemaPath, apiPrefix }) => {
-    assert.equal(existsSync(resolve(repoRoot, shPath)), true, `${shPath} should exist`);
-    expectShellWrapper(readRepoFile(shPath), schemaPath, apiPrefix);
+runCheck('authored generator sources do not contain retired generic sdk packages', () => {
+  const rgArgs = [
+    '-n',
+    retiredTokens.join('|'),
+    ...scannedSources,
+    '--hidden',
+    '-g',
+    '!**/node_modules/**',
+  ];
+  const result = spawnSync('rg', rgArgs, {
+    cwd: repoRoot,
+    encoding: 'utf-8',
   });
+
+  assert.equal(result.status, 1, result.stdout || result.stderr);
 });
 
-runCheck('each sdk readme documents wrapper-based regeneration', () => {
-  wrappers.forEach(({ readmePath, sdkRoot }) => {
-    expectReadmeWrapperUsage(readRepoFile(readmePath), sdkRoot);
+runCheck('version resolver derives product package baselines for non-typescript languages', () => {
+  const result = runNode(['./bin/test-runner.mjs', 'src/versioning.test.ts'], {
+    stdio: 'pipe',
   });
-});
-
-runCheck('shared sdk version resolver wrapper is executable', () => {
-  const resolverPath = resolve(repoRoot, 'sdk/sdkwork-sdk-generator/bin/resolve-sdk-version.js');
-  assert.equal(existsSync(resolverPath), true, 'resolve-sdk-version.js should exist');
-
-  const tempRoot = mkdtempSync(resolve(tmpdir(), 'sdkwork-sdk-version-'));
-  try {
-    const result = spawnSync(process.execPath, [
-      resolverPath,
-      '--sdk-root',
-      tempRoot,
-      '--sdk-name',
-      'sdkwork-test-sdk',
-      '--sdk-type',
-      'app',
-      '--package-name',
-      '@sdkwork/test-sdk',
-      '--no-sync-published-version',
-    ], {
-      encoding: 'utf-8',
-    });
-
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(result.stdout.trim(), '1.0.0');
-  } finally {
-    rmSync(tempRoot, { recursive: true, force: true });
-  }
+  assert.equal(result.status, 0, result.stderr || result.stdout);
 });

@@ -1,3 +1,4 @@
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const PYTHON_CONFIG = {
     language: 'python',
@@ -165,7 +166,7 @@ function renderPythonConstType(value) {
     return `Literal[${value}]`;
 }
 export function getPythonPackageRoot(config) {
-    const distributionName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+    const distributionName = config.packageName || resolveDefaultDistributionName(config);
     const packageRoot = distributionName
         .replace(/[@/.-]+/g, '_')
         .replace(/[^a-zA-Z0-9_]/g, '_')

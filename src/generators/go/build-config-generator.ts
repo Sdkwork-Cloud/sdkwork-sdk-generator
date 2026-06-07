@@ -1,7 +1,7 @@
 import type { GeneratedFile } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { GO_CONFIG } from './config.js';
 import { resolveGoCommonPackage } from '../../framework/common-package.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
@@ -11,7 +11,7 @@ export class BuildConfigGenerator {
   }
 
   private generateGoMod(config: GeneratorConfig): GeneratedFile {
-    const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+    const moduleName = config.packageName || resolveDefaultGoModuleName(config);
     const commonPkg = resolveGoCommonPackage(config);
     
     return {

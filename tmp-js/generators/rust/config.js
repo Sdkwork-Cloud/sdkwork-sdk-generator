@@ -1,3 +1,4 @@
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const RUST_CONFIG = {
     language: 'rust',
@@ -31,7 +32,7 @@ export const RUST_CONFIG = {
     },
 };
 export function getRustPackageName(config) {
-    const baseName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+    const baseName = config.packageName || resolveDefaultDistributionName(config);
     return sanitizePackageName(baseName);
 }
 export function getRustCrateName(config) {

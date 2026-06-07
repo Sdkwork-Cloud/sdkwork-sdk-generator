@@ -1,4 +1,5 @@
 import { resolveGoCommonPackage } from '../../framework/common-package.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 export class BuildConfigGenerator {
     generate(config) {
         return [
@@ -6,7 +7,7 @@ export class BuildConfigGenerator {
         ];
     }
     generateGoMod(config) {
-        const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+        const moduleName = config.packageName || resolveDefaultGoModuleName(config);
         const commonPkg = resolveGoCommonPackage(config);
         return {
             path: 'go.mod',

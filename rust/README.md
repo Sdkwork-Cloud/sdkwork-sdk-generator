@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .sdk_type(SdkType::Backend)
             .base_url("https://api.example.com")
             .api_prefix("/backend/v3/api")
-            .package_name("sdkwork-backend-sdk"),
+            .package_name("sdkwork-notes-backend-sdk"),
         )
         .await?;
 
@@ -235,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Backend",
             )
             .sdk_type(SdkType::Backend)
-            .package_name("sdkwork-backend-sdk"),
+            .package_name("sdkwork-notes-backend-sdk"),
             GeneratedPackageFormat::TarGz,
         )
         .await?;

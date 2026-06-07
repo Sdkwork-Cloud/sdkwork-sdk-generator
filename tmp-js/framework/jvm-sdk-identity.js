@@ -1,8 +1,9 @@
 import { toSafeSnakeIdentifier } from './identifiers.js';
+import { resolveDefaultPackageToken } from './package-identity.js';
 const EMPTY_RESERVED_WORDS = new Set();
 const DEFAULT_GROUP_ID = 'com.sdkwork';
 export function resolveJvmSdkIdentity(config) {
-    const defaultArtifactId = `${config.sdkType}-sdk`;
+    const defaultArtifactId = resolveDefaultPackageToken(config);
     const coordinate = parseSdkCoordinate(config.packageName, defaultArtifactId);
     const packageRoot = resolvePackageRoot(config, coordinate.groupId, coordinate.artifactId);
     return {

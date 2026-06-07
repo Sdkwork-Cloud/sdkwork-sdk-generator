@@ -1,21 +1,26 @@
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JAVA_CONFIG } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
         const identity = resolveJvmSdkIdentity(config);
         const clientName = resolveSdkClientName(config);
+        const legacyClientName = resolveLegacySdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
         const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
         const commonPkg = resolveJvmCommonPackage(config);
-        return [
+        const files = [
             this.generateHttpClient(identity, apiKeyHeader, apiKeyUseBearer, commonPkg.importRoot),
             this.generateSdkClient(clientName, tags, resolvedTagNames, identity, config, commonPkg.importRoot),
         ];
+        if (legacyClientName) {
+            files.push(this.generateLegacySdkClient(legacyClientName, clientName, identity, commonPkg.importRoot));
+        }
+        return files;
     }
     generateHttpClient(identity, apiKeyHeader, apiKeyUseBearer, commonImportRoot) {
         return {
@@ -521,6 +526,27 @@ ${getters}
 `),
             language: 'java',
             description: 'Main SDK class',
+        };
+    }
+    generateLegacySdkClient(legacyClientName, clientName, identity, commonImportRoot) {
+        return {
+            path: `src/main/java/${identity.packagePath}/${legacyClientName}.java`,
+            content: this.format(`package ${identity.packageRoot};
+
+import ${commonImportRoot}.Types;
+
+public class ${legacyClientName} extends ${clientName} {
+    public ${legacyClientName}(String baseUrl) {
+        super(baseUrl);
+    }
+
+    public ${legacyClientName}(Types.SdkConfig config) {
+        super(config);
+    }
+}
+`),
+            language: 'java',
+            description: 'Legacy SDK client compatibility class',
         };
     }
     format(content) {

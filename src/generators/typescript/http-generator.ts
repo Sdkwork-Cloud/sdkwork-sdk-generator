@@ -2,12 +2,17 @@ import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { buildTypeScriptTagMetadata, type TypeScriptApiTagMetadata } from './tag-metadata.js';
 import { resolveTypeScriptCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName, resolveTypeScriptConfigTypeName } from '../../framework/sdk-identity.js';
+import {
+  resolveLegacySdkClientName,
+  resolveSdkClientName,
+  resolveTypeScriptConfigTypeName,
+} from '../../framework/sdk-identity.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const configType = resolveTypeScriptConfigTypeName(config);
     const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const tagMetadata = buildTypeScriptTagMetadata(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -21,8 +26,8 @@ export class HttpClientGenerator {
       this.generateHttpClient(configType, apiKeyHeader, accessTokenHeader, apiKeyUseBearer, commonPkg.importPath),
       this.generateHttpIndex(),
       this.generateAuthIndex(commonPkg.importPath),
-      this.generateSdkClass(clientName, configType, tagMetadata, config, commonPkg.importPath),
-      this.generateMainIndex(clientName),
+      this.generateSdkClass(clientName, legacyClientName, configType, tagMetadata, config, commonPkg.importPath),
+      this.generateMainIndex(clientName, legacyClientName),
     ];
   }
 
@@ -391,6 +396,7 @@ export type { AuthTokenManager, AuthTokens, AuthMode } from '${commonImportPath}
 
   private generateSdkClass(
     clientName: string, 
+    legacyClientName: string | undefined,
     configType: string, 
     tagMetadata: TypeScriptApiTagMetadata[],
     config: GeneratorConfig,
@@ -407,6 +413,7 @@ export type { AuthTokenManager, AuthTokens, AuthMode } from '${commonImportPath}
     const inits = tagMetadata.map((meta) => {
       return `    this.${meta.clientPropertyName} = create${meta.className}(this.httpClient);`;
     }).join('\n\n');
+    const legacyExport = legacyClientName ? `\nexport { ${clientName} as ${legacyClientName} };\n` : '';
 
     return {
       path: 'src/sdk.ts',
@@ -453,7 +460,7 @@ ${inits}
 export function createClient(config: ${configType}): ${clientName} {
   return new ${clientName}(config);
 }
-
+${legacyExport}
 export default ${clientName};
 `),
       language: 'typescript',
@@ -461,10 +468,11 @@ export default ${clientName};
     };
   }
 
-  private generateMainIndex(clientName: string): GeneratedFile {
+  private generateMainIndex(clientName: string, legacyClientName: string | undefined): GeneratedFile {
+    const exports = [clientName, legacyClientName, 'createClient'].filter(Boolean).join(', ');
     return {
       path: 'src/index.ts',
-      content: this.format(`export { ${clientName}, createClient } from './sdk';
+      content: this.format(`export { ${exports} } from './sdk';
 export * from './types';
 export * from './api';
 export * from './http';

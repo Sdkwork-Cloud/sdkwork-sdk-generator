@@ -1,3 +1,4 @@
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import { toSafeCamelIdentifier, toSafePascalIdentifier } from '../../framework/identifiers.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const DART_RESERVED_WORDS = new Set([
@@ -185,5 +186,5 @@ export function getDartPackageName(config) {
     if (raw) {
         return toSnakeCase(raw);
     }
-    return `sdkwork_${DART_CONFIG.namingConventions.packageName(config.sdkType)}_sdk_dart`;
+    return toSnakeCase(`${resolveDefaultDistributionName(config)}-dart`);
 }

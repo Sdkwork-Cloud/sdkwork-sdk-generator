@@ -1,5 +1,6 @@
 import { getPythonPackageRoot } from './config.js';
 import { resolvePythonCommonPackage } from '../../framework/common-package.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 export class BuildConfigGenerator {
     generate(config) {
         return [
@@ -21,7 +22,7 @@ setup()
         };
     }
     generatePyprojectToml(config) {
-        const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+        const pkgName = config.packageName || resolveDefaultDistributionName(config);
         const commonPkg = resolvePythonCommonPackage(config);
         const packageRoot = getPythonPackageRoot(config);
         return {

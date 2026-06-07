@@ -2,12 +2,13 @@ import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { SWIFT_CONFIG } from './config.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
@@ -16,7 +17,7 @@ export class HttpClientGenerator {
 
     return [
       this.generateHttpClient(config, apiKeyHeader, apiKeyUseBearer, commonPkg.productName),
-      this.generateSdkClient(clientName, tags, resolvedTagNames, config, commonPkg.productName),
+      this.generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config, commonPkg.productName),
     ];
   }
 
@@ -499,6 +500,7 @@ public class HttpClient {
 
   private generateSdkClient(
     clientName: string,
+    legacyClientName: string | undefined,
     tags: string[],
     resolvedTagNames: Map<string, string>,
     config: GeneratorConfig,
@@ -517,6 +519,7 @@ public class HttpClient {
       const className = `${SWIFT_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
       return `        self.${propName} = ${className}(client: httpClient)`;
     }).join('\n');
+    const legacyAlias = legacyClientName ? `\npublic typealias ${legacyClientName} = ${clientName}\n` : '';
 
     return {
       path: `Sources/${clientName}.swift`,
@@ -557,6 +560,7 @@ ${inits}
         return self
     }
 }
+${legacyAlias}
 `),
       language: 'swift',
       description: 'Main SDK class',

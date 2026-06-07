@@ -28,7 +28,7 @@ async fn generate_from_openapi_url_posts_standard_json_payload() {
                 "Backend",
             )
             .sdk_type(SdkType::Backend)
-            .package_name("sdkwork-backend-sdk")
+            .package_name("sdkwork-notes-backend-sdk")
             .base_url("https://api.example.com")
             .api_prefix("/backend/v3/api"),
         )
@@ -48,7 +48,7 @@ async fn generate_from_openapi_url_posts_standard_json_payload() {
     assert!(captured.body_text().contains(r#""sdkType":"backend""#));
     assert!(captured
         .body_text()
-        .contains(r#""packageName":"sdkwork-backend-sdk""#));
+        .contains(r#""packageName":"sdkwork-notes-backend-sdk""#));
 }
 
 #[tokio::test]
@@ -66,8 +66,8 @@ async fn generate_from_url_normalizes_request_text_before_sending() {
                 SdkLanguage::Rust,
                 "  Backend  ",
             )
-            .package_name("  sdkwork-backend-sdk  ")
-            .namespace("  com.sdkwork.backend  ")
+            .package_name("  sdkwork-notes-backend-sdk  ")
+            .namespace("  com.sdkwork.notes.backend  ")
             .version("  1.2.3  ")
             .description("  Backend SDK  ")
             .author("  SDKWork  ")
@@ -83,8 +83,8 @@ async fn generate_from_url_normalizes_request_text_before_sending() {
     assert_eq!(response.status, GenerationStatus::Completed);
     assert!(body.contains(r#""url":"https://api.example.com/openapi.yaml""#));
     assert!(body.contains(r#""name":"Backend""#));
-    assert!(body.contains(r#""packageName":"sdkwork-backend-sdk""#));
-    assert!(body.contains(r#""namespace":"com.sdkwork.backend""#));
+    assert!(body.contains(r#""packageName":"sdkwork-notes-backend-sdk""#));
+    assert!(body.contains(r#""namespace":"com.sdkwork.notes.backend""#));
     assert!(body.contains(r#""version":"1.2.3""#));
     assert!(body.contains(r#""description":"Backend SDK""#));
     assert!(body.contains(r#""author":"SDKWork""#));

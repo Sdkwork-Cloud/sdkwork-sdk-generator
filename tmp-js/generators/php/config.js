@@ -1,4 +1,5 @@
 import { toSafeCamelIdentifier } from '../../framework/identifiers.js';
+import { resolveDefaultComposerPackageName } from '../../framework/package-identity.js';
 import { resolveSdkTypePascal } from '../../framework/sdk-identity.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 export const PHP_CONFIG = {
@@ -189,5 +190,5 @@ export function getPhpPackageName(config) {
     if (rawName) {
         return rawName;
     }
-    return `sdkwork/${config.sdkType}-sdk`;
+    return resolveDefaultComposerPackageName(config);
 }

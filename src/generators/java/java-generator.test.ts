@@ -13,6 +13,7 @@ const javaConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
+  packageName: 'sdkwork-notes-app-sdk',
 };
 
 const javaSpec: ApiSpec = {
@@ -247,7 +248,7 @@ describe('Java generator regressions', () => {
     const result = await generator!.generate({
       ...javaConfig,
       namespace: 'com.acme.clients.app',
-      packageName: 'com.acme:sdkwork-app-sdk',
+      packageName: 'com.acme:sdkwork-notes-app-sdk',
     }, javaSpec);
 
     const pomFile = result.files.find((file) => file.path === 'pom.xml');
@@ -260,7 +261,7 @@ describe('Java generator regressions', () => {
 
     expect(pomFile).toBeDefined();
     expect(pomFile!.content).toContain('<groupId>com.acme</groupId>');
-    expect(pomFile!.content).toContain('<artifactId>sdkwork-app-sdk</artifactId>');
+    expect(pomFile!.content).toContain('<artifactId>sdkwork-notes-app-sdk</artifactId>');
     expect(pomFile!.content).toContain('<version>1.0.0</version>');
 
     expect(apiFile).toBeDefined();
@@ -277,8 +278,8 @@ describe('Java generator regressions', () => {
 
     expect(readmeFile).toBeDefined();
     expect(readmeFile!.content).toContain('<groupId>com.acme</groupId>');
-    expect(readmeFile!.content).toContain('<artifactId>sdkwork-app-sdk</artifactId>');
-    expect(readmeFile!.content).toContain("implementation 'com.acme:sdkwork-app-sdk:1.0.0'");
+    expect(readmeFile!.content).toContain('<artifactId>sdkwork-notes-app-sdk</artifactId>');
+    expect(readmeFile!.content).toContain("implementation 'com.acme:sdkwork-notes-app-sdk:1.0.0'");
     expect(readmeFile!.content).toContain('import com.acme.clients.app.SdkworkAppClient;');
   });
 
@@ -287,8 +288,8 @@ describe('Java generator regressions', () => {
     expect(generator).toBeDefined();
 
     const result = await generator!.generate(javaConfig, typedResponseSpec);
-    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/app/api/UserApi.java');
-    const httpFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/app/http/HttpClient.java');
+    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/notes/app/api/UserApi.java');
+    const httpFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/notes/app/http/HttpClient.java');
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
@@ -313,7 +314,7 @@ describe('Java generator regressions', () => {
     const result = await generator!.generate({ ...javaConfig, generateTests: true }, typedResponseSpec);
     const pomFile = result.files.find((file) => file.path === 'pom.xml');
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/java/com/sdkwork/app/GeneratedSdkSmokeTest.java'
+      (file) => file.path === 'src/test/java/com/sdkwork/notes/app/GeneratedSdkSmokeTest.java'
     );
 
     expect(result.errors).toEqual([]);
@@ -321,7 +322,7 @@ describe('Java generator regressions', () => {
     expect(smokeTestFile).toBeDefined();
     expect(pomFile!.content).toContain('<artifactId>junit-jupiter</artifactId>');
     expect(pomFile!.content).toContain('<artifactId>maven-surefire-plugin</artifactId>');
-    expect(smokeTestFile!.content).toContain('package com.sdkwork.app;');
+    expect(smokeTestFile!.content).toContain('package com.sdkwork.notes.app;');
     expect(smokeTestFile!.content).toContain('import org.junit.jupiter.api.Test;');
     expect(smokeTestFile!.content).toContain('SdkworkAppClient client = new SdkworkAppClient(config);');
     expect(smokeTestFile!.content).toContain('UserProfile result = client.getUser().getUserProfile();');
@@ -351,7 +352,7 @@ describe('Java generator regressions', () => {
 
     const result = await generator!.generate({ ...javaConfig, generateTests: true }, wrappedTypedResponseSpec);
     const smokeTestFile = result.files.find(
-      (file) => file.path === 'src/test/java/com/sdkwork/app/GeneratedSdkSmokeTest.java'
+      (file) => file.path === 'src/test/java/com/sdkwork/notes/app/GeneratedSdkSmokeTest.java'
     );
 
     expect(result.errors).toEqual([]);
@@ -367,7 +368,7 @@ describe('Java generator regressions', () => {
     expect(generator).toBeDefined();
 
     const result = await generator!.generate(javaConfig, javaExplicitQuerySpec);
-    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/app/api/FinanceApi.java');
+    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/notes/app/api/FinanceApi.java');
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
@@ -382,7 +383,7 @@ describe('Java generator regressions', () => {
     expect(generator).toBeDefined();
 
     const result = await generator!.generate(javaConfig, javaQueryHeaderCollisionSpec);
-    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/app/api/ChatApi.java');
+    const apiFile = result.files.find((file) => file.path === 'src/main/java/com/sdkwork/notes/app/api/ChatApi.java');
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
@@ -398,10 +399,10 @@ describe('Java generator regressions', () => {
 
     const result = await generator!.generate(javaConfig, discriminatedContentSpec);
     const contentPartFile = result.files.find(
-      (file) => file.path === 'src/main/java/com/sdkwork/app/model/ContentPart.java'
+      (file) => file.path === 'src/main/java/com/sdkwork/notes/app/model/ContentPart.java'
     );
     const mediaContentPartFile = result.files.find(
-      (file) => file.path === 'src/main/java/com/sdkwork/app/model/MediaContentPart.java'
+      (file) => file.path === 'src/main/java/com/sdkwork/notes/app/model/MediaContentPart.java'
     );
 
     expect(result.errors).toEqual([]);

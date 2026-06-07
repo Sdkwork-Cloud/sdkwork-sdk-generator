@@ -12,7 +12,7 @@ const rustConfig: GeneratorConfig = {
   apiSpecPath: './openapi.json',
   baseUrl: 'https://api.example.com',
   apiPrefix: '/app/v3/api',
-  packageName: 'sdkwork-app-sdk',
+  packageName: 'sdkwork-notes-app-sdk',
 };
 
 const rustSpec: ApiSpec = {
@@ -380,7 +380,7 @@ describe('Rust generator', () => {
     expect(readme).toBeDefined();
 
     expect(cargoFile!.content).toContain('tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }');
-    expect(smokeTestFile!.content).toContain('use sdkwork_app_sdk::{SdkworkAppClient, SdkworkConfig};');
+    expect(smokeTestFile!.content).toContain('use sdkwork_notes_app_sdk::{SdkworkAppClient, SdkworkConfig};');
     expect(smokeTestFile!.content).toContain('#[tokio::test]');
     expect(smokeTestFile!.content).toContain('let result = client.user().get_user_profile().await?;');
     expect(smokeTestFile!.content).toContain('assert_eq!(captured.path, "/app/v3/api/user/profile");');

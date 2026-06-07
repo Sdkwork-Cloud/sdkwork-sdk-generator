@@ -1,12 +1,13 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { resolveRustApiNames, type RustApiName } from './identifiers.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiNames = resolveRustApiNames(tags, resolvedTagNames);
@@ -16,7 +17,7 @@ export class HttpClientGenerator {
     return [
       this.generateHttpClient(apiKeyHeader, apiKeyUseBearer, config),
       this.generateHttpIndex(),
-      this.generateSdkClient(clientName, tags, apiNames, config),
+      this.generateSdkClient(clientName, legacyClientName, tags, apiNames, config),
       this.generateLibFile(config),
     ];
   }
@@ -458,6 +459,7 @@ pub use client::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, Sdkwo
 
   private generateSdkClient(
     clientName: string,
+    legacyClientName: string | undefined,
     tags: string[],
     apiNames: Map<string, RustApiName>,
     _config: GeneratorConfig
@@ -471,6 +473,7 @@ pub use client::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, Sdkwo
         ${apiName.structName}::new(Arc::clone(&self.http))
     }`;
     }).filter(Boolean).join('\n\n');
+    const legacyAlias = legacyClientName ? `\npub type ${legacyClientName} = ${clientName};\n` : '';
 
     return {
       path: 'src/client.rs',
@@ -520,13 +523,17 @@ impl ${clientName} {
     }
 
 ${this.indent(getters, 4)}
-}`),
+}
+${legacyAlias}`),
       language: 'rust',
       description: 'Main Rust SDK client',
     };
   }
 
   private generateLibFile(config: GeneratorConfig): GeneratedFile {
+    const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
+    const clientExports = [clientName, legacyClientName].filter(Boolean).join(', ');
     return {
       path: 'src/lib.rs',
       content: this.format(`pub mod api;
@@ -534,7 +541,7 @@ mod client;
 pub mod http;
 pub mod models;
 
-pub use client::${resolveSdkClientName(config)};
+pub use client::{${clientExports}};
 pub use http::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, SdkworkHttpClient};
 pub use models::*;`),
       language: 'rust',

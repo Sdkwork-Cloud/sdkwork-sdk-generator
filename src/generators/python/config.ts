@@ -1,4 +1,5 @@
 import type { LanguageConfig } from '../../framework/base.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
@@ -188,7 +189,7 @@ function renderPythonConstType(value: string | number | boolean | null): string 
 }
 
 export function getPythonPackageRoot(config: GeneratorConfig): string {
-  const distributionName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+  const distributionName = config.packageName || resolveDefaultDistributionName(config);
   const packageRoot = distributionName
     .replace(/[@/.-]+/g, '_')
     .replace(/[^a-zA-Z0-9_]/g, '_')

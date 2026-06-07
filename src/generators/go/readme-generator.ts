@@ -7,6 +7,7 @@ import {
   buildPublishSection,
   resolveApiKeyHeaderPreview,
 } from '../../framework/readme.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GO_CONFIG } from './config.js';
 import { GoUsagePlanner, renderGoUsageSnippet } from './usage-planner.js';
@@ -14,7 +15,7 @@ import { GoUsagePlanner, renderGoUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile {
     const clientName = resolveSdkClientName(config);
-    const moduleName = config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+    const moduleName = config.packageName || resolveDefaultGoModuleName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
     const planner = new GoUsagePlanner(ctx, undefined, config);

@@ -2,6 +2,7 @@ import type { GeneratedFile } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { getPythonPackageRoot } from './config.js';
 import { resolvePythonCommonPackage } from '../../framework/common-package.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
@@ -26,7 +27,7 @@ setup()
   }
 
   private generatePyprojectToml(config: GeneratorConfig): GeneratedFile {
-    const pkgName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+    const pkgName = config.packageName || resolveDefaultDistributionName(config);
     const commonPkg = resolvePythonCommonPackage(config);
     const packageRoot = getPythonPackageRoot(config);
     

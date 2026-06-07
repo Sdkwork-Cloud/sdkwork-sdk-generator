@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, resolve } from 'path';
 
 import type { Language, SdkType } from './types.js';
+import { inferTypeScriptPackageNameFromSdkIdentity } from './package-identity.js';
 import { parseSdkMetadataManifest, SDKWORK_METADATA_FILE } from './sdk-metadata.js';
 
 const SUPPORTED_WORKSPACE_LANGUAGES = [
@@ -247,20 +248,25 @@ export function detectVersionFromProject(language: Language, projectDir: string)
   return undefined;
 }
 
-function resolveDefaultTypeScriptPackageName(
+function resolvePublishedTypeScriptBaselinePackageName(
   sdkType: SdkType,
   language?: Language,
   packageName?: string,
-  npmPackageName?: string
+  npmPackageName?: string,
+  sdkName?: string
 ): string | undefined {
   if (npmPackageName) {
     return npmPackageName;
   }
-  if (language && language !== 'typescript') {
-    return `@sdkwork/${sdkType}-sdk`;
+  if (language === 'typescript' && packageName) {
+    return packageName;
   }
 
-  return packageName || `@sdkwork/${sdkType}-sdk`;
+  return inferTypeScriptPackageNameFromSdkIdentity({
+    sdkType,
+    packageName,
+    sdkName,
+  });
 }
 
 async function fetchPublishedNpmVersion(packageName: string, registryUrl: string): Promise<string | undefined> {
@@ -382,11 +388,12 @@ export async function resolveSdkVersion(options: ResolveSdkVersionOptions): Prom
 
   let publishedVersion: string | undefined;
   if (options.syncPublishedVersion !== false) {
-    const packageName = resolveDefaultTypeScriptPackageName(
+    const packageName = resolvePublishedTypeScriptBaselinePackageName(
       options.sdkType,
       options.language,
       options.packageName,
-      options.npmPackageName
+      options.npmPackageName,
+      options.sdkName
     );
     if (packageName) {
       try {

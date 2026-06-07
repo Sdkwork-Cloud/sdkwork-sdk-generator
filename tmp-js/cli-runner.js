@@ -67,6 +67,8 @@ async function executeGenerate(options) {
         packageName: options.packageName,
         namespace: options.namespace,
         commonPackage: options.commonPackage,
+        clientName: options.clientName,
+        legacyClientName: options.legacyClientName,
         generateReadme: true,
         options: options.standardProfile
             ? { standardProfile: options.standardProfile }

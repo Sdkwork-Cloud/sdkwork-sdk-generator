@@ -1,10 +1,12 @@
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveGoCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveDefaultGoModuleName } from '../../framework/package-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { GO_CONFIG } from './config.js';
 export class HttpClientGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
+        const legacyClientName = resolveLegacySdkClientName(config);
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSdkTagNames(tags, config);
         const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
@@ -13,12 +15,12 @@ export class HttpClientGenerator {
         return [
             this.generateHttpClient(config, apiKeyHeader, apiKeyUseBearer, commonPkg.commonImportPath),
             this.generateHttpIndex(config),
-            this.generateSdkClient(clientName, tags, resolvedTagNames, config),
+            this.generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config),
             this.generateMainIndex(config),
         ];
     }
     getModuleName(config) {
-        return config.packageName || `github.com/sdkwork/${config.sdkType}-sdk`;
+        return config.packageName || resolveDefaultGoModuleName(config);
     }
     generateHttpClient(config, apiKeyHeader, apiKeyUseBearer, commonImportPath) {
         const moduleName = this.getModuleName(config);
@@ -519,7 +521,7 @@ func (c *Client) request(
             description: 'HTTP module exports',
         };
     }
-    generateSdkClient(clientName, tags, resolvedTagNames, config) {
+    generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config) {
         const moduleName = this.getModuleName(config);
         const modules = tags.map((tag) => {
             const resolvedTagName = resolvedTagNames.get(tag) || tag;
@@ -533,6 +535,17 @@ func (c *Client) request(
             const structName = `${GO_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
             return `        ${propName}: api.New${structName}(client),`;
         }).join('\n');
+        const legacyAlias = legacyClientName ? `
+type ${legacyClientName} = ${clientName}
+
+func New${legacyClientName}(baseURL string) *${legacyClientName} {
+    return New${clientName}(baseURL)
+}
+
+func New${legacyClientName}WithConfig(config sdkhttp.Config) *${legacyClientName} {
+    return New${clientName}WithConfig(config)
+}
+` : '';
         return {
             path: 'sdk.go',
             content: this.format(`package ${config.sdkType}
@@ -583,6 +596,7 @@ func (c *${clientName}) SetHeader(key string, value string) *${clientName} {
 func (c *${clientName}) Http() *sdkhttp.Client {
     return c.http
 }
+${legacyAlias}
 `),
             language: 'go',
             description: 'Main SDK class',

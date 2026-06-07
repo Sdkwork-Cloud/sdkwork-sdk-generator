@@ -1,5 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
+import { resolveDiscriminatedUnionModel } from '../../framework/discriminated-union.js';
 import { collectSchemaReferences, resolveModelSchema } from '../../framework/schema.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
 
@@ -34,6 +35,16 @@ export class ModelGenerator {
     knownModels: Set<string>,
     modelNameToFile: Map<string, string>
   ): GeneratedFile {
+    const oneOfModel = resolveDiscriminatedUnionModel(
+      schema,
+      schemas,
+      PYTHON_CONFIG.namingConventions.modelName,
+      knownModels,
+    );
+    if (oneOfModel) {
+      return this.generateOneOfUnion(name, oneOfModel, packageRoot, modelNameToFile);
+    }
+
     const modelSchema = resolveModelSchema(schema, schemas);
     const modelName = PYTHON_CONFIG.namingConventions.modelName(name);
     const props = modelSchema.properties || {};
@@ -127,6 +138,53 @@ ${docComment}${fields || '    pass'}
     return `Optional[${pyType}]`;
   }
 
+  private generateOneOfUnion(
+    name: string,
+    oneOfModel: NonNullable<ReturnType<typeof resolveDiscriminatedUnionModel>>,
+    packageRoot: string,
+    modelNameToFile: Map<string, string>
+  ): GeneratedFile {
+    const modelName = PYTHON_CONFIG.namingConventions.modelName(name);
+    const fileName = PYTHON_CONFIG.namingConventions.fileName(name);
+    const modelImports = Array.from(new Set(oneOfModel.variants.map((variant) => variant.modelName)));
+    const importBlock = modelImports
+      .map((variantModelName) => {
+        const refFile = modelNameToFile.get(variantModelName)
+          ?? PYTHON_CONFIG.namingConventions.fileName(variantModelName);
+        return `    from .${refFile} import ${variantModelName}`;
+      })
+      .join('\n');
+    const unionTypes = modelImports.join(', ');
+    const discriminatorProperty = this.escapePythonString(oneOfModel.discriminatorProperty);
+    const cases = oneOfModel.variants
+      .map((variant) => {
+        const discriminatorValue = this.escapePythonString(variant.discriminatorValue);
+        return `    if kind == '${discriminatorValue}':
+        return ${variant.modelName}(**value)`;
+      })
+      .join('\n');
+
+    return {
+      path: `${packageRoot}/models/${fileName}.py`,
+      content: this.format(`from __future__ import annotations
+from typing import Any, Dict, Union
+
+${importBlock.replace(/^ {4}/gm, '')}
+
+
+${modelName} = Union[${unionTypes}]
+
+
+def ${PYTHON_CONFIG.namingConventions.propertyName(name)}_from_dict(value: Dict[str, Any]) -> ${modelName}:
+    kind = value.get('${discriminatorProperty}')
+${cases}
+    raise ValueError(f"Unknown ${oneOfModel.discriminatorProperty} discriminator: {kind}")
+`),
+      language: 'python',
+      description: `${modelName} discriminated union model`,
+    };
+  }
+
   private isNullableSchema(schema: any): boolean {
     if (!schema || typeof schema !== 'object') {
       return false;
@@ -174,5 +232,9 @@ __all__ = [${exports}]
 
   private format(content: string): string {
     return content.trim() + '\n';
+  }
+
+  private escapePythonString(value: string): string {
+    return String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   }
 }

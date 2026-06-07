@@ -1,4 +1,5 @@
 import type { LanguageConfig } from '../../framework/base.js';
+import { resolveDefaultDistributionName } from '../../framework/package-identity.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { getConstSchemaInfo, getSchemaReferenceName, getTupleSchemaInfo, pickComposedSchema, resolveSchemaType } from '../../framework/schema.js';
 
@@ -35,7 +36,7 @@ export const RUST_CONFIG: LanguageConfig = {
 };
 
 export function getRustPackageName(config: GeneratorConfig): string {
-  const baseName = config.packageName || `sdkwork-${config.sdkType}-sdk`;
+  const baseName = config.packageName || resolveDefaultDistributionName(config);
   return sanitizePackageName(baseName);
 }
 

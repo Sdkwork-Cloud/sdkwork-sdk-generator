@@ -2,12 +2,13 @@ import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveFlutterCommonPackage } from '../../framework/common-package.js';
-import { resolveSdkClientName } from '../../framework/sdk-identity.js';
+import { resolveLegacySdkClientName, resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { FLUTTER_CONFIG, getFlutterPackageName } from './config.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     const clientName = resolveSdkClientName(config);
+    const legacyClientName = resolveLegacySdkClientName(config);
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
     const apiKeyHeader = (ctx.auth.apiKeyHeader || 'Authorization').replace(/'/g, "\\'");
@@ -16,7 +17,7 @@ export class HttpClientGenerator {
 
     return [
       this.generateHttpClient(config, commonPkg.importPath),
-      this.generateSdkClient(clientName, tags, resolvedTagNames, config, apiKeyHeader, apiKeyAsBearer, commonPkg.importPath),
+      this.generateSdkClient(clientName, legacyClientName, tags, resolvedTagNames, config, apiKeyHeader, apiKeyAsBearer, commonPkg.importPath),
       this.generatePackageEntry(config),
     ];
   }
@@ -294,6 +295,7 @@ class HttpClient extends BaseHttpClient {
 
   private generateSdkClient(
     clientName: string,
+    legacyClientName: string | undefined,
     tags: string[],
     resolvedTagNames: Map<string, string>,
     config: GeneratorConfig,
@@ -320,6 +322,7 @@ class HttpClient extends BaseHttpClient {
       const className = `${FLUTTER_CONFIG.namingConventions.modelName(resolvedTagName)}Api`;
       return `    ${propName} = ${className}(_httpClient);`;
     }).join('\n');
+    const legacyAlias = legacyClientName ? `\ntypedef ${legacyClientName} = ${clientName};\n` : '';
 
     return {
       path: `lib/${FLUTTER_CONFIG.namingConventions.fileName(config.sdkType)}_client.dart`,
@@ -378,6 +381,7 @@ ${inits}
     _httpClient.setHeader(key, value);
   }
 }
+${legacyAlias}
 `),
       language: 'flutter',
       description: 'Main SDK class',

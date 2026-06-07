@@ -1,6 +1,7 @@
 import { resolveSdkTagNames } from '../../framework/openai-surface.js';
 import { resolveSwiftCommonPackage } from '../../framework/common-package.js';
 import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPublishSection, resolveApiKeyHeaderPreview, } from '../../framework/readme.js';
+import { resolveDefaultPackageToken } from '../../framework/package-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { resolveSwiftPackageTargetName } from './build-config-generator.js';
 import { SwiftUsagePlanner, renderSwiftUsageSnippet } from './usage-planner.js';
@@ -8,6 +9,7 @@ export class ReadmeGenerator {
     generate(ctx, config) {
         const clientName = resolveSdkClientName(config);
         const sdkTargetName = resolveSwiftPackageTargetName(config);
+        const packageRepositoryName = config.packageName || `${resolveDefaultPackageToken(config)}-swift`;
         const commonPkg = resolveSwiftCommonPackage(config);
         const planner = new SwiftUsagePlanner(ctx, undefined, config);
         const tags = Object.keys(ctx.apiGroups);
@@ -57,7 +59,7 @@ Add to \`Package.swift\`:
 
 \`\`\`swift
 dependencies: [
-    .package(url: "https://github.com/sdkwork/${config.sdkType}-sdk-swift", from: "${config.version}")
+    .package(url: "https://github.com/sdkwork/${packageRepositoryName}", from: "${config.version}")
 ]
 \`\`\`
 
