@@ -3391,9 +3391,9 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new KotlinGenerator(),
         filePath: 'src/main/kotlin/com/sdkwork/test/backend/ComposedUser.kt',
         expected: [
-          'val id: String? = null',
+          'val id: String',
           'val createdAt: String? = null',
-          'val email: String? = null',
+          'val email: String',
           'val displayName: String? = null',
           'val roles: List<String>? = null',
         ],
@@ -3404,9 +3404,9 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new CSharpGenerator(),
         filePath: 'Models/ComposedUser.cs',
         expected: [
-          'public string? Id { get; set; }',
+          'public string Id { get; set; }',
           'public string? CreatedAt { get; set; }',
-          'public string? Email { get; set; }',
+          'public string Email { get; set; }',
           'public string? DisplayName { get; set; }',
           'public List<string>? Roles { get; set; }',
         ],
@@ -3418,9 +3418,9 @@ describe('OpenAPI Security And Compliance', () => {
         filePath: 'Sources/Models.swift',
         expected: [
           'public struct ComposedUser: Codable',
-          'public let id: String?',
+          'public let id: String',
           'public let createdAt: String?',
-          'public let email: String?',
+          'public let email: String',
           'public let displayName: String?',
           'public let roles: [String]?',
         ],
@@ -3836,7 +3836,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new KotlinGenerator(),
         filePath: 'src/main/kotlin/com/sdkwork/test/backend/AuditEnvelope.kt',
         expected: [
-          'val event: AuditEnvelopeAuditEvent? = null',
+          'val event: AuditEnvelopeAuditEvent',
           'val actor: AuditEnvelopeAuditActor? = null',
           'val metadata: AuditEnvelopeAuditMetadata? = null',
           'val rootNote: AuditRootNote? = null',
@@ -3853,7 +3853,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new SwiftGenerator(),
         filePath: 'Sources/Models.swift',
         expected: [
-          'public let event: AuditEnvelopeAuditEvent?',
+          'public let event: AuditEnvelopeAuditEvent',
           'public let actor_: AuditEnvelopeAuditActor?',
           'public let metadata: AuditEnvelopeAuditMetadata?',
           'public let rootNote: AuditRootNote?',
@@ -3870,7 +3870,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new CSharpGenerator(),
         filePath: 'Models/AuditEnvelope.cs',
         expected: [
-          'public AuditEnvelopeAuditEvent? Event { get; set; }',
+          'public AuditEnvelopeAuditEvent Event { get; set; }',
           'public AuditEnvelopeAuditActor? Actor { get; set; }',
           'public AuditEnvelopeAuditMetadata? Metadata { get; set; }',
           'public AuditRootNote? RootNote { get; set; }',
@@ -4016,10 +4016,10 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new KotlinGenerator(),
         filePath: 'src/main/kotlin/com/sdkwork/test/backend/ConstEnvelope.kt',
         expected: [
-          'val kind: String? = null',
-          'val version: Int? = null',
+          'val kind: String',
+          'val version: Int',
           'val ratio: Double? = null',
-          'val enabled: Boolean? = null',
+          'val enabled: Boolean',
         ],
         forbidden: ['val kind: Any? = null', 'val version: Any? = null', 'val enabled: Any? = null'],
       },
@@ -4028,10 +4028,10 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new SwiftGenerator(),
         filePath: 'Sources/Models.swift',
         expected: [
-          'public let kind: String?',
-          'public let version: Int?',
+          'public let kind: String',
+          'public let version: Int',
           'public let ratio: Double?',
-          'public let enabled: Bool?',
+          'public let enabled: Bool',
         ],
         forbidden: ['public let kind: Any?', 'public let version: Any?', 'public let enabled: Any?'],
       },
@@ -4040,10 +4040,10 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new CSharpGenerator(),
         filePath: 'Models/ConstEnvelope.cs',
         expected: [
-          'public string? Kind { get; set; }',
-          'public int? Version { get; set; }',
+          'public string Kind { get; set; }',
+          'public int Version { get; set; }',
           'public double? Ratio { get; set; }',
-          'public bool? Enabled { get; set; }',
+          'public bool Enabled { get; set; }',
         ],
         forbidden: ['public object? Kind', 'public object? Version', 'public object? Enabled'],
       },
@@ -4181,7 +4181,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new KotlinGenerator(),
         filePath: 'src/main/kotlin/com/sdkwork/test/backend/EscapedEnvelope.kt',
         expected: [
-          'val event: AuditEvent? = null',
+          'val event: AuditEvent',
           'val meta: AuditMeta? = null',
         ],
         forbidden: ['Audit1Event', 'Audit0Meta', 'val event: Any? = null', 'val meta: Any? = null'],
@@ -4191,7 +4191,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new CSharpGenerator(),
         filePath: 'Models/EscapedEnvelope.cs',
         expected: [
-          'public AuditEvent? Event { get; set; }',
+          'public AuditEvent Event { get; set; }',
           'public AuditMeta? Meta { get; set; }',
         ],
         forbidden: ['Audit1Event', 'Audit0Meta', 'public object? Event', 'public object? Meta'],
@@ -4232,7 +4232,7 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new SwiftGenerator(),
         filePath: 'Sources/Models.swift',
         expected: [
-          'public let event: AuditEvent?',
+          'public let event: AuditEvent',
           'public let meta: AuditMeta?',
         ],
         forbidden: ['Audit1Event', 'Audit0Meta', 'public let event: Any?', 'public let meta: Any?'],
@@ -5696,7 +5696,7 @@ describe('OpenAPI Security And Compliance', () => {
         ],
         expectedHttp: [
           'def stream_json(self, path: str, method: str = \'POST\'',
-          "headers={'Accept': 'text/event-stream'",
+          "headers=self._request_headers({'Accept': 'text/event-stream'",
           'for line in response.iter_lines(decode_unicode=True):',
           "if data == '[DONE]':",
           'yield json_module.loads(data)',
@@ -5709,7 +5709,7 @@ describe('OpenAPI Security And Compliance', () => {
         httpPath: 'http/client.go',
         expectedApi: [
           'func (a *ChatApi) Create(body sdktypes.CreateChatCompletionRequest) (*sdkhttp.SSEStream[sdktypes.ChatCompletionChunk], error)',
-          'sdkhttp.Stream[sdktypes.ChatCompletionChunk](a.client, "POST", AiApiPath("/chat/completions"), body, nil, nil, "application/json")',
+          'sdkhttp.Stream[sdktypes.ChatCompletionChunk](a.client, "POST", AiApiPath("/chat/completions"), body, nil, nil, "application/json", false)',
         ],
         expectedHttp: [
           'type SSEStream[T any] struct',
@@ -5824,7 +5824,7 @@ describe('OpenAPI Security And Compliance', () => {
         httpPath: 'src/http/client.rs',
         expectedApi: [
           'pub async fn create(&self, body: &CreateChatCompletionRequest) -> Result<SseStream<ChatCompletionChunk>, SdkworkError>',
-          'self.client.stream(Method::POST, &path, Some(body), None, None, Some("application/json")).await',
+          'self.client.stream(Method::POST, &path, Some(body), None, None, Some("application/json"), false).await',
         ],
         expectedHttp: [
           'pub struct SseStream<T>',
@@ -5863,7 +5863,7 @@ describe('OpenAPI Security And Compliance', () => {
           'Models::ChatCompletionChunk.from_hash(event)',
         ],
         expectedHttp: [
-          'def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil)',
+          'def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false)',
           "'Accept' => 'text/event-stream'",
           'split(/\\r?\\n\\r?\\n/)',
           'data = data_lines.join("\\n")',
@@ -6359,6 +6359,261 @@ describe('OpenAPI Security And Compliance', () => {
     expect(httpClient!.content).toContain("private static readonly ACCESS_TOKEN_HEADER: string = 'Access-Token';");
     expect(httpClient!.content).not.toContain(`${'Sdkwork'}-Access-Token`);
     expect(httpClient!.content).not.toContain("HttpClient.ACCESS_TOKEN_HEADER === 'Access-Token'");
+  });
+
+  it('should generate skipAuth for sdkwork v3 anonymous operations', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          ...sdkworkV3IamSpec.paths,
+          '/app/v3/api/auth/sessions': {
+            post: {
+              ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
+              'x-sdkwork-auth-mode': 'anonymous',
+              'x-sdkwork-forbid-credential-headers': true,
+            },
+          },
+        },
+      },
+    );
+    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+    const httpClient = result.files.find((f) => f.path === 'src/http/client.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(authApi).toBeDefined();
+    expect(authApi!.content).toContain(
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', skipAuth: true })",
+    );
+    expect(authApi!.content).toContain(
+      "this.client.get<AuthSession>(appApiPath(`/auth/sessions/current`))",
+    );
+    expect(authApi!.content).not.toContain(
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/current`), { method: 'GET' as any, skipAuth: true })",
+    );
+    expect(httpClient).toBeDefined();
+    expect(httpClient!.content).toMatch(
+      /const requestHeaders = skipAuth\s*\?\s*headers\s*:\s*this\.applySdkworkAuthHeaders\(headers\)/u,
+    );
+    expect(httpClient!.content).toMatch(
+      /const authHeaders = skipAuth\s*\?\s*headers\s*:\s*this\.applySdkworkAuthHeaders\(headers\)/u,
+    );
+  });
+
+  it('should generate skipAuth for sdkwork v3 refresh-token operations', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          ...sdkworkV3IamSpec.paths,
+          '/app/v3/api/auth/sessions/refresh': {
+            post: {
+              ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions/refresh'] as Record<string, any>).post,
+              'x-sdkwork-auth-mode': 'refresh-token',
+            },
+          },
+        },
+      },
+    );
+    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(authApi).toBeDefined();
+    expect(authApi!.content).toContain(
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+    );
+  });
+
+  it('should generate sdkwork v3 credential suppression for anonymous and refresh operations across language SDKs', async () => {
+    const spec: ApiSpec = {
+      ...sdkworkV3IamSpec,
+      paths: {
+        ...sdkworkV3IamSpec.paths,
+        '/app/v3/api/auth/sessions': {
+          post: {
+            ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
+            'x-sdkwork-auth-mode': 'anonymous',
+            'x-sdkwork-forbid-credential-headers': true,
+          },
+        },
+        '/app/v3/api/auth/sessions/refresh': {
+          post: {
+            ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions/refresh'] as Record<string, any>).post,
+            security: [],
+            'x-sdkwork-auth-mode': 'refresh-token',
+          },
+        },
+      },
+    };
+    const cases = [
+      {
+        language: 'typescript' as const,
+        generator: new TypeScriptGenerator(),
+        apiPath: 'src/api/auth.ts',
+        httpPath: 'src/http/client.ts',
+          anonymousCall: /auth\/sessions`[\s\S]*skipAuth: true/u,
+          refreshCall: /auth\/sessions\/refresh`[\s\S]*skipAuth: true/u,
+          protectedCall: /auth\/sessions\/current`\)\)/u,
+          transportSkip: /protected buildHeaders\(config: any, skipAuth = false\)[\s\S]*config\?\.skipAuth[\s\S]*X-Sdkwork-Organization-Id[\s\S]*skipAuth,/u,
+        },
+      {
+        language: 'dart' as const,
+        generator: new DartGenerator(),
+        apiPath: 'lib/src/api/auth.dart',
+        httpPath: 'lib/src/http/client.dart',
+          anonymousCall: /auth\/sessions'[\s\S]*skipAuth: true/u,
+          refreshCall: /auth\/sessions\/refresh'[\s\S]*skipAuth: true/u,
+          protectedCall: /auth\/sessions\/current'\)\)/u,
+          transportSkip: /if \(!skipAuth\)[\s\S]*_authToken[\s\S]*Access-Token/u,
+        },
+      {
+        language: 'flutter' as const,
+        generator: new FlutterGenerator(),
+        apiPath: 'lib/src/api/auth.dart',
+        httpPath: 'lib/src/http/client.dart',
+          anonymousCall: /auth\/sessions'[\s\S]*skipAuth: true/u,
+          refreshCall: /auth\/sessions\/refresh'[\s\S]*skipAuth: true/u,
+          protectedCall: /auth\/sessions\/current'\)\)/u,
+          transportSkip: /if \(!skipAuth\) \.\.\.headers[\s\S]*if \(!skipAuth\) \.\.\.this\.headers/u,
+        },
+      {
+        language: 'python' as const,
+        generator: new PythonGenerator(),
+        apiPath: 'test_sdk/api/auth.py',
+        httpPath: 'test_sdk/http_client.py',
+          anonymousCall: /auth\/sessions"[\s\S]*skip_auth=True/u,
+          refreshCall: /auth\/sessions\/refresh"[\s\S]*skip_auth=True/u,
+          protectedCall: /auth\/sessions\/current"\)/u,
+          transportSkip: /def _request_session\(self, skip_auth: bool = False\):[\s\S]*if not skip_auth:[\s\S]*return self\._get_session\(\)[\s\S]*session\.headers\.clear\(\)/u,
+        },
+      {
+        language: 'go' as const,
+        generator: new GoGenerator(),
+        apiPath: 'api/auth.go',
+          httpPath: 'http/client.go',
+          anonymousCall: /AppApiPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
+          refreshCall: /AppApiPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+          protectedCall: /client\.Get\(AppApiPath\("\/auth\/sessions\/current"\), nil, nil\)/u,
+          transportSkip: /func \(c \*Client\) mergeHeaders\(requestHeaders map\[string\]string, skipAuth bool\)[\s\S]*if !skipAuth/u,
+        },
+      {
+        language: 'java' as const,
+        generator: new JavaGenerator(),
+        apiPath: 'src/main/java/com/sdkwork/test/app/api/generated/api/AuthApi.java',
+        httpPath: 'src/main/java/com/sdkwork/test/app/api/generated/http/HttpClient.java',
+          anonymousCall: /appPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
+          refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+          protectedCall: /appPath\("\/auth\/sessions\/current"\)\)/u,
+          transportSkip: /applyHeaders\(Request\.Builder builder, Map<String, String> requestHeaders, boolean skipAuth\)[\s\S]*skipAuth \? new HashMap<>\(\) : new HashMap<>\(headers\)/u,
+        },
+      {
+        language: 'kotlin' as const,
+        generator: new KotlinGenerator(),
+        apiPath: 'src/main/kotlin/com/sdkwork/test/app/api/generated/api/AuthApi.kt',
+        httpPath: 'src/main/kotlin/com/sdkwork/test/app/api/generated/http/HttpClient.kt',
+        anonymousCall: /appPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
+        refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+        protectedCall: /appPath\("\/auth\/sessions\/current"\)\)/u,
+        transportSkip: /private fun mergeHeaders\(requestHeaders: Map<String, String>\? = null, skipAuth: Boolean = false\)[\s\S]*if \(!skipAuth\)/u,
+      },
+        {
+          language: 'csharp' as const,
+          generator: new CSharpGenerator(),
+          apiPath: 'Api/AuthApi.cs',
+          httpPath: 'Http/HttpClient.cs',
+          anonymousCall: /AppPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
+          refreshCall: /AppPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+          protectedCall: /AppPath\("\/auth\/sessions\/current"\)\)/u,
+          transportSkip: /bool skipAuth = false[\s\S]*if \(!skipAuth\)[\s\S]*anonymousClient/u,
+        },
+        {
+          language: 'swift' as const,
+          generator: new SwiftGenerator(),
+          apiPath: 'Sources/API/AuthApi.swift',
+          httpPath: 'Sources/HTTP/HttpClient.swift',
+          anonymousCall: /appPath\("\/auth\/sessions"\)[\s\S]*skipAuth: true/u,
+          refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*skipAuth: true/u,
+          protectedCall: /appPath\("\/auth\/sessions\/current"\)\)/u,
+          transportSkip: /skipAuth: Bool = false[\s\S]*if !skipAuth[\s\S]*for \(key, value\) in headers/u,
+        },
+      {
+        language: 'rust' as const,
+          generator: new RustGenerator(),
+          apiPath: 'src/api/auth.rs',
+          httpPath: 'src/http/client.rs',
+          importAssertion: /use reqwest::Method;/u,
+          anonymousCall: /app_path\(&"\/auth\/sessions"\.to_string\(\)\)[\s\S]*true\)\.await/u,
+          refreshCall: /app_path\(&"\/auth\/sessions\/refresh"\.to_string\(\)\)[\s\S]*true\)\.await/u,
+          protectedCall: /app_path\(&"\/auth\/sessions\/current"\.to_string\(\)\)[\s\S]*client\.get\(&path, None, None\)\.await/u,
+          transportSkip: /fn merge_headers\(&self, headers: Option<&RequestHeaders>, skip_auth: bool\)[\s\S]*if !skip_auth/u,
+        },
+        {
+          language: 'php' as const,
+          generator: new PhpGenerator(),
+          apiPath: 'src/Api/Auth.php',
+          httpPath: 'src/Http/HttpClient.php',
+          anonymousCall: /auth\/sessions'[\s\S]*'skipAuth' => true/u,
+          refreshCall: /auth\/sessions\/refresh'[\s\S]*'skipAuth' => true/u,
+          protectedCall: /auth\/sessions\/current';[\s\S]*request\('GET', \$path, \[\]\)/u,
+          transportSkip: /empty\(\$options\['skipAuth'\]\)[\s\S]*array_merge\(\$this->buildAuthHeaders\(\), \$this->headers\)/u,
+        },
+        {
+          language: 'ruby' as const,
+          generator: new RubyGenerator(),
+          apiPath: 'lib/sdkwork/app_sdk/api/auth.rb',
+          httpPath: 'lib/sdkwork/app_sdk/http/client.rb',
+        anonymousCall: /auth\/sessions'[\s\S]*options\[:skip_auth\] = true/u,
+        refreshCall: /auth\/sessions\/refresh'[\s\S]*options\[:skip_auth\] = true/u,
+        protectedCall: /auth\/sessions\/current'[\s\S]*@client\.request\('GET', path, \*\*options\)/u,
+        transportSkip: /skip_auth: false[\s\S]*skip_auth \? \{\} : auth_headers/u,
+      },
+    ];
+
+    for (const item of cases) {
+      const result = await item.generator.generate(
+        {
+          ...baseConfig,
+          name: 'TestSDK',
+          language: item.language,
+          sdkType: 'app',
+          apiPrefix: '/app/v3/api',
+          packageName: item.language === 'java' || item.language === 'kotlin'
+            ? 'com.sdkwork.test:app-api-generated'
+            : item.language === 'python' || item.language === 'ruby'
+              ? 'test-sdk'
+              : undefined,
+          options: { standardProfile: 'sdkwork-v3' },
+        },
+        spec,
+      );
+
+      expect(result.errors, item.language).toEqual([]);
+      const api = result.files.find((file) => file.path === item.apiPath);
+      const http = result.files.find((file) => file.path === item.httpPath);
+      expect(api, `${item.language} api`).toBeDefined();
+      expect(http, `${item.language} http`).toBeDefined();
+      if ('importAssertion' in item) {
+        expect(api!.content, `${item.language} import`).toMatch(item.importAssertion);
+      }
+      expect(api!.content, `${item.language} anonymous call`).toMatch(item.anonymousCall);
+      expect(api!.content, `${item.language} refresh call`).toMatch(item.refreshCall);
+      expect(api!.content, `${item.language} protected call`).toMatch(item.protectedCall);
+      expect(http!.content, `${item.language} transport skip`).toMatch(item.transportSkip);
+    }
   });
 
   it('should keep sdkwork v3 typescript namespaces tag-driven when governance domains differ', async () => {

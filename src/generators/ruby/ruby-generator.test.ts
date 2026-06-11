@@ -163,6 +163,81 @@ const composedQueryParameterSpec: ApiSpec = {
   },
 };
 
+const multiOperationRubySpec: ApiSpec = {
+  openapi: '3.0.3',
+  info: {
+    title: 'Ruby Whitespace Regression',
+    version: '1.0.0',
+  },
+  paths: {
+    '/app/v3/api/auth/sessions': {
+      post: {
+        summary: 'Create session',
+        operationId: 'sessions.create',
+        tags: ['Auth'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/app/v3/api/auth/sessions/refresh': {
+      post: {
+        summary: 'Refresh session',
+        operationId: 'sessions.refresh',
+        tags: ['Auth'],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Success',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  additionalProperties: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {},
+  },
+};
+
 describe('Ruby generator', () => {
   it('emits ruby smoke tests and aligns README quick start when generateTests is enabled', async () => {
     const generator = getGenerator('ruby' as any);
@@ -211,5 +286,17 @@ describe('Ruby generator', () => {
     expect(smokeTestFile).toBeDefined();
     expect(smokeTestFile!.content).toContain("params = { 'page' => 1 }");
     expect(smokeTestFile!.content).toContain("assert_equal '1', captured[:query]['page']");
+  });
+
+  it('does not emit trailing whitespace in generated Ruby files', async () => {
+    const generator = getGenerator('ruby' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(rubyConfig, multiOperationRubySpec);
+
+    expect(result.errors).toEqual([]);
+    for (const file of result.files.filter((entry) => entry.path.endsWith('.rb'))) {
+      expect(file.content, file.path).not.toMatch(/[ \t]+$/mu);
+    }
   });
 });

@@ -5,6 +5,7 @@ import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framewo
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { resolveRustApiNames, sanitizeRustRawIdentifier } from './identifiers.js';
 export class ApiGenerator {
@@ -64,6 +65,9 @@ export class ApiGenerator {
         });
         const needsCustomMethod = operations.some((op) => !['get', 'post', 'put', 'patch', 'delete'].includes(String(op.method || '').toLowerCase()));
         const needsEventStream = operations.some((op) => Boolean(extractEventStreamResponseInfo(op)));
+        const needsMethodImport = needsCustomMethod
+            || needsEventStream
+            || operations.some((op) => operationSkipsSdkworkAuth(op));
         const modelImports = referencedModels.size > 0
             ? `use crate::models::{${Array.from(referencedModels).sort().join(', ')}};\n`
             : '';
@@ -72,7 +76,7 @@ export class ApiGenerator {
             path: `src/api/${apiName.moduleName}.rs`,
             content: this.format(`use std::sync::Arc;
 
-${needsCustomMethod || needsEventStream ? 'use reqwest::Method;\n\n' : ''}${typeImports.size > 0 ? `use crate::api::base::{${Array.from(typeImports).sort().join(', ')}};\n` : ''}use crate::api::paths::${pathFunction};
+${needsMethodImport ? 'use reqwest::Method;\n\n' : ''}${typeImports.size > 0 ? `use crate::api::base::{${Array.from(typeImports).sort().join(', ')}};\n` : ''}use crate::api::paths::${pathFunction};
 ${needsAppendQueryString ? 'use crate::api::paths::append_query_string;\n' : ''}use crate::http::{SdkworkError, SdkworkHttpClient${needsEventStream ? ', SseStream' : ''}};
 ${modelImports}
 #[derive(Clone)]
@@ -206,25 +210,36 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `Some("${requestBodyInfo.mediaType.toLowerCase()}")`
             : 'None';
+        const skipAuthArg = operationSkipsSdkworkAuth(op) ? 'true' : 'false';
         let clientCall = '';
         switch (method) {
             case 'get':
-                clientCall = `self.client.get(&path, ${queryArg}, ${headersArg}).await`;
+                clientCall = operationSkipsSdkworkAuth(op)
+                    ? `self.client.request_method(Method::GET, &path, Option::<&serde_json::Value>::None, ${queryArg}, ${headersArg}, None, true).await`
+                    : `self.client.get(&path, ${queryArg}, ${headersArg}).await`;
                 break;
             case 'post':
-                clientCall = `self.client.post(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = operationSkipsSdkworkAuth(op)
+                    ? `self.client.request_method(Method::POST, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, true).await`
+                    : `self.client.post(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
                 break;
             case 'put':
-                clientCall = `self.client.put(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = operationSkipsSdkworkAuth(op)
+                    ? `self.client.request_method(Method::PUT, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, true).await`
+                    : `self.client.put(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
                 break;
             case 'patch':
-                clientCall = `self.client.patch(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = operationSkipsSdkworkAuth(op)
+                    ? `self.client.request_method(Method::PATCH, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, true).await`
+                    : `self.client.patch(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
                 break;
             case 'delete':
-                clientCall = `self.client.delete(&path, ${queryArg}, ${headersArg}).await`;
+                clientCall = operationSkipsSdkworkAuth(op)
+                    ? `self.client.request_method(Method::DELETE, &path, Option::<&serde_json::Value>::None, ${queryArg}, ${headersArg}, None, true).await`
+                    : `self.client.delete(&path, ${queryArg}, ${headersArg}).await`;
                 break;
             default:
-                clientCall = `self.client.request_method(Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
+                clientCall = `self.client.request_method(Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await`;
                 break;
         }
         const docComment = op.summary
@@ -248,7 +263,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
             return {
                 content: `${docComment}pub async fn ${normalizedMethodName}(&self${params}) -> Result<SseStream<${responseType}>, SdkworkError> {
 ${queryBlock}    let path = ${requestPathExpression};
-${requestHeaderBlock}    self.client.stream(Method::${toHttpMethodLiteral(httpMethod)}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await
+${requestHeaderBlock}    self.client.stream(Method::${toHttpMethodLiteral(httpMethod)}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await
 }`,
                 referencedModels,
             };

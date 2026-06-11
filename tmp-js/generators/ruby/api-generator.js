@@ -5,6 +5,7 @@ import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framewo
 import { getSchemaReferenceName, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
@@ -232,6 +233,7 @@ end`, requires)),
         const requestBodySchema = requestBodyInfo?.schema;
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
         const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const skipAuth = operationSkipsSdkworkAuth(op);
         const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => RUBY_CONFIG.namingConventions.propertyName(value), [
@@ -315,6 +317,9 @@ ${this.renderHeaderParameterHash(cookieBindings, 8)}
       )`
             : '';
         const optionLines = [];
+        if (skipAuth) {
+            optionLines.push('      options[:skip_auth] = true');
+        }
         if (hasQuery && !hasExplicitQuerySerialization) {
             optionLines.push('      options[:query] = params unless params.nil? || params.empty?');
         }
@@ -715,7 +720,7 @@ ${requestLine}
         return `${normalizedPrefix}${normalizedPath}`.replace(/\/{2,}/g, '/');
     }
     format(content) {
-        return `${content.trim()}\n`;
+        return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
     }
 }
 function wrapRubyModules(segments, body, requires = []) {

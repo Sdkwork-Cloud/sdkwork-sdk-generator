@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import {
   parsePersistedGeneratorChangeSummary,
@@ -18,6 +19,7 @@ import {
   type GenerateExecutionReport,
   type ResolvedGenerateExecutionArtifacts,
 } from '../execution-report.js';
+import type { Language, RpcServiceManifest, SdkProtocol } from '../framework/types.js';
 
 export interface GenerateControlPlaneIssue {
   artifact: 'manifest' | 'changeSummary' | 'executionReport';
@@ -28,8 +30,17 @@ export interface GenerateControlPlaneIssue {
     | 'invalid-shape'
     | 'missing-artifact'
     | 'fingerprint-mismatch'
-    | 'sdk-metadata-mismatch';
+    | 'sdk-metadata-mismatch'
+    | 'sdk-protocol-mismatch';
   path: string;
+}
+
+export interface GenerateControlPlaneConventionEvidence {
+  protocol: 'rpc';
+  sdkFamily: string;
+  language: Language;
+  manifestPath: string;
+  packageManifestPath: string;
 }
 
 export interface GenerateControlPlaneEvaluation {
@@ -42,7 +53,9 @@ export interface GenerateControlPlaneEvaluation {
 export interface GenerateControlPlaneSnapshot {
   schemaVersion: 1;
   generator: typeof SDKWORK_GENERATOR_NAME;
+  evidenceMode: 'control-plane' | 'convention' | 'empty';
   artifacts: ResolvedGenerateExecutionArtifacts;
+  convention: GenerateControlPlaneConventionEvidence | null;
   manifest: PersistedGeneratorManifest | null;
   changeSummary: PersistedGeneratorChangeSummary | null;
   executionReport: GenerateExecutionReport | null;
@@ -50,8 +63,13 @@ export interface GenerateControlPlaneSnapshot {
   evaluation: GenerateControlPlaneEvaluation;
 }
 
-export function readGenerateControlPlaneSnapshot(outputPath: string): GenerateControlPlaneSnapshot {
-  const artifacts = resolveGenerateExecutionArtifacts(outputPath);
+export type GeneratedSdkEvidenceSnapshot = GenerateControlPlaneSnapshot;
+
+export function readGenerateControlPlaneSnapshot(
+  outputPath: string,
+  options: { protocol?: SdkProtocol } = {}
+): GenerateControlPlaneSnapshot {
+  const artifacts = resolveGenerateExecutionArtifacts(outputPath, options.protocol);
   const artifactPresence = {
     manifest: existsSync(artifacts.manifestPath),
     changeSummary: existsSync(artifacts.changeSummaryPath),
@@ -77,15 +95,23 @@ export function readGenerateControlPlaneSnapshot(outputPath: string): GenerateCo
     parseGenerateExecutionReport,
     issues
   );
+  const hasAnyArtifact = artifactPresence.manifest
+    || artifactPresence.changeSummary
+    || artifactPresence.executionReport;
+  const convention = !hasAnyArtifact && (options.protocol || 'http') === 'rpc'
+    ? resolveRpcConventionEvidence(outputPath)
+    : null;
   issues.push(...deriveConsistencyIssues({
     artifacts,
     artifactPresence,
+    expectedProtocol: options.protocol || 'http',
     manifest,
     changeSummary,
     executionReport,
   }));
   const evaluation = evaluateGenerateControlPlaneSnapshot({
     artifactPresence,
+    convention,
     issues,
     executionReport,
   });
@@ -93,7 +119,9 @@ export function readGenerateControlPlaneSnapshot(outputPath: string): GenerateCo
   return {
     schemaVersion: 1,
     generator: SDKWORK_GENERATOR_NAME,
+    evidenceMode: hasAnyArtifact ? 'control-plane' : convention ? 'convention' : 'empty',
     artifacts,
+    convention,
     manifest,
     changeSummary,
     executionReport,
@@ -172,6 +200,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function deriveConsistencyIssues(input: {
   artifacts: ResolvedGenerateExecutionArtifacts;
+  expectedProtocol: SdkProtocol;
   artifactPresence: {
     manifest: boolean;
     changeSummary: boolean;
@@ -210,6 +239,30 @@ function deriveConsistencyIssues(input: {
     }
   }
 
+  if (input.manifest && input.manifest.sdk.protocol !== input.expectedProtocol) {
+    issues.push({
+      artifact: 'manifest',
+      code: 'sdk-protocol-mismatch',
+      path: input.artifacts.manifestPath,
+    });
+  }
+
+  if (input.changeSummary && input.changeSummary.sdk.protocol !== input.expectedProtocol) {
+    issues.push({
+      artifact: 'changeSummary',
+      code: 'sdk-protocol-mismatch',
+      path: input.artifacts.changeSummaryPath,
+    });
+  }
+
+  if (input.executionReport && input.executionReport.sdk.protocol !== input.expectedProtocol) {
+    issues.push({
+      artifact: 'executionReport',
+      code: 'sdk-protocol-mismatch',
+      path: input.artifacts.executionReportPath,
+    });
+  }
+
   if (
     input.changeSummary
     && input.executionReport
@@ -242,6 +295,7 @@ function deriveConsistencyIssues(input: {
       version: input.executionReport.sdk.version,
       language: input.executionReport.sdk.language as typeof input.changeSummary.sdk.language,
       sdkType: input.executionReport.sdk.sdkType as typeof input.changeSummary.sdk.sdkType,
+      protocol: input.executionReport.sdk.protocol,
       packageName: input.executionReport.sdk.packageName || null,
     })
   ) {
@@ -261,6 +315,7 @@ function evaluateGenerateControlPlaneSnapshot(input: {
     changeSummary: boolean;
     executionReport: boolean;
   };
+  convention: GenerateControlPlaneConventionEvidence | null;
   issues: GenerateControlPlaneIssue[];
   executionReport: GenerateExecutionReport | null;
 }): GenerateControlPlaneEvaluation {
@@ -272,6 +327,14 @@ function evaluateGenerateControlPlaneSnapshot(input: {
   const hasFatalIssues = input.issues.some((issue) => issue.code !== 'missing-artifact');
 
   if (!hasAnyArtifact && input.issues.length === 0) {
+    if (input.convention) {
+      return {
+        status: 'healthy',
+        recommendedAction: 'verify',
+        summary: 'RPC SDK workspace is valid by SDKWork directory and manifest convention. Generate persisted control-plane evidence only for release, CI, audit, or migration workflows.',
+        reasons: ['rpc-convention-evidence'],
+      };
+    }
     return {
       status: 'empty',
       recommendedAction: 'generate',
@@ -315,6 +378,125 @@ function evaluateGenerateControlPlaneSnapshot(input: {
   };
 }
 
+const SUPPORTED_RPC_CONVENTION_LANGUAGES = new Set<Language>([
+  'typescript',
+  'go',
+  'java',
+  'python',
+  'rust',
+]);
+
+const RPC_PACKAGE_MANIFEST_BY_LANGUAGE: Record<Language, string | null> = {
+  typescript: 'package.json',
+  dart: null,
+  python: 'pyproject.toml',
+  java: 'pom.xml',
+  csharp: null,
+  go: 'go.mod',
+  rust: 'Cargo.toml',
+  swift: null,
+  flutter: null,
+  kotlin: null,
+  php: null,
+  ruby: null,
+};
+
+function resolveRpcConventionEvidence(outputPath: string): GenerateControlPlaneConventionEvidence | null {
+  const outputRoot = resolve(outputPath);
+  const languageWorkspace = basename(outputRoot);
+  const familyRoot = dirname(outputRoot);
+  const sdkFamily = basename(familyRoot);
+  const language = parseRpcLanguageWorkspace(languageWorkspace, sdkFamily);
+  if (!language) {
+    return null;
+  }
+
+  const packageManifestPath = resolveRpcPackageManifestPath(outputRoot, language);
+  if (!packageManifestPath) {
+    return null;
+  }
+
+  const manifestPath = resolveRpcManifestPath(familyRoot, sdkFamily);
+  if (!manifestPath) {
+    return null;
+  }
+
+  return {
+    protocol: 'rpc',
+    sdkFamily,
+    language,
+    manifestPath,
+    packageManifestPath,
+  };
+}
+
+export function readGeneratedSdkEvidenceSnapshot(
+  outputPath: string,
+  options: { protocol?: SdkProtocol } = {}
+): GeneratedSdkEvidenceSnapshot {
+  return readGenerateControlPlaneSnapshot(outputPath, options);
+}
+
+function parseRpcLanguageWorkspace(languageWorkspace: string, sdkFamily: string): Language | null {
+  if (!/^sdkwork-[a-z0-9]+(?:-[a-z0-9]+)*-rpc-sdk$/.test(sdkFamily)) {
+    return null;
+  }
+  if (!languageWorkspace.startsWith(`${sdkFamily}-`)) {
+    return null;
+  }
+  const language = languageWorkspace.slice(`${sdkFamily}-`.length) as Language;
+  if (!SUPPORTED_RPC_CONVENTION_LANGUAGES.has(language)) {
+    return null;
+  }
+  return language;
+}
+
+function resolveRpcPackageManifestPath(outputRoot: string, language: Language): string | null {
+  const packageManifest = RPC_PACKAGE_MANIFEST_BY_LANGUAGE[language];
+  if (!packageManifest) {
+    return null;
+  }
+  const packageManifestPath = join(outputRoot, packageManifest);
+  return existsSync(packageManifestPath) && statSync(packageManifestPath).isFile()
+    ? packageManifestPath
+    : null;
+}
+
+function resolveRpcManifestPath(familyRoot: string, sdkFamily: string): string | null {
+  const rpcDir = join(familyRoot, 'rpc');
+  if (!existsSync(rpcDir) || !statSync(rpcDir).isDirectory()) {
+    return null;
+  }
+
+  const preferredManifestPath = join(rpcDir, `${sdkFamily.replace(/-sdk$/, '')}.manifest.json`);
+  if (manifestMatchesSdkFamily(preferredManifestPath, sdkFamily)) {
+    return preferredManifestPath;
+  }
+
+  for (const entry of readdirSync(rpcDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.manifest.json')) {
+      continue;
+    }
+    const manifestPath = join(rpcDir, entry.name);
+    if (manifestMatchesSdkFamily(manifestPath, sdkFamily)) {
+      return manifestPath;
+    }
+  }
+  return null;
+}
+
+function manifestMatchesSdkFamily(manifestPath: string, sdkFamily: string): boolean {
+  if (!existsSync(manifestPath) || !statSync(manifestPath).isFile()) {
+    return false;
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Partial<RpcServiceManifest>;
+    return manifest.kind === 'sdkwork.rpc.manifest' && manifest.sdkFamily === sdkFamily;
+  } catch {
+    return false;
+  }
+}
+
 function isSameSdkMetadata(
   left: PersistedGeneratorManifest['sdk'],
   right: PersistedGeneratorManifest['sdk']
@@ -323,5 +505,6 @@ function isSameSdkMetadata(
     && left.version === right.version
     && left.language === right.language
     && left.sdkType === right.sdkType
+    && left.protocol === right.protocol
     && left.packageName === right.packageName;
 }

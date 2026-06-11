@@ -174,6 +174,20 @@ namespace ${namespace}.Http
             return request;
         }
 
+        private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, bool skipAuth = false)
+        {
+            if (!skipAuth)
+            {
+                return await _client.SendAsync(request);
+            }
+
+            using var anonymousClient = new System.Net.Http.HttpClient
+            {
+                Timeout = _client.Timeout
+            };
+            return await anonymousClient.SendAsync(request);
+        }
+
         private static HttpContent CreateMultipartContent(object? body)
         {
             if (body is HttpContent rawContent)
@@ -337,10 +351,11 @@ namespace ${namespace}.Http
         public async Task<T?> GetAsync<T>(
             string path,
             Dictionary<string, object>? parameters = null,
-            Dictionary<string, string>? requestHeaders = null)
+            Dictionary<string, string>? requestHeaders = null,
+            bool skipAuth = false)
         {
             using var request = BuildRequest(System.Net.Http.HttpMethod.Get, path, parameters, requestHeaders);
-            var response = await _client.SendAsync(request);
+            var response = await SendAsync(request, skipAuth);
             return await ReadResponseAsync<T>(response);
         }
 
@@ -350,11 +365,12 @@ namespace ${namespace}.Http
             object? body = null,
             Dictionary<string, object>? parameters = null,
             Dictionary<string, string>? requestHeaders = null,
-            string? contentType = null)
+            string? contentType = null,
+            bool skipAuth = false)
         {
             using var content = CreateContent(body, contentType);
             using var request = BuildRequest(new System.Net.Http.HttpMethod(method), path, parameters, requestHeaders, content);
-            var response = await _client.SendAsync(request);
+            var response = await SendAsync(request, skipAuth);
             return await ReadResponseAsync<T>(response);
         }
 
@@ -363,11 +379,12 @@ namespace ${namespace}.Http
             object? body = null,
             Dictionary<string, object>? parameters = null,
             Dictionary<string, string>? requestHeaders = null,
-            string? contentType = null)
+            string? contentType = null,
+            bool skipAuth = false)
         {
             using var content = CreateContent(body, contentType);
             using var request = BuildRequest(System.Net.Http.HttpMethod.Post, path, parameters, requestHeaders, content);
-            var response = await _client.SendAsync(request);
+            var response = await SendAsync(request, skipAuth);
             return await ReadResponseAsync<T>(response);
         }
 
@@ -377,12 +394,18 @@ namespace ${namespace}.Http
             object? body = null,
             Dictionary<string, object>? parameters = null,
             Dictionary<string, string>? requestHeaders = null,
-            string? contentType = null)
+            string? contentType = null,
+            bool skipAuth = false)
         {
             using var content = CreateContent(body, contentType);
             using var request = BuildRequest(new System.Net.Http.HttpMethod(method), path, parameters, requestHeaders, content);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+            using var anonymousClient = skipAuth
+                ? new System.Net.Http.HttpClient { Timeout = _client.Timeout }
+                : null;
+            using var response = skipAuth
+                ? await anonymousClient!.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+                : await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
             response.EnsureSuccessStatusCode();
             await using var responseStream = await response.Content.ReadAsStreamAsync();
             using var reader = new StreamReader(responseStream);
@@ -411,21 +434,23 @@ namespace ${namespace}.Http
             object? body = null,
             Dictionary<string, object>? parameters = null,
             Dictionary<string, string>? requestHeaders = null,
-            string? contentType = null)
+            string? contentType = null,
+            bool skipAuth = false)
         {
             using var content = CreateContent(body, contentType);
             using var request = BuildRequest(System.Net.Http.HttpMethod.Put, path, parameters, requestHeaders, content);
-            var response = await _client.SendAsync(request);
+            var response = await SendAsync(request, skipAuth);
             return await ReadResponseAsync<T>(response);
         }
 
         public async Task<T?> DeleteAsync<T>(
             string path,
             Dictionary<string, object>? parameters = null,
-            Dictionary<string, string>? requestHeaders = null)
+            Dictionary<string, string>? requestHeaders = null,
+            bool skipAuth = false)
         {
             using var request = BuildRequest(System.Net.Http.HttpMethod.Delete, path, parameters, requestHeaders);
-            var response = await _client.SendAsync(request);
+            var response = await SendAsync(request, skipAuth);
             return await ReadResponseAsync<T>(response);
         }
 
@@ -434,11 +459,12 @@ namespace ${namespace}.Http
             object? body = null,
             Dictionary<string, object>? parameters = null,
             Dictionary<string, string>? requestHeaders = null,
-            string? contentType = null)
+            string? contentType = null,
+            bool skipAuth = false)
         {
             using var content = CreateContent(body, contentType);
             using var request = BuildRequest(System.Net.Http.HttpMethod.Patch, path, parameters, requestHeaders, content);
-            var response = await _client.SendAsync(request);
+            var response = await SendAsync(request, skipAuth);
             return await ReadResponseAsync<T>(response);
         }
     }

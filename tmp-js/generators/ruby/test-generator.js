@@ -110,7 +110,7 @@ end
         return content.split('\n').map((line) => (line ? `${prefix}${line}` : line)).join('\n');
     }
     format(content) {
-        return `${content.trim()}\n`;
+        return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
     }
 }
 function quoteRuby(value) {

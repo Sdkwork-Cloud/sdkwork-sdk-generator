@@ -100,8 +100,8 @@ end`)),
     self
   end
 
-  def request(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil)
-    response = @connection.run_request(method.to_sym, path, nil, build_headers(headers)) do |request|
+  def request(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false)
+    response = @connection.run_request(method.to_sym, path, nil, build_headers(headers, skip_auth: skip_auth)) do |request|
       request.params.update(query) unless query.nil? || query.empty?
 
       if multipart
@@ -121,8 +121,8 @@ end`)),
     raise RuntimeError, "SDK request failed: #{e.message}"
   end
 
-  def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil)
-    response = @connection.run_request(method.to_sym, path, nil, build_headers({ 'Accept' => 'text/event-stream' }.merge(headers || {}))) do |request|
+  def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false)
+    response = @connection.run_request(method.to_sym, path, nil, build_headers({ 'Accept' => 'text/event-stream' }.merge(headers || {}), skip_auth: skip_auth)) do |request|
       request.params.update(query) unless query.nil? || query.empty?
 
       if multipart
@@ -154,12 +154,13 @@ end`)),
 
   private
 
-  def build_headers(request_headers)
+  def build_headers(request_headers, skip_auth: false)
     auth_headers = {}
     auth_headers['${apiKeyHeader}'] = ${apiKeyUseBearer ? "format_bearer(@api_key)" : '@api_key'} if @api_key && !@api_key.empty?
     auth_headers['Authorization'] = format_bearer(@auth_token) if @auth_token && !@auth_token.empty?
     auth_headers['Access-Token'] = @access_token if @access_token && !@access_token.empty?
-    auth_headers.merge(@headers).merge(request_headers || {})
+    client_headers = skip_auth ? {} : auth_headers.merge(@headers)
+    client_headers.merge(request_headers || {})
   end
 
   def parse_response(response)
@@ -270,7 +271,7 @@ end`)}`),
         };
     }
     format(content) {
-        return `${content.trim()}\n`;
+        return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
     }
 }
 function wrapRubyModules(segments, body, requires = []) {

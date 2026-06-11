@@ -1,10 +1,12 @@
 import { GENERATE_EXECUTION_REPORT_SCHEMA_VERSION } from './execution-report.js';
 import { SDKWORK_GENERATOR_NAME } from './framework/output-sync.js';
-import { readGenerateControlPlaneSnapshot, } from './node/control-plane.js';
+import { readGeneratedSdkEvidenceSnapshot, } from './node/control-plane.js';
 const INSPECT_FAIL_ON_STATUSES = ['empty', 'degraded', 'invalid'];
 const INSPECT_REQUIRED_ACTIONS = ['generate', 'review', 'apply', 'verify', 'complete', 'skip'];
 export function runInspectCommand(options) {
-    return readGenerateControlPlaneSnapshot(options.output);
+    return readGeneratedSdkEvidenceSnapshot(options.output, {
+        protocol: options.protocol,
+    });
 }
 export function formatInspectSuccess(snapshot, options = {}) {
     const gate = resolveInspectGate(snapshot, options);
@@ -15,15 +17,26 @@ export function formatInspectSuccess(snapshot, options = {}) {
         }, null, 2)}\n`;
     }
     const lines = [];
-    lines.push(`Control plane status: ${snapshot.evaluation.status}`);
+    const evidenceMode = snapshot.evidenceMode ?? 'control-plane';
+    lines.push(`SDK evidence status: ${snapshot.evaluation.status}`);
+    lines.push(`SDK evidence mode: ${evidenceMode}`);
     lines.push(`Recommended action: ${snapshot.evaluation.recommendedAction}`);
     lines.push(`Summary: ${snapshot.evaluation.summary}`);
     lines.push(`Gate: ${gate.passed ? 'pass' : 'fail'}`);
     lines.push('');
-    lines.push(`State dir: ${snapshot.artifacts.stateDir}`);
-    lines.push(`Manifest: ${snapshot.manifest ? 'present' : 'missing'} -> ${snapshot.artifacts.manifestPath}`);
-    lines.push(`Change summary: ${snapshot.changeSummary ? 'present' : 'missing'} -> ${snapshot.artifacts.changeSummaryPath}`);
-    lines.push(`Execution report: ${snapshot.executionReport ? 'present' : 'missing'} -> ${snapshot.artifacts.executionReportPath}`);
+    if (evidenceMode === 'convention' && snapshot.convention) {
+        lines.push('RPC convention evidence:');
+        lines.push(`  SDK family: ${snapshot.convention.sdkFamily}`);
+        lines.push(`  Language: ${snapshot.convention.language}`);
+        lines.push(`  RPC manifest: ${snapshot.convention.manifestPath}`);
+        lines.push(`  Package manifest: ${snapshot.convention.packageManifestPath}`);
+    }
+    else {
+        lines.push(`State dir: ${snapshot.artifacts.stateDir}`);
+        lines.push(`Manifest: ${snapshot.manifest ? 'present' : 'missing'} -> ${snapshot.artifacts.manifestPath}`);
+        lines.push(`Change summary: ${snapshot.changeSummary ? 'present' : 'missing'} -> ${snapshot.artifacts.changeSummaryPath}`);
+        lines.push(`Execution report: ${snapshot.executionReport ? 'present' : 'missing'} -> ${snapshot.artifacts.executionReportPath}`);
+    }
     if (snapshot.evaluation.reasons.length > 0) {
         lines.push('');
         lines.push(`Reasons: ${snapshot.evaluation.reasons.join(', ')}`);
@@ -53,7 +66,7 @@ export function formatInspectFailure(error, options = {}) {
         };
         return `${JSON.stringify(report, null, 2)}\n`;
     }
-    return `Failed to inspect SDK control plane: ${String(error)}`;
+    return `Failed to inspect SDK evidence: ${String(error)}`;
 }
 export function resolveInspectGate(snapshot, options = {}) {
     assertValidInspectGateOptions(options);

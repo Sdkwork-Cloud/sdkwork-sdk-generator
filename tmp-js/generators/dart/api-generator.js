@@ -5,6 +5,7 @@ import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framewo
 import { getSchemaReferenceName, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 import { DART_CONFIG, DART_RESERVED_WORDS, getDartType } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
@@ -96,6 +97,7 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `, contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
             : '';
+        const skipAuth = operationSkipsSdkworkAuth(op);
         const eventStreamInfo = extractEventStreamResponseInfo(op);
         const isEventStreamResponse = Boolean(eventStreamInfo);
         const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
@@ -213,6 +215,9 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             default:
                 call = `_client.request('${toHttpMethodLiteral(httpMethod)}', ${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
         }
+        if (skipAuth) {
+            call = `_client.request('${toHttpMethodLiteral(httpMethod)}', ${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''}, skipAuth: true)`;
+        }
         const docComment = op.summary ? `  /// ${op.summary}\n` : '';
         const queryBlock = hasExplicitQuerySerialization
             ? `    final query = buildQueryString([
@@ -228,7 +233,7 @@ ${this.renderHeaderParameterMap(cookieBindings, 6)},
 `
             : '';
         if (isEventStreamResponse) {
-            const streamCall = `_client.streamJson(${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''})`;
+            const streamCall = `_client.streamJson(${requestPathCall}${hasBody ? ', body: payload' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params: params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody ? contentTypeArg : ''}${skipAuth ? ', skipAuth: true' : ''})`;
             return `${docComment}  Stream<${responseType}> ${methodName}(${params.join(', ')}) {
 ${queryBlock}${requestHeaderBlock}${payloadLine}    return ${streamCall}
         .map((event) => ${this.deserializeStreamEventExpression(responseSchema, 'event')});

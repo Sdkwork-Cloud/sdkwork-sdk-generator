@@ -8,8 +8,8 @@ Professional SDK code generator for multiple programming languages. Generate typ
 - **Type-safe**: Generate strongly typed models and API clients
 - **Modular Architecture**: Each generator has independent sub-modules for models, APIs, HTTP client, build config, and docs
 - **README System**: Every generated SDK always includes a top-level `README.md`
-- **Unified Metadata Manifest**: Every generated SDK also includes `sdkwork-sdk.json` with schema version, SDK identity, machine-readable capability flags, and generated-vs-scaffold ownership boundaries
-- **Safe Regeneration**: Generated ownership is tracked in `.sdkwork/sdkwork-generator-manifest.json`, each run writes `.sdkwork/sdkwork-generator-changes.json`, apply mode also writes a versioned `.sdkwork/sdkwork-generator-report.json`, stale generated files are pruned safely, and custom code is preserved
+- **Unified Metadata Manifest**: HTTP/OpenAPI generated SDKs include `sdkwork-sdk.json` with schema version, SDK identity, machine-readable capability flags, and generated-vs-scaffold ownership boundaries
+- **Safe Regeneration**: HTTP/OpenAPI generated ownership is tracked in `.sdkwork/sdkwork-generator-manifest.json`, each run writes `.sdkwork/sdkwork-generator-changes.json`, apply mode also writes a versioned `.sdkwork/sdkwork-generator-report.json`, stale generated files are pruned safely, and custom code is preserved
 - **Impact-Aware Automation**: Every generation run classifies changed files into machine-readable impact areas so verification and release automation can react to real change scope
 - **Unified Client Naming**: `Sdkwork{SdkType}Client` across all languages (for example `SdkworkAiClient`)
 - **Auth Clarity**: README examples document API key mode and dual-token mode as mutually exclusive
@@ -18,6 +18,7 @@ Professional SDK code generator for multiple programming languages. Generate typ
 - **Async/Await**: Modern async patterns for all languages
 - **Strict Spec Validation**: Generation fails fast if input is not a valid OpenAPI 3.x semantic version document, has no `paths`, or is an upstream error payload (`code/msg` wrapper)
 - **OpenAPI 3.x Coverage**: Supports OpenAPI 3.0.x, 3.1.x, 3.2.x, and valid future 3.x version strings, including JSON/YAML specs from local files or HTTP(S) URLs
+- **RPC SDK Scaffolding**: Supports `sdkgen generate --protocol rpc` for SDKWork RPC manifests and proto roots, producing convention-first Buf/protoc-compatible generation config plus SDKWork package scaffolds
 - **Complete Path Item Methods**: Generates SDK operations for OpenAPI Path Item methods `get`, `put`, `post`, `delete`, `options`, `head`, `patch`, `trace`, `query`, plus OpenAPI 3.2 `additionalOperations`
 - **Rust Integration Client**: The `rust/` crate provides a native Rust client for SDK Generator HTTP services, including OpenAPI URL generation, OpenAPI file upload generation, and generated package download
 ## Installation
@@ -74,20 +75,58 @@ To lock apply mode to an already reviewed dry-run plan, pass the fingerprint bac
 sdkgen generate -i ./openapi.json -o ./sdk -n MySDK -l typescript --expected-change-fingerprint <fingerprint>
 ```
 
+### RPC SDK Generation
+
+Use `sdkgen generate --protocol rpc` to generate SDKWork RPC SDK package scaffolds and Buf/protoc-compatible generation configuration from proto contracts and `sdkwork.rpc.manifest` files.
+
+```bash
+sdkgen generate \
+  --protocol rpc \
+  --input ./rpc/sdkwork-im-rpc.manifest.json \
+  --proto-root ./proto \
+  --output ./sdks/sdkwork-im-rpc-sdk/sdkwork-im-rpc-sdk-typescript \
+  --name SdkworkImRpc \
+  --sdk-name sdkwork-im-rpc-sdk \
+  --language typescript \
+  --package-name @sdkwork/im-rpc-sdk \
+  --dry-run
+```
+
+For Rust scaffolds:
+
+```bash
+sdkgen generate \
+  --protocol rpc \
+  --input ./rpc/sdkwork-im-rpc.manifest.json \
+  --proto-root ./proto \
+  --output ./sdks/sdkwork-im-rpc-sdk/sdkwork-im-rpc-sdk-rust \
+  --name SdkworkImRpc \
+  --sdk-name sdkwork-im-rpc-sdk \
+  --language rust \
+  --package-name sdkwork-im-rpc-sdk-rust \
+  --dry-run
+```
+
+RPC generation is additive. Existing `sdkgen generate` commands without `--protocol rpc` continue to use the HTTP/OpenAPI path and do not require proto roots, RPC manifests, Buf, protoc, or RPC-specific flags.
+
+RPC generation defaults to convention-first source output and does not write persisted generator evidence in normal RPC language workspaces. Verify generated RPC SDK workspaces with `sdkgen inspect --protocol rpc`; add `--emit-control-plane` only when release, CI, audit, or migration workflows need persisted generator evidence. The evidence paths are derived by generator convention.
+
+Current RPC generation creates SDKWork scaffolds, README content, metadata/deadline/idempotency helpers for TypeScript, and `buf.gen.yaml`. `sdkgen` orchestrates SDKWork RPC generation; it does not replace Protocol Buffers, Buf, protoc, or language-specific gRPC plugins. Run Buf/protoc generation and generated client compile checks before publishing an RPC SDK package.
+
 ### Initialize SDK Workspace
 
-Use `init` when you want a minimal, regeneration-safe workspace before the OpenAPI spec or full SDK package is ready:
+Use `init` when you want a minimal, regeneration-safe HTTP/OpenAPI workspace before the OpenAPI spec or full SDK package is ready:
 
 ```bash
 sdkgen init -o ./sdk -n MySDK -l typescript -t backend
 ```
 
-The init command creates only the stable workspace boundary:
+The init command creates only the stable HTTP/OpenAPI workspace boundary:
 
 - `README.md` with the next `sdkgen generate` command
 - `sdkwork-sdk.json` with SDK identity, capabilities, and ownership boundaries
 - `custom/README.md` for hand-written extensions
-- `.sdkwork/` control-plane artifacts so `sdkgen inspect` stays healthy
+- `.sdkwork/` control-plane artifacts so HTTP/OpenAPI `sdkgen inspect` stays healthy
 
 Key rules:
 
@@ -96,12 +135,20 @@ Key rules:
 - `init` refuses to replace an already generated SDK control plane
 - `init` supports `--dry-run`, `--json`, and `--expected-change-fingerprint` for the same review/apply automation style as `generate`
 
-### Inspect SDK Control Plane
+### Inspect Generated SDK Evidence
 
-To inspect the persisted regeneration control plane for an existing generated SDK:
+To inspect generated SDK evidence for an existing generated SDK:
 
 ```bash
 sdkgen inspect -o ./sdk
+```
+
+HTTP/OpenAPI inspect reads persisted generated SDK control-plane artifacts.
+RPC inspect validates convention evidence by default and validates emitted control-plane metadata only when present.
+For RPC workspaces:
+
+```bash
+sdkgen inspect --protocol rpc -o ./sdks/sdkwork-im-rpc-sdk/sdkwork-im-rpc-sdk-typescript
 ```
 
 For automation:
@@ -110,7 +157,7 @@ For automation:
 sdkgen inspect -o ./sdk --json
 ```
 
-The inspect command returns the parsed manifest, change summary, and execution report snapshot together with a unified health evaluation and recommended next action.
+The inspect command returns a unified generated SDK evidence snapshot with a health evaluation and recommended next action. HTTP/OpenAPI evidence includes the parsed manifest, change summary, and execution report snapshot. RPC evidence includes convention metadata by default, and includes parsed control-plane artifacts only when `--emit-control-plane` was used.
 
 To turn inspect into an explicit automation gate:
 
@@ -170,19 +217,19 @@ Supported inspect gate values:
 
 ### Safe Regeneration Contract
 
-Every generated SDK now follows the same regeneration rules:
+HTTP/OpenAPI generated SDKs follow these control-plane regeneration rules:
 
-- Generator-owned files are tracked in `.sdkwork/sdkwork-generator-manifest.json`
-- `sdkwork-sdk.json` also declares the SDK schema version, language capabilities, and the stable generated/scaffold boundary used by regeneration-safe workflows
-- Each generation run writes `.sdkwork/sdkwork-generator-changes.json` with created, updated, unchanged, deleted, scaffolded, preserved, and backed-up file lists
+- Generator-owned HTTP/OpenAPI files are tracked in `.sdkwork/sdkwork-generator-manifest.json`
+- `sdkwork-sdk.json` declares the SDK schema version, language capabilities, and the stable generated/scaffold boundary used by regeneration-safe workflows
+- Each HTTP/OpenAPI generation run writes `.sdkwork/sdkwork-generator-changes.json` with created, updated, unchanged, deleted, scaffolded, preserved, and backed-up file lists
 - The change summary also includes classified impact areas such as `api-surface`, `models`, `runtime`, `build-metadata`, `publish-workflow`, `documentation`, and `custom-scaffold`
 - The change summary now also persists the resolved verification plan so CI and agent workflows can continue from a single machine-readable control-plane artifact
 - The change summary also persists the resolved execution decision so downstream automation knows whether the next best action is `review`, `apply`, `verify`, `complete`, or `skip`
-- Apply mode also writes `.sdkwork/sdkwork-generator-report.json` with the same full execution report structure as CLI `--json`, including `schemaVersion`, `generator`, stable artifact paths, sdk metadata, versioning, stats, warnings, `changeImpact`, `verificationPlan`, `executionDecision`, and `executionHandoff`
+- HTTP/OpenAPI apply mode also writes `.sdkwork/sdkwork-generator-report.json` with the same full execution report structure as CLI `--json`, including `schemaVersion`, `generator`, stable artifact paths, sdk metadata, versioning, stats, warnings, `changeImpact`, `verificationPlan`, `executionDecision`, and `executionHandoff`
 - CLI JSON output also includes an execution handoff with concrete next commands, including reviewed apply commands for dry-run flows
-- Hand-written extensions belong in `custom/`
-- `custom/` is scaffolded once and is never overwritten by later generations
-- Modified generated-owned files are backed up to `.sdkwork/manual-backups/` before overwrite or deletion
+- Hand-written HTTP/OpenAPI extensions belong in `custom/`
+- `custom/` is scaffolded once and is never overwritten by later HTTP/OpenAPI generations
+- Modified HTTP/OpenAPI generated-owned files are backed up to `.sdkwork/manual-backups/` before overwrite or deletion
 - Legacy SDK outputs without a prior manifest are preserved on the first safe regeneration pass
 - `--dry-run` reuses the same diff engine but does not write files, manifests, change summaries, execution reports, or backups
 - `--json` emits a versioned machine-readable report on both success and failure; success matches the apply-mode `.sdkwork/sdkwork-generator-report.json` contract, while failure includes the same `schemaVersion` and `generator` identity plus available artifact paths
@@ -190,6 +237,8 @@ Every generated SDK now follows the same regeneration rules:
 - `syncSummary.changeFingerprint` provides a stable fingerprint for the planned mutations, and `--expected-change-fingerprint` can require apply mode to match a reviewed dry-run plan before writing
 
 This keeps repeat generation idempotent while avoiding destructive cleanup of custom code.
+
+RPC SDK source workspaces use convention-first evidence by default: the RPC SDK family name, language workspace name, `rpc/*.manifest.json`, proto source reference, generated client files, and native package manifest. Use `sdkgen inspect --protocol rpc` to validate that evidence. Request persisted generator evidence only with `--emit-control-plane` for release, CI, audit, or migration workflows; the evidence paths are derived by generator convention.
 
 For programmatic Node.js callers that need the same safe write semantics as the CLI, use the Node-only helper:
 
@@ -213,13 +262,13 @@ import {
 } from '@sdkwork/sdk-generator/node/execution-report';
 ```
 
-For downstream agents that want a single health-checked snapshot of manifest, change summary, and execution report:
+For downstream agents that want a single health-checked generated SDK evidence snapshot:
 
 ```typescript
-import { readGenerateControlPlaneSnapshot } from '@sdkwork/sdk-generator/node/control-plane';
+import { readGeneratedSdkEvidenceSnapshot } from '@sdkwork/sdk-generator/node/control-plane';
 ```
 
-The returned snapshot includes parsed artifacts, structured `issues`, and a unified `evaluation` with `status`, `recommendedAction`, and `summary` so orchestration layers can decide whether to `generate`, `review`, `apply`, `verify`, `complete`, or `skip`.
+For HTTP/OpenAPI outputs, the returned snapshot includes parsed manifest, change summary, execution report artifacts, structured `issues`, and a unified `evaluation` with `status`, `recommendedAction`, and `summary`. For RPC outputs, pass `protocol: "rpc"` to inspect convention evidence by default and emitted control-plane metadata only when present.
 
 For downstream agents that want to parse the standardized SDK metadata contract itself:
 
@@ -255,9 +304,10 @@ import { buildExecutionHandoff } from '@sdkwork/sdk-generator';
 
 | Option | Description | Required | Default |
 |--------|-------------|----------|---------|
-| `-i, --input` | OpenAPI specification file path or HTTP(S) URL; JSON and YAML are supported | Yes | - |
+| `-i, --input` | OpenAPI specification file path or HTTP(S) URL; JSON and YAML are supported. With `--protocol rpc`, this is the SDKWork RPC manifest path | Yes | - |
 | `-o, --output` | Output directory | Yes | - |
 | `-n, --name` | SDK name | Yes | - |
+| `--protocol` | SDK protocol: `http` or `rpc` | No | `http` |
 | `-l, --language` | Target language | No | `typescript` |
 | `-t, --type` | SDK type (`app`, `backend`, `ai`, `custom`) | No | `backend` |
 | `--sdk-version` | Requested SDK version, auto-bumped if it is not newer than local/npm baseline | No | Auto-resolved |
@@ -267,6 +317,10 @@ import { buildExecutionHandoff } from '@sdkwork/sdk-generator';
 | `--sdk-root` | Workspace root used to scan sibling generated SDK versions | No | - |
 | `--sdk-name` | Workspace prefix, for example `sdkwork-notes-app-sdk` | No | - |
 | `--no-sync-published-version` | Skip published npm version checks when resolving SDK version | No | `false` |
+| `--proto-root` | RPC proto root for `--protocol rpc` | Required for RPC | - |
+| `--proto-file` | Explicit RPC proto file list for `--protocol rpc`; can be repeated by passing multiple values | No | Discovered from manifest packages |
+| `--import-root` | Additional RPC proto import roots for `--protocol rpc`; can be repeated by passing multiple values | No | `--proto-root` |
+| `--emit-control-plane` | Emit optional persisted generator evidence for RPC release, CI, audit, or migration workflows; HTTP/OpenAPI generation already persists its standard control plane | No | `false` |
 | `--base-url` | Base URL for API | No | From spec |
 | `--api-prefix` | API path prefix | No | empty string |
 | `--package-name` | Package name | No | Auto-generated |
@@ -444,7 +498,7 @@ For server-side applications. Includes:
 - Authentication examples in generated README always state that API key mode and dual-token mode are mutually exclusive.
 ## Generated Structure
 
-All generated SDK layouts also reserve these stable cross-language paths:
+HTTP/OpenAPI generated SDK layouts reserve these stable cross-language paths:
 
 ```
 sdk/

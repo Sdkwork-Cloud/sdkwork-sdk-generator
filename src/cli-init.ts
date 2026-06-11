@@ -290,7 +290,7 @@ function buildInitReadme(config: GeneratorConfig): string {
   lines.push('1. Prepare an OpenAPI 3.x specification.');
   lines.push(`2. Run \`${buildGenerateCommandPreview(config)}\`.`);
   lines.push('3. Keep hand-written extensions in `custom/` so regeneration stays safe.');
-  lines.push('4. Run `sdkgen inspect -o .` after generation when you need a machine-readable control-plane snapshot.');
+  lines.push('4. Run `sdkgen inspect -o .` after generation when you need a machine-readable generated SDK evidence snapshot.');
   lines.push('');
   return lines.join('\n');
 }

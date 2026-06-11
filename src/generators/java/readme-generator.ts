@@ -11,6 +11,7 @@ import {
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JAVA_CONFIG } from './config.js';
+import { formatJavaGeneratedContent } from './format.js';
 import { JavaUsagePlanner, renderJavaUsageSnippet } from './usage-planner.js';
 
 export class ReadmeGenerator {
@@ -187,7 +188,7 @@ ${outputLine}
   }
 
   private format(content: string): string {
-    return content.trim() + '\n';
+    return formatJavaGeneratedContent(content);
   }
 
   private indent(content: string, spaces: number): string {

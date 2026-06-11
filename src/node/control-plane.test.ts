@@ -20,7 +20,11 @@ import {
   SDKWORK_GENERATOR_REPORT_PATH,
 } from '../execution-report.js';
 import { runGenerateCommand } from '../cli-runner.js';
-import { readGenerateControlPlaneSnapshot } from './control-plane.js';
+import {
+  readGeneratedSdkEvidenceSnapshot,
+  readGenerateControlPlaneSnapshot,
+  type GeneratedSdkEvidenceSnapshot,
+} from './control-plane.js';
 
 const tempDirs: string[] = [];
 
@@ -91,8 +95,10 @@ describe('node control plane', () => {
     });
 
     const snapshot = readGenerateControlPlaneSnapshot(outputDir);
+    const evidenceSnapshot: GeneratedSdkEvidenceSnapshot = readGeneratedSdkEvidenceSnapshot(outputDir);
 
     expect(snapshot.schemaVersion).toBe(1);
+    expect(evidenceSnapshot).toEqual(snapshot);
     expect(snapshot.generator).toBe(SDKWORK_GENERATOR_NAME);
     expect(snapshot.artifacts.stateDir).toBe(join(outputDir, SDKWORK_STATE_DIR));
     expect(snapshot.manifest?.schemaVersion).toBe(1);
@@ -102,6 +108,116 @@ describe('node control plane', () => {
     expect(snapshot.evaluation).toMatchObject({
       status: 'healthy',
       recommendedAction: 'verify',
+    });
+  });
+
+  it('reads unified persisted control plane artifacts and validates rpc protocol metadata', async () => {
+    const workDir = createTempDir('sdkwork-control-plane-rpc-');
+    const outputDir = join(workDir, 'generated-rpc-sdk');
+    const protoRoot = join(workDir, 'proto');
+    const protoDir = join(protoRoot, 'sdkwork', 'communication', 'app', 'v3');
+    mkdirSync(protoDir, { recursive: true });
+    writeFileSync(join(protoDir, 'message_service.proto'), `syntax = "proto3";
+package sdkwork.communication.app.v3;
+service MessageService {
+  rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
+}
+message CreateMessageRequest { string text = 1; }
+message CreateMessageResponse { string message_id = 1; }
+`, 'utf-8');
+    const manifestPath = join(workDir, 'sdkwork-im-rpc.manifest.json');
+    writeFileSync(manifestPath, JSON.stringify({
+      schemaVersion: 1,
+      kind: 'sdkwork.rpc.manifest',
+      domain: 'communication',
+      sdkFamily: 'sdkwork-im-rpc-sdk',
+      services: [
+        {
+          package: 'sdkwork.communication.app.v3',
+          service: 'MessageService',
+          surface: 'app',
+          methods: [
+            {
+              method: 'CreateMessage',
+              operationId: 'messages.create',
+              auth: 'app-session',
+              idempotency: 'required',
+              streaming: 'unary',
+              owner: 'communication-open-api',
+              compatibility: 'v3',
+            },
+          ],
+        },
+      ],
+    }, null, 2), 'utf-8');
+
+    await runGenerateCommand({
+      protocol: 'rpc',
+      input: manifestPath,
+      protoRoot,
+      output: outputDir,
+      name: 'SdkworkImRpc',
+      type: 'backend',
+      language: 'typescript',
+      packageName: '@sdkwork/im-rpc-sdk',
+      license: 'MIT',
+      syncPublishedVersion: false,
+      emitControlPlane: true,
+    });
+
+    const snapshot = readGenerateControlPlaneSnapshot(outputDir, { protocol: 'rpc' });
+
+    expect(snapshot.artifacts.manifestPath).toBe(join(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH));
+    expect(snapshot.artifacts.changeSummaryPath).toBe(join(outputDir, SDKWORK_GENERATOR_CHANGES_PATH));
+    expect(snapshot.artifacts.executionReportPath).toBe(join(outputDir, SDKWORK_GENERATOR_REPORT_PATH));
+    expect(snapshot.manifest?.sdk.protocol).toBe('rpc');
+    expect(snapshot.changeSummary?.sdk.protocol).toBe('rpc');
+    expect(snapshot.executionReport?.sdk.protocol).toBe('rpc');
+    expect(snapshot.issues).toEqual([]);
+    expect(snapshot.evaluation).toMatchObject({
+      status: 'healthy',
+    });
+  });
+
+  it('marks control plane invalid when requested protocol does not match sdk metadata', async () => {
+    const workDir = createTempDir('sdkwork-control-plane-protocol-mismatch-');
+    const outputDir = join(workDir, 'generated-sdk');
+    const specPath = join(workDir, 'openapi.json');
+    writeFileSync(specPath, JSON.stringify(userSpec, null, 2), 'utf-8');
+
+    await runGenerateCommand({
+      input: specPath,
+      output: outputDir,
+      name: 'TestSDK',
+      type: 'backend',
+      language: 'typescript',
+      license: 'MIT',
+      syncPublishedVersion: false,
+    });
+
+    const snapshot = readGenerateControlPlaneSnapshot(outputDir, { protocol: 'rpc' });
+
+    expect(snapshot.manifest?.sdk.protocol).toBe('http');
+    expect(snapshot.issues).toEqual([
+      {
+        artifact: 'manifest',
+        code: 'sdk-protocol-mismatch',
+        path: join(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH),
+      },
+      {
+        artifact: 'changeSummary',
+        code: 'sdk-protocol-mismatch',
+        path: join(outputDir, SDKWORK_GENERATOR_CHANGES_PATH),
+      },
+      {
+        artifact: 'executionReport',
+        code: 'sdk-protocol-mismatch',
+        path: join(outputDir, SDKWORK_GENERATOR_REPORT_PATH),
+      },
+    ]);
+    expect(snapshot.evaluation).toMatchObject({
+      status: 'invalid',
+      recommendedAction: 'review',
     });
   });
 

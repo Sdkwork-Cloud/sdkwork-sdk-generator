@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   rmSync,
   writeFileSync,
@@ -108,6 +110,290 @@ describe('cli inspect', () => {
     expect(parsed.issues).toEqual([]);
   });
 
+  it('inspects an rpc sdk workspace by convention when no persisted control plane is committed', async () => {
+    const workDir = createTempDir('sdkwork-cli-inspect-rpc-convention-');
+    const familyRoot = join(workDir, 'sdkwork-im-rpc-sdk');
+    const outputDir = join(familyRoot, 'sdkwork-im-rpc-sdk-typescript');
+    const protoRoot = join(workDir, 'proto');
+    const protoDir = join(protoRoot, 'sdkwork', 'communication', 'app', 'v3');
+    const rpcDir = join(familyRoot, 'rpc');
+    const manifestPath = join(rpcDir, 'sdkwork-im-rpc.manifest.json');
+    mkdirSync(protoDir, { recursive: true });
+    mkdirSync(rpcDir, { recursive: true });
+    writeFileSync(join(protoDir, 'message_service.proto'), `syntax = "proto3";
+package sdkwork.communication.app.v3;
+service MessageService {
+  rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
+}
+message CreateMessageRequest { string text = 1; }
+message CreateMessageResponse { string message_id = 1; }
+`, 'utf-8');
+    writeFileSync(manifestPath, JSON.stringify({
+      schemaVersion: 1,
+      kind: 'sdkwork.rpc.manifest',
+      domain: 'communication',
+      sdkFamily: 'sdkwork-im-rpc-sdk',
+      services: [
+        {
+          package: 'sdkwork.communication.app.v3',
+          service: 'MessageService',
+          surface: 'app',
+          methods: [
+            {
+              method: 'CreateMessage',
+              operationId: 'messages.create',
+              auth: 'app-session',
+              idempotency: 'required',
+              streaming: 'unary',
+              owner: 'communication-open-api',
+              compatibility: 'v3',
+            },
+          ],
+        },
+      ],
+    }, null, 2), 'utf-8');
+
+    const { runGenerateCommand } = await import('./cli-runner.js');
+    await runGenerateCommand({
+      protocol: 'rpc',
+      input: manifestPath,
+      protoRoot,
+      output: outputDir,
+      name: 'SdkworkImRpc',
+      type: 'backend',
+      language: 'typescript',
+      packageName: '@sdkwork/im-rpc-sdk',
+      license: 'MIT',
+      syncPublishedVersion: false,
+    });
+
+    expect(existsSync(join(outputDir, '.sdkwork', 'sdkwork-generator-manifest.json'))).toBe(false);
+    expect(existsSync(join(outputDir, '.sdkwork', 'sdkwork-generator-changes.json'))).toBe(false);
+    expect(existsSync(join(outputDir, '.sdkwork', 'sdkwork-generator-report.json'))).toBe(false);
+
+    const snapshot = runInspectCommand({
+      output: outputDir,
+      protocol: 'rpc',
+    });
+    const output = formatInspectSuccess(snapshot, { json: true });
+    const parsed = JSON.parse(output) as {
+      evaluation: {
+        status: string;
+        recommendedAction: string;
+        summary: string;
+      };
+      evidenceMode: string;
+      convention: {
+        protocol: string;
+        sdkFamily: string;
+        language: string;
+        manifestPath: string;
+        packageManifestPath: string;
+      };
+      manifest: null;
+      changeSummary: null;
+      executionReport: null;
+      issues: Array<{ code: string }>;
+    };
+
+    expect(parsed.evaluation.status).toBe('healthy');
+    expect(parsed.evaluation.recommendedAction).toBe('verify');
+    expect(parsed.evaluation.summary).toContain('release, CI, audit, or migration workflows');
+    expect(parsed.evidenceMode).toBe('convention');
+    expect(parsed.convention).toMatchObject({
+      protocol: 'rpc',
+      sdkFamily: 'sdkwork-im-rpc-sdk',
+      language: 'typescript',
+    });
+    expect(parsed.convention.manifestPath).toContain('sdkwork-im-rpc.manifest.json');
+    expect(parsed.convention.packageManifestPath).toContain('package.json');
+    expect(parsed.manifest).toBeNull();
+    expect(parsed.changeSummary).toBeNull();
+    expect(parsed.executionReport).toBeNull();
+    expect(parsed.issues).toEqual([]);
+  });
+
+  it('formats rpc convention inspection as convention evidence in text mode', async () => {
+    const workDir = createTempDir('sdkwork-cli-inspect-rpc-convention-text-');
+    const familyRoot = join(workDir, 'sdkwork-im-rpc-sdk');
+    const outputDir = join(familyRoot, 'sdkwork-im-rpc-sdk-typescript');
+    const protoRoot = join(workDir, 'proto');
+    const protoDir = join(protoRoot, 'sdkwork', 'communication', 'app', 'v3');
+    const rpcDir = join(familyRoot, 'rpc');
+    const manifestPath = join(rpcDir, 'sdkwork-im-rpc.manifest.json');
+    mkdirSync(protoDir, { recursive: true });
+    mkdirSync(rpcDir, { recursive: true });
+    writeFileSync(join(protoDir, 'message_service.proto'), `syntax = "proto3";
+package sdkwork.communication.app.v3;
+service MessageService {
+  rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
+}
+message CreateMessageRequest { string text = 1; }
+message CreateMessageResponse { string message_id = 1; }
+`, 'utf-8');
+    writeFileSync(manifestPath, JSON.stringify({
+      schemaVersion: 1,
+      kind: 'sdkwork.rpc.manifest',
+      domain: 'communication',
+      sdkFamily: 'sdkwork-im-rpc-sdk',
+      services: [
+        {
+          package: 'sdkwork.communication.app.v3',
+          service: 'MessageService',
+          surface: 'app',
+          methods: [
+            {
+              method: 'CreateMessage',
+              operationId: 'messages.create',
+              auth: 'app-session',
+              idempotency: 'required',
+              streaming: 'unary',
+              owner: 'communication-open-api',
+              compatibility: 'v3',
+            },
+          ],
+        },
+      ],
+    }, null, 2), 'utf-8');
+
+    const { runGenerateCommand } = await import('./cli-runner.js');
+    await runGenerateCommand({
+      protocol: 'rpc',
+      input: manifestPath,
+      protoRoot,
+      output: outputDir,
+      name: 'SdkworkImRpc',
+      type: 'backend',
+      language: 'typescript',
+      packageName: '@sdkwork/im-rpc-sdk',
+      license: 'MIT',
+      syncPublishedVersion: false,
+    });
+
+    const snapshot = runInspectCommand({
+      output: outputDir,
+      protocol: 'rpc',
+    });
+    const output = formatInspectSuccess(snapshot, { json: false });
+
+    expect(output).toContain('SDK evidence status: healthy');
+    expect(output).toContain('SDK evidence mode: convention');
+    expect(output).toContain('release, CI, audit, or migration workflows');
+    expect(output).toContain('RPC convention evidence:');
+    expect(output).toContain('SDK family: sdkwork-im-rpc-sdk');
+    expect(output).toContain('Language: typescript');
+    expect(output).toContain('RPC manifest:');
+    expect(output).toContain('Package manifest:');
+    expect(output).not.toContain('Manifest: missing ->');
+    expect(output).not.toContain('Change summary: missing ->');
+    expect(output).not.toContain('Execution report: missing ->');
+  });
+
+  it('reads unified generated sdk control-plane artifacts when protocol is rpc and evidence is emitted', async () => {
+    const workDir = createTempDir('sdkwork-cli-inspect-rpc-');
+    const familyRoot = join(workDir, 'sdkwork-im-rpc-sdk');
+    const outputDir = join(familyRoot, 'sdkwork-im-rpc-sdk-typescript');
+    const protoRoot = join(workDir, 'proto');
+    const protoDir = join(protoRoot, 'sdkwork', 'communication', 'app', 'v3');
+    const rpcDir = join(familyRoot, 'rpc');
+    const manifestPath = join(rpcDir, 'sdkwork-im-rpc.manifest.json');
+    mkdirSync(protoDir, { recursive: true });
+    mkdirSync(rpcDir, { recursive: true });
+    writeFileSync(join(protoDir, 'message_service.proto'), `syntax = "proto3";
+package sdkwork.communication.app.v3;
+service MessageService {
+  rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
+}
+message CreateMessageRequest { string text = 1; }
+message CreateMessageResponse { string message_id = 1; }
+`, 'utf-8');
+    writeFileSync(manifestPath, JSON.stringify({
+      schemaVersion: 1,
+      kind: 'sdkwork.rpc.manifest',
+      domain: 'communication',
+      sdkFamily: 'sdkwork-im-rpc-sdk',
+      services: [
+        {
+          package: 'sdkwork.communication.app.v3',
+          service: 'MessageService',
+          surface: 'app',
+          methods: [
+            {
+              method: 'CreateMessage',
+              operationId: 'messages.create',
+              auth: 'app-session',
+              idempotency: 'required',
+              streaming: 'unary',
+              owner: 'communication-open-api',
+              compatibility: 'v3',
+            },
+          ],
+        },
+      ],
+    }, null, 2), 'utf-8');
+
+    const { runGenerateCommand } = await import('./cli-runner.js');
+    await runGenerateCommand({
+      protocol: 'rpc',
+      input: manifestPath,
+      protoRoot,
+      output: outputDir,
+      name: 'SdkworkImRpc',
+      type: 'backend',
+      language: 'typescript',
+      packageName: '@sdkwork/im-rpc-sdk',
+      license: 'MIT',
+      syncPublishedVersion: false,
+      emitControlPlane: true,
+    });
+
+    const snapshot = runInspectCommand({
+      output: outputDir,
+      protocol: 'rpc',
+    });
+    const output = formatInspectSuccess(snapshot, { json: true });
+    const parsed = JSON.parse(output) as {
+      evaluation: {
+        status: string;
+      };
+      evidenceMode: string;
+      artifacts: {
+        manifestPath: string;
+        changeSummaryPath: string;
+        executionReportPath: string;
+      };
+      manifest: {
+        sdk: {
+          protocol: string;
+        };
+      };
+      changeSummary: {
+        sdk: {
+          protocol: string;
+        };
+      };
+      executionReport: {
+        sdk: {
+          protocol: string;
+        };
+      };
+      issues: Array<{ code: string }>;
+    };
+
+    expect(parsed.evaluation.status).toBe('healthy');
+    expect(parsed.evidenceMode).toBe('control-plane');
+    expect(parsed.artifacts.manifestPath).toContain('sdkwork-generator-manifest.json');
+    expect(parsed.artifacts.changeSummaryPath).toContain('sdkwork-generator-changes.json');
+    expect(parsed.artifacts.executionReportPath).toContain('sdkwork-generator-report.json');
+    expect(parsed.artifacts.manifestPath).not.toContain('sdkwork-rpc-generator');
+    expect(parsed.artifacts.changeSummaryPath).not.toContain('sdkwork-rpc-generator');
+    expect(parsed.artifacts.executionReportPath).not.toContain('sdkwork-rpc-generator');
+    expect(parsed.manifest.sdk.protocol).toBe('rpc');
+    expect(parsed.changeSummary.sdk.protocol).toBe('rpc');
+    expect(parsed.executionReport.sdk.protocol).toBe('rpc');
+    expect(parsed.issues).toEqual([]);
+  });
+
   it('formats a control plane snapshot as human-readable text', () => {
     const output = formatInspectSuccess({
       schemaVersion: 1,
@@ -137,7 +423,7 @@ describe('cli inspect', () => {
       },
     }, { json: false });
 
-    expect(output).toContain('Control plane status: degraded');
+    expect(output).toContain('SDK evidence status: degraded');
     expect(output).toContain('Recommended action: review');
     expect(output).toContain('Persisted control-plane artifacts are incomplete.');
     expect(output).toContain('Issues:');
@@ -157,6 +443,12 @@ describe('cli inspect', () => {
     expect(parsed.generator).toBe('@sdkwork/sdk-generator');
     expect(parsed.status).toBe('error');
     expect(parsed.message).toBe('inspect boom');
+  });
+
+  it('formats inspect failures as generated sdk evidence failures in text mode', () => {
+    const output = formatInspectFailure(new Error('inspect boom'));
+
+    expect(output).toBe('Failed to inspect SDK evidence: Error: inspect boom');
   });
 
   it('fails inspection when status meets or exceeds the configured fail-on threshold', () => {

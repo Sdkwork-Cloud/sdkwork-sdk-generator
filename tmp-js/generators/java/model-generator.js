@@ -2,6 +2,7 @@ import { resolveDiscriminatedUnionModel } from '../../framework/discriminated-un
 import { resolveModelSchema } from '../../framework/schema.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
+import { formatJavaGeneratedContent } from './format.js';
 export class ModelGenerator {
     generate(ctx, config) {
         const files = [];
@@ -99,7 +100,7 @@ public abstract class ${className} {
         return variantBaseBySchemaName;
     }
     format(content) {
-        return content.trim() + '\n';
+        return formatJavaGeneratedContent(content);
     }
     collectImports(fieldType, imports) {
         if (fieldType.includes('List<')) {

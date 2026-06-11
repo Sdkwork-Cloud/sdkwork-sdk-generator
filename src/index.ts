@@ -7,6 +7,9 @@ export * from './execution-decision.js';
 export * from './execution-handoff.js';
 export * from './execution-report.js';
 export * from './publish-capabilities.js';
+export * from './rpc/manifest.js';
+export * from './rpc/proto-input.js';
+export * from './rpc/rpc-generation-runner.js';
 
 import { loadOpenApiSpec } from './framework/spec-loader.js';
 import { TypeScriptGenerator } from './generators/typescript/index.js';

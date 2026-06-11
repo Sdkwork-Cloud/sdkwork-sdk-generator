@@ -3,6 +3,7 @@ import type { GeneratorConfig } from '../../framework/types.js';
 import { JAVA_CONFIG } from './config.js';
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
+import { formatJavaGeneratedContent } from './format.js';
 
 export class BuildConfigGenerator {
   generate(config: GeneratorConfig): GeneratedFile[] {
@@ -89,6 +90,6 @@ ${surefirePlugin}
   }
 
   private format(content: string): string {
-    return content.trim() + '\n';
+    return formatJavaGeneratedContent(content);
   }
 }

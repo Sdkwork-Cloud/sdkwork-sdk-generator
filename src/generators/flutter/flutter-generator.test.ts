@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
@@ -510,6 +514,41 @@ describe('Flutter generator regressions', () => {
   final result = await client.user.getUserProfile();
   print(result);`);
     expect(readmeFile!.content).not.toContain("import 'package:sdkwork_common_flutter/sdkwork_common_flutter.dart';");
+  });
+
+  it('generates flutter workspace overrides when sdkwork-sdk-commons is a sibling workspace root', async () => {
+    const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sdkwork-flutter-workspace-'));
+    try {
+      const outputPath = path.join(
+        workspaceRoot,
+        'sdkwork-appbase',
+        'sdks',
+        'sdkwork-appbase-app-sdk',
+        'sdkwork-appbase-app-sdk-flutter',
+        'generated',
+        'server-openapi',
+      );
+      const commonPackagePath = path.join(
+        workspaceRoot,
+        'sdkwork-sdk-commons',
+        'sdkwork-sdk-common-flutter',
+      );
+      fs.mkdirSync(outputPath, { recursive: true });
+      fs.mkdirSync(commonPackagePath, { recursive: true });
+
+      const generator = new FlutterGenerator();
+      const result = await generator.generate({ ...flutterConfig, outputPath }, flutterSpec);
+      const overridesFile = result.files.find((file) => file.path === 'pubspec_overrides.yaml');
+
+      expect(result.errors).toEqual([]);
+      expect(overridesFile).toBeDefined();
+      expect(overridesFile!.content).toContain('sdkwork_common_flutter:');
+      expect(overridesFile!.content).toContain(
+        `path: ${path.relative(outputPath, commonPackagePath).replace(/\\/g, '/')}`,
+      );
+    } finally {
+      fs.rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it('does not import response helpers for void-only flutter api files', async () => {

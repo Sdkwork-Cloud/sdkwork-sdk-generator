@@ -1,12 +1,14 @@
 import { GENERATE_EXECUTION_REPORT_SCHEMA_VERSION } from './execution-report.js';
 import { SDKWORK_GENERATOR_NAME } from './framework/output-sync.js';
+import type { SdkProtocol } from './framework/types.js';
 import {
-  readGenerateControlPlaneSnapshot,
-  type GenerateControlPlaneSnapshot,
+  readGeneratedSdkEvidenceSnapshot,
+  type GeneratedSdkEvidenceSnapshot,
 } from './node/control-plane.js';
 
 export interface InspectCommandOptions {
   output: string;
+  protocol?: SdkProtocol;
 }
 
 export interface InspectOutputOptions extends InspectGateOptions {
@@ -15,7 +17,7 @@ export interface InspectOutputOptions extends InspectGateOptions {
 
 export interface InspectGateOptions {
   failOn?: 'empty' | 'degraded' | 'invalid';
-  requireAction?: GenerateControlPlaneSnapshot['evaluation']['recommendedAction'];
+  requireAction?: GeneratedSdkEvidenceSnapshot['evaluation']['recommendedAction'];
 }
 
 export interface InspectGateResult {
@@ -37,12 +39,14 @@ interface InspectFailureReport {
 const INSPECT_FAIL_ON_STATUSES = ['empty', 'degraded', 'invalid'] as const;
 const INSPECT_REQUIRED_ACTIONS = ['generate', 'review', 'apply', 'verify', 'complete', 'skip'] as const;
 
-export function runInspectCommand(options: InspectCommandOptions): GenerateControlPlaneSnapshot {
-  return readGenerateControlPlaneSnapshot(options.output);
+export function runInspectCommand(options: InspectCommandOptions): GeneratedSdkEvidenceSnapshot {
+  return readGeneratedSdkEvidenceSnapshot(options.output, {
+    protocol: options.protocol,
+  });
 }
 
 export function formatInspectSuccess(
-  snapshot: GenerateControlPlaneSnapshot,
+  snapshot: GeneratedSdkEvidenceSnapshot,
   options: InspectOutputOptions = {}
 ): string {
   const gate = resolveInspectGate(snapshot, options);
@@ -54,15 +58,25 @@ export function formatInspectSuccess(
   }
 
   const lines: string[] = [];
-  lines.push(`Control plane status: ${snapshot.evaluation.status}`);
+  const evidenceMode = snapshot.evidenceMode ?? 'control-plane';
+  lines.push(`SDK evidence status: ${snapshot.evaluation.status}`);
+  lines.push(`SDK evidence mode: ${evidenceMode}`);
   lines.push(`Recommended action: ${snapshot.evaluation.recommendedAction}`);
   lines.push(`Summary: ${snapshot.evaluation.summary}`);
   lines.push(`Gate: ${gate.passed ? 'pass' : 'fail'}`);
   lines.push('');
-  lines.push(`State dir: ${snapshot.artifacts.stateDir}`);
-  lines.push(`Manifest: ${snapshot.manifest ? 'present' : 'missing'} -> ${snapshot.artifacts.manifestPath}`);
-  lines.push(`Change summary: ${snapshot.changeSummary ? 'present' : 'missing'} -> ${snapshot.artifacts.changeSummaryPath}`);
-  lines.push(`Execution report: ${snapshot.executionReport ? 'present' : 'missing'} -> ${snapshot.artifacts.executionReportPath}`);
+  if (evidenceMode === 'convention' && snapshot.convention) {
+    lines.push('RPC convention evidence:');
+    lines.push(`  SDK family: ${snapshot.convention.sdkFamily}`);
+    lines.push(`  Language: ${snapshot.convention.language}`);
+    lines.push(`  RPC manifest: ${snapshot.convention.manifestPath}`);
+    lines.push(`  Package manifest: ${snapshot.convention.packageManifestPath}`);
+  } else {
+    lines.push(`State dir: ${snapshot.artifacts.stateDir}`);
+    lines.push(`Manifest: ${snapshot.manifest ? 'present' : 'missing'} -> ${snapshot.artifacts.manifestPath}`);
+    lines.push(`Change summary: ${snapshot.changeSummary ? 'present' : 'missing'} -> ${snapshot.artifacts.changeSummaryPath}`);
+    lines.push(`Execution report: ${snapshot.executionReport ? 'present' : 'missing'} -> ${snapshot.artifacts.executionReportPath}`);
+  }
 
   if (snapshot.evaluation.reasons.length > 0) {
     lines.push('');
@@ -99,11 +113,11 @@ export function formatInspectFailure(
     };
     return `${JSON.stringify(report, null, 2)}\n`;
   }
-  return `Failed to inspect SDK control plane: ${String(error)}`;
+  return `Failed to inspect SDK evidence: ${String(error)}`;
 }
 
 export function resolveInspectGate(
-  snapshot: GenerateControlPlaneSnapshot,
+  snapshot: GeneratedSdkEvidenceSnapshot,
   options: InspectGateOptions = {}
 ): InspectGateResult {
   assertValidInspectGateOptions(options);
@@ -142,7 +156,7 @@ function assertValidInspectGateOptions(options: InspectGateOptions): void {
 }
 
 function statusSeverity(
-  status: NonNullable<InspectGateOptions['failOn']> | GenerateControlPlaneSnapshot['evaluation']['status']
+  status: NonNullable<InspectGateOptions['failOn']> | GeneratedSdkEvidenceSnapshot['evaluation']['status']
 ): number {
   switch (status) {
     case 'empty':

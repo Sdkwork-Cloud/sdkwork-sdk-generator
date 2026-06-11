@@ -100,8 +100,9 @@ class HttpClient {
     String path, {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
+    bool skipAuth = false,
   }) {
-    return request('GET', path, params: params, headers: headers);
+    return request('GET', path, params: params, headers: headers, skipAuth: skipAuth);
   }
 
   Future<dynamic> post(
@@ -110,8 +111,9 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     String contentType = 'application/json',
+    bool skipAuth = false,
   }) {
-    return request('POST', path, body: body, params: params, headers: headers, contentType: contentType);
+    return request('POST', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth);
   }
 
   Future<dynamic> put(
@@ -120,8 +122,9 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     String contentType = 'application/json',
+    bool skipAuth = false,
   }) {
-    return request('PUT', path, body: body, params: params, headers: headers, contentType: contentType);
+    return request('PUT', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth);
   }
 
   Future<dynamic> patch(
@@ -130,16 +133,18 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     String contentType = 'application/json',
+    bool skipAuth = false,
   }) {
-    return request('PATCH', path, body: body, params: params, headers: headers, contentType: contentType);
+    return request('PATCH', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth);
   }
 
   Future<dynamic> delete(
     String path, {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
+    bool skipAuth = false,
   }) {
-    return request('DELETE', path, params: params, headers: headers);
+    return request('DELETE', path, params: params, headers: headers, skipAuth: skipAuth);
   }
 
   Future<dynamic> request(
@@ -149,9 +154,10 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     String contentType = 'application/json',
+    bool skipAuth = false,
   }) async {
     final uri = _buildUri(path, params);
-    final mergedHeaders = _buildHeaders(headers, contentType: body == null ? null : contentType);
+    final mergedHeaders = _buildHeaders(headers, contentType: body == null ? null : contentType, skipAuth: skipAuth);
 
     http.StreamedResponse response;
     if (body != null && contentType.toLowerCase() == 'multipart/form-data') {
@@ -176,13 +182,14 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     String contentType = 'application/json',
+    bool skipAuth = false,
   }) async* {
     final uri = _buildUri(path, params);
     final request = http.Request('POST', uri)
       ..headers.addAll(_buildHeaders({
         'Accept': 'text/event-stream',
         ...?headers,
-      }, contentType: body == null ? null : contentType));
+      }, contentType: body == null ? null : contentType, skipAuth: skipAuth));
     final payload = _encodeBody(body, contentType);
     if (payload != null) {
       request.body = payload;
@@ -244,9 +251,10 @@ class HttpClient {
   Map<String, String> _buildHeaders(
     Map<String, String>? headers, {
     String? contentType,
+    bool skipAuth = false,
   }) {
     final merged = <String, String>{
-      ..._headers,
+      if (!skipAuth) ..._headers,
       ...?headers,
     };
 
@@ -255,14 +263,16 @@ class HttpClient {
     }
     merged.putIfAbsent('Accept', () => 'application/json');
 
-    if (_apiKey != null && _apiKey!.isNotEmpty) {
-      merged[_apiKeyHeader] = _apiKeyAsBearer ? 'Bearer $_apiKey' : _apiKey!;
-    }
-    if (_authToken != null && _authToken!.isNotEmpty) {
-      merged['Authorization'] = 'Bearer $_authToken';
-    }
-    if (_accessToken != null && _accessToken!.isNotEmpty) {
-      merged['Access-Token'] = _accessToken!;
+    if (!skipAuth) {
+      if (_apiKey != null && _apiKey!.isNotEmpty) {
+        merged[_apiKeyHeader] = _apiKeyAsBearer ? 'Bearer $_apiKey' : _apiKey!;
+      }
+      if (_authToken != null && _authToken!.isNotEmpty) {
+        merged['Authorization'] = 'Bearer $_authToken';
+      }
+      if (_accessToken != null && _accessToken!.isNotEmpty) {
+        merged['Access-Token'] = _accessToken!;
+      }
     }
 
     return merged;

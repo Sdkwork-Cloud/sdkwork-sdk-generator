@@ -16,6 +16,7 @@ import {
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
 import { SWIFT_CONFIG, getSwiftType } from './config.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -133,6 +134,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
       : 'Any';
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
+    const skipAuth = operationSkipsSdkworkAuth(op);
     const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const responseType = responseSchema
       ? this.ensureKnownType(getSwiftType(responseSchema, SWIFT_CONFIG), knownModels)
@@ -349,6 +351,10 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         call = `try await client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, body: ${hasBody ? 'body' : 'nil'}, params: ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'nil'}, headers: ${hasHeaders ? 'requestHeaders' : 'nil'}${hasBody && requestBodyInfo?.mediaType ? `, contentType: "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : ''}${typedResponseArg})`;
     }
 
+    if (skipAuth) {
+      call = `try await client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, body: ${hasBody ? 'body' : 'nil'}, params: ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'nil'}, headers: ${hasHeaders ? 'requestHeaders' : 'nil'}${hasBody && requestBodyInfo?.mediaType ? `, contentType: "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : ''}, skipAuth: true${typedResponseArg})`;
+    }
+
     const docComment = op.summary ? `    /// ${op.summary}\n` : '';
     const queryBlock = hasExplicitQuerySerialization
       ? `        let query = buildQueryString([
@@ -372,6 +378,7 @@ ${this.renderHeaderParameterDictionary(cookieBindings, 12)}
         hasQuery && !hasExplicitQuerySerialization ? 'params: params' : 'params: nil',
         hasHeaders ? 'headers: requestHeaders' : 'headers: nil',
         hasBody && requestBodyInfo?.mediaType ? `contentType: "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'contentType: nil',
+        ...(skipAuth ? ['skipAuth: true'] : []),
         `responseType: ${responseType}.self`,
       ].join(', ');
 

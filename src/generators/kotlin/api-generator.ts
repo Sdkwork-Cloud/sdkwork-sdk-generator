@@ -17,6 +17,7 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -132,6 +133,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const contentTypeArg = requestBodyInfo?.mediaType
       ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
       : '';
+    const skipAuth = operationSkipsSdkworkAuth(op);
     const requestType = requestBodySchema
       ? this.ensureKnownType(getKotlinType(requestBodySchema, KOTLIN_CONFIG), knownModels)
       : 'Any';
@@ -350,6 +352,10 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
     }
 
+    if (skipAuth) {
+      call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, true)`;
+    }
+
     const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
     const requestHeaderBlock = hasHeaders
       ? `        val requestHeaders = buildRequestHeaders(
@@ -374,6 +380,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
         hasHeaders ? 'requestHeaders' : 'null',
         hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null',
         `object : TypeReference<${responseType}>() {}`,
+        ...(skipAuth ? ['true'] : []),
       ].join(', ');
 
       return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): Sequence<${responseType}> {

@@ -114,13 +114,15 @@ export function buildRegenerationContractSection(): string {
   return [
     '## Regeneration Contract',
     '',
-    '- Generator-owned files are tracked in `.sdkwork/sdkwork-generator-manifest.json`.',
-    '- Each run also writes `.sdkwork/sdkwork-generator-changes.json` so automation can inspect created, updated, deleted, unchanged, scaffolded, and backed-up files plus the classified impact areas, verification plan, and execution decision for the latest generation.',
-    '- Apply mode also writes `.sdkwork/sdkwork-generator-report.json` with the full execution report, including `schemaVersion`, `generator`, stable artifact paths, and the execution handoff commands that match CLI `--json` output.',
+    '- HTTP/OpenAPI generator-owned files are tracked in `.sdkwork/sdkwork-generator-manifest.json`.',
+    '- HTTP/OpenAPI generation also writes `.sdkwork/sdkwork-generator-changes.json` so automation can inspect created, updated, deleted, unchanged, scaffolded, and backed-up files plus the classified impact areas, verification plan, and execution decision for the latest generation.',
+    '- HTTP/OpenAPI apply mode also writes `.sdkwork/sdkwork-generator-report.json` with the full execution report, including `schemaVersion`, `generator`, stable artifact paths, and the execution handoff commands that match CLI `--json` output.',
     '- CLI JSON output also includes an execution handoff with concrete next commands, including reviewed apply commands for dry-run flows.',
-    '- Put hand-written wrappers, adapters, and orchestration in `custom/`.',
-    '- Files scaffolded under `custom/` are created once and preserved across regenerations.',
-    '- If a generated-owned file was modified locally, its previous content is copied to `.sdkwork/manual-backups/` before overwrite or removal.',
+    '- Put HTTP/OpenAPI hand-written wrappers, adapters, and orchestration in `custom/`.',
+    '- Files scaffolded under `custom/` are created once and preserved across HTTP/OpenAPI regenerations.',
+    '- If an HTTP/OpenAPI generated-owned file was modified locally, its previous content is copied to `.sdkwork/manual-backups/` before overwrite or removal.',
+    '- RPC SDK source workspaces use convention-first evidence by default: RPC SDK family naming, language workspace naming, `rpc/*.manifest.json`, proto source references, generated client source, and native package manifests.',
+    '- Use `sdkgen inspect --protocol rpc` to verify RPC convention evidence. Request persisted generator evidence only with `--emit-control-plane` for release, CI, audit, or migration workflows; evidence paths are derived by generator convention.',
   ].join('\n');
 }
 

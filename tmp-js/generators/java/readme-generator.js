@@ -4,6 +4,7 @@ import { buildLanguageReadmeTitle, buildMutuallyExclusiveAuthSection, buildPubli
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JAVA_CONFIG } from './config.js';
+import { formatJavaGeneratedContent } from './format.js';
 import { JavaUsagePlanner, renderJavaUsageSnippet } from './usage-planner.js';
 export class ReadmeGenerator {
     generate(ctx, config) {
@@ -165,7 +166,7 @@ ${outputLine}
         ].filter(Boolean).join('\n');
     }
     format(content) {
-        return content.trim() + '\n';
+        return formatJavaGeneratedContent(content);
     }
     indent(content, spaces) {
         const prefix = ' '.repeat(Math.max(0, spaces));

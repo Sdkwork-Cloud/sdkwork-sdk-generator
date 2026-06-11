@@ -115,7 +115,7 @@ ${config.license || 'MIT'}
   }
 
   private format(content: string): string {
-    return `${content.trim()}\n`;
+    return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
   }
 
   private generateExamples(ctx: SchemaContext, planner: RubyUsagePlanner): string {

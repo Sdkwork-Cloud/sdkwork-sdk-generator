@@ -89,6 +89,30 @@ export class HttpClient extends BaseHttpClient {
     return Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined;
   }
 
+  protected buildHeaders(config: any, skipAuth = false): Record<string, string> {
+    const headers = super.buildHeaders(config, skipAuth);
+    if (!skipAuth && !config?.skipAuth) {
+      return headers;
+    }
+
+    [
+      HttpClient.ACCESS_TOKEN_HEADER,
+      'Authorization',
+      'Access-Token',
+      ['X', 'API', 'Key'].join('-'),
+      'X-Tenant-Id',
+      'X-Organization-Id',
+      'X-Platform',
+      'X-User-Id',
+      'X-Sdkwork-Tenant-Id',
+      'X-Sdkwork-Organization-Id',
+      'X-Sdkwork-User-Id',
+    ].forEach((key) => {
+      delete headers[key];
+    });
+    return headers;
+  }
+
   private buildRequestBody(body: unknown, contentType?: string): unknown {
     if (body == null) {
       return body;
@@ -283,13 +307,14 @@ export class HttpClient extends BaseHttpClient {
     if (typeof execute !== 'function') {
       throw new Error('BaseHttpClient execute method is not available');
     }
-    const { body, headers, contentType, method = 'GET', ...rest } = options;
-    const requestHeaders = this.applySdkworkAuthHeaders(headers);
+    const { body, headers, contentType, method = 'GET', skipAuth, ...rest } = options;
+    const requestHeaders = skipAuth ? headers : this.applySdkworkAuthHeaders(headers);
     return withRetry(
       () => execute.call(this, { 
         url: path, 
         method,
         ...rest,
+        skipAuth,
         body: this.buildRequestBody(body, contentType),
         headers: this.buildRequestHeaders(requestHeaders, body == null ? undefined : contentType),
       }),
@@ -302,8 +327,8 @@ export class HttpClient extends BaseHttpClient {
     if (typeof stream !== 'function') {
       throw new Error('BaseHttpClient stream method is not available');
     }
-    const { body, headers, contentType, method = 'GET', ...rest } = options;
-    const authHeaders = this.applySdkworkAuthHeaders(headers);
+    const { body, headers, contentType, method = 'GET', skipAuth, ...rest } = options;
+    const authHeaders = skipAuth ? headers : this.applySdkworkAuthHeaders(headers);
     const requestHeaders = this.buildRequestHeaders(
       { Accept: 'text/event-stream', ...(authHeaders ?? {}) },
       body == null ? undefined : contentType,
@@ -312,6 +337,7 @@ export class HttpClient extends BaseHttpClient {
     for await (const data of stream.call(this, path, {
       method,
       ...rest,
+      skipAuth,
       body: this.buildRequestBody(body, contentType),
       headers: requestHeaders,
     })) {

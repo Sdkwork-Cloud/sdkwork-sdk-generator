@@ -14,6 +14,7 @@ import {
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
 
 interface NamedParameterBinding {
@@ -276,6 +277,7 @@ end`, requires)),
     const requestBodySchema = requestBodyInfo?.schema;
     const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
     const eventStreamInfo = extractEventStreamResponseInfo(op);
+    const skipAuth = operationSkipsSdkworkAuth(op);
     const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const pathParamNames = createUniqueIdentifierMap(
@@ -364,6 +366,9 @@ ${this.renderHeaderParameterHash(cookieBindings, 8)}
       )`
       : '';
     const optionLines: string[] = [];
+    if (skipAuth) {
+      optionLines.push('      options[:skip_auth] = true');
+    }
     if (hasQuery && !hasExplicitQuerySerialization) {
       optionLines.push('      options[:query] = params unless params.nil? || params.empty?');
     }
@@ -815,7 +820,7 @@ ${requestLine}
   }
 
   private format(content: string): string {
-    return `${content.trim()}\n`;
+    return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
   }
 }
 

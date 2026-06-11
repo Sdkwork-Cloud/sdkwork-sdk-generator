@@ -393,6 +393,18 @@ describe('Java generator regressions', () => {
     expect(apiFile!.content).not.toContain('public Void stop(String conversationId, String conversationId) throws Exception');
   });
 
+  it('does not emit trailing whitespace in generated Java source files', async () => {
+    const generator = getGenerator('java' as any);
+    expect(generator).toBeDefined();
+
+    const result = await generator!.generate(javaConfig, typedResponseSpec);
+
+    expect(result.errors).toEqual([]);
+    for (const file of result.files.filter((entry) => entry.path.endsWith('.java'))) {
+      expect(file.content, file.path).not.toMatch(/[ \t]+$/m);
+    }
+  });
+
   it('generates oneOf content parts as Jackson polymorphic models instead of one wide DTO', async () => {
     const generator = getGenerator('java' as any);
     expect(generator).toBeDefined();

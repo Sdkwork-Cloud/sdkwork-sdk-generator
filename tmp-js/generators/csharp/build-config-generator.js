@@ -14,16 +14,15 @@ export class BuildConfigGenerator {
         const namespace = getCSharpNamespace(config);
         const packageId = getCSharpPackageId(config);
         const commonPkg = resolveCSharpCommonPackage(config);
-        const localCommonProjectPath = this.findLocalCommonProjectPath(config.outputPath, ['sdk', 'sdkwork-sdk-commons', 'sdkwork-sdk-common-csharp', 'SDKwork.Common.csproj']);
-        const commonReferenceGroup = localCommonProjectPath
-            ? `  <ItemGroup Condition="Exists('${localCommonProjectPath}')">
+        const localCommonProjectPath = this.findLocalCommonProjectPath(config.outputPath, [
+            ['sdk', 'sdkwork-sdk-commons', 'sdkwork-sdk-common-csharp', 'SDKwork.Common.csproj'],
+            ['sdkwork-sdk-commons', 'sdkwork-sdk-common-csharp', 'SDKwork.Common.csproj'],
+        ]) || this.resolveConventionalCommonProjectPath(config.outputPath, ['sdkwork-sdk-commons', 'sdkwork-sdk-common-csharp', 'SDKwork.Common.csproj']);
+        const commonReferenceGroup = `  <ItemGroup Condition="Exists('${localCommonProjectPath}')">
     <ProjectReference Include="${localCommonProjectPath}" />
   </ItemGroup>
 
   <ItemGroup Condition="!Exists('${localCommonProjectPath}')">
-    <PackageReference Include="${commonPkg.packageId}" Version="${commonPkg.version}" />
-  </ItemGroup>`
-            : `  <ItemGroup>
     <PackageReference Include="${commonPkg.packageId}" Version="${commonPkg.version}" />
   </ItemGroup>`;
         return {
@@ -31,7 +30,7 @@ export class BuildConfigGenerator {
             content: this.format(`<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
@@ -68,7 +67,7 @@ ${commonReferenceGroup}
             content: this.format(`<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsTestProject>true</IsTestProject>
@@ -96,13 +95,15 @@ ${commonReferenceGroup}
     format(content) {
         return content.trim() + '\n';
     }
-    findLocalCommonProjectPath(outputPath, targetSegments) {
+    findLocalCommonProjectPath(outputPath, targetCandidates) {
         const outputDir = path.resolve(outputPath);
         let currentDir = outputDir;
         while (true) {
-            const candidate = path.join(currentDir, ...targetSegments);
-            if (fs.existsSync(candidate)) {
-                return path.relative(outputDir, candidate).replace(/\\/g, '/');
+            for (const targetSegments of targetCandidates) {
+                const candidate = path.join(currentDir, ...targetSegments);
+                if (fs.existsSync(candidate)) {
+                    return path.relative(outputDir, candidate).replace(/\\/g, '/');
+                }
             }
             const parentDir = path.dirname(currentDir);
             if (parentDir === currentDir) {
@@ -110,5 +111,10 @@ ${commonReferenceGroup}
             }
             currentDir = parentDir;
         }
+    }
+    resolveConventionalCommonProjectPath(outputPath, targetSegments) {
+        const outputDir = path.resolve(outputPath);
+        const candidate = path.resolve(...targetSegments);
+        return path.relative(outputDir, candidate).replace(/\\/g, '/');
     }
 }

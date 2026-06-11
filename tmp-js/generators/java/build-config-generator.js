@@ -1,5 +1,6 @@
 import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
+import { formatJavaGeneratedContent } from './format.js';
 export class BuildConfigGenerator {
     generate(config) {
         return [
@@ -82,6 +83,6 @@ ${surefirePlugin}
         };
     }
     format(content) {
-        return content.trim() + '\n';
+        return formatJavaGeneratedContent(content);
     }
 }

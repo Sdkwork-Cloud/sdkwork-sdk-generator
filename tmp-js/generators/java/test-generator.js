@@ -2,6 +2,7 @@ import { resolveJvmCommonPackage } from '../../framework/common-package.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { resolveSdkClientName } from '../../framework/sdk-identity.js';
 import { JavaUsagePlanner, renderJavaUsageSnippet, resolveJavaExpectedRequestPath, } from './usage-planner.js';
+import { formatJavaGeneratedContent } from './format.js';
 export class TestGenerator {
     generate(ctx, config) {
         const planner = new JavaUsagePlanner(ctx, undefined, config);
@@ -194,6 +195,6 @@ ${assertions}
         return `"${String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     }
     format(content) {
-        return content.trim() + '\n';
+        return formatJavaGeneratedContent(content);
     }
 }

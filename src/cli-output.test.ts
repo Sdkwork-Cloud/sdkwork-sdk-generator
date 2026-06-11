@@ -223,6 +223,52 @@ describe('cli output', () => {
     expect(parsed.artifacts.changeSummaryPath).toBe('.sdkwork/sdkwork-generator-changes.json');
   });
 
+  it('uses unified control-plane artifact names and rpc protocol metadata for rpc executions', () => {
+    const baseline = createExecution();
+    const output = formatGenerateSuccess(createExecution({
+      config: {
+        ...baseline.config,
+        protocol: 'rpc',
+        apiSpecPath: '/tmp/rpc/sdkwork-rpc.manifest.json',
+      },
+      syncSummary: {
+        ...baseline.syncSummary,
+        changeSummaryPath: '.sdkwork/sdkwork-generator-changes.json',
+      },
+    }), { json: false });
+
+    expect(output).toContain('Change summary path (apply mode): .sdkwork/sdkwork-generator-changes.json');
+    expect(output).toContain('Execution report path (apply mode): .sdkwork/sdkwork-generator-report.json');
+    expect(output).not.toContain('sdkwork-rpc-generator');
+
+    const jsonOutput = formatGenerateSuccess(createExecution({
+      config: {
+        ...baseline.config,
+        protocol: 'rpc',
+        apiSpecPath: '/tmp/rpc/sdkwork-rpc.manifest.json',
+      },
+      syncSummary: {
+        ...baseline.syncSummary,
+        changeSummaryPath: '.sdkwork/sdkwork-generator-changes.json',
+      },
+    }), { json: true });
+    const parsed = JSON.parse(jsonOutput) as {
+      artifacts: {
+        manifestPath: string;
+        changeSummaryPath: string;
+        executionReportPath: string;
+      };
+      sdk: {
+        protocol: string;
+      };
+    };
+
+    expect(parsed.artifacts.manifestPath).toBe('.sdkwork/sdkwork-generator-manifest.json');
+    expect(parsed.artifacts.changeSummaryPath).toBe('.sdkwork/sdkwork-generator-changes.json');
+    expect(parsed.artifacts.executionReportPath).toBe('.sdkwork/sdkwork-generator-report.json');
+    expect(parsed.sdk.protocol).toBe('rpc');
+  });
+
   it('formats failures as human-readable text by default', () => {
     const output = formatGenerateFailure(new Error('boom'), { json: false });
 

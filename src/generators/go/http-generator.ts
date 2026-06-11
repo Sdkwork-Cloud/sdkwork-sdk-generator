@@ -152,7 +152,7 @@ func (c *Client) SetHeader(key, value string) {
 }
 
 func (c *Client) Get(path string, query map[string]interface{}, requestHeaders map[string]string) (interface{}, error) {
-    return c.request("GET", path, query, nil, requestHeaders, "")
+    return c.request("GET", path, query, nil, requestHeaders, "", false)
 }
 
 func (c *Client) Post(
@@ -162,7 +162,7 @@ func (c *Client) Post(
     requestHeaders map[string]string,
     contentType string,
 ) (interface{}, error) {
-    return c.request("POST", path, query, body, requestHeaders, contentType)
+    return c.request("POST", path, query, body, requestHeaders, contentType, false)
 }
 
 func (c *Client) Put(
@@ -172,11 +172,11 @@ func (c *Client) Put(
     requestHeaders map[string]string,
     contentType string,
 ) (interface{}, error) {
-    return c.request("PUT", path, query, body, requestHeaders, contentType)
+    return c.request("PUT", path, query, body, requestHeaders, contentType, false)
 }
 
 func (c *Client) Delete(path string, query map[string]interface{}, requestHeaders map[string]string) (interface{}, error) {
-    return c.request("DELETE", path, query, nil, requestHeaders, "")
+    return c.request("DELETE", path, query, nil, requestHeaders, "", false)
 }
 
 func (c *Client) Patch(
@@ -186,7 +186,7 @@ func (c *Client) Patch(
     requestHeaders map[string]string,
     contentType string,
 ) (interface{}, error) {
-    return c.request("PATCH", path, query, body, requestHeaders, contentType)
+    return c.request("PATCH", path, query, body, requestHeaders, contentType, false)
 }
 
 func (c *Client) Request(
@@ -196,8 +196,9 @@ func (c *Client) Request(
     query map[string]interface{},
     requestHeaders map[string]string,
     contentType string,
+    skipAuth bool,
 ) (interface{}, error) {
-    return c.request(method, path, query, body, requestHeaders, contentType)
+    return c.request(method, path, query, body, requestHeaders, contentType, skipAuth)
 }
 
 type SSEStream[T any] struct {
@@ -250,6 +251,7 @@ func Stream[T any](
     query map[string]interface{},
     requestHeaders map[string]string,
     contentType string,
+    skipAuth bool,
 ) (*SSEStream[T], error) {
     requestURL, err := url.Parse(c.baseURL + path)
     if err != nil {
@@ -274,7 +276,7 @@ func Stream[T any](
         return nil, requestErr
     }
 
-    mergedHeaders := c.mergeHeaders(requestHeaders)
+    mergedHeaders := c.mergeHeaders(requestHeaders, skipAuth)
     for key, value := range mergedHeaders {
         req.Header.Set(key, value)
     }
@@ -300,10 +302,12 @@ func Stream[T any](
     }, nil
 }
 
-func (c *Client) mergeHeaders(requestHeaders map[string]string) common.HttpHeaders {
+func (c *Client) mergeHeaders(requestHeaders map[string]string, skipAuth bool) common.HttpHeaders {
     merged := common.HttpHeaders{}
-    for key, value := range c.headers {
-        merged[key] = value
+    if !skipAuth {
+        for key, value := range c.headers {
+            merged[key] = value
+        }
     }
     for key, value := range requestHeaders {
         merged[key] = value
@@ -447,6 +451,7 @@ func (c *Client) request(
     body interface{},
     requestHeaders map[string]string,
     contentType string,
+    skipAuth bool,
 ) (interface{}, error) {
     requestURL, err := url.Parse(c.baseURL + path)
     if err != nil {
@@ -471,7 +476,7 @@ func (c *Client) request(
         return nil, requestErr
     }
 
-    mergedHeaders := c.mergeHeaders(requestHeaders)
+    mergedHeaders := c.mergeHeaders(requestHeaders, skipAuth)
     for key, value := range mergedHeaders {
         req.Header.Set(key, value)
     }

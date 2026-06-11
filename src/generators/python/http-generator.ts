@@ -34,6 +34,7 @@ export class HttpClientGenerator {
     return {
       path: `${packageRoot}/http_client.py`,
       content: this.format(`import json as json_module
+import requests
 
 from ${commonRoot}.core.types import SdkConfig as CommonSdkConfig
 from ${commonRoot}.http import BaseHttpClient
@@ -95,14 +96,57 @@ class HttpClient(BaseHttpClient):
             self._session.headers[key] = value
         return self
 
-    def stream_json(self, path: str, method: str = 'POST', params=None, data=None, json=None, headers=None):
-        response = self._get_session().request(
+    def _request_headers(self, headers=None, skip_auth: bool = False):
+        if skip_auth:
+            request_headers = dict(headers or {})
+            return request_headers
+        return headers
+
+    def _request_session(self, skip_auth: bool = False):
+        if not skip_auth:
+            return self._get_session()
+        session = requests.Session()
+        session.headers.clear()
+        return session
+
+    def request(self, method: str, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
+        response = self._request_session(skip_auth).request(
             method=method,
             url=f"{self.base_url}{path}",
             params=params,
             data=data,
             json=json,
-            headers={'Accept': 'text/event-stream', **(headers or {})},
+            headers=self._request_headers(headers, skip_auth),
+            timeout=self.timeout / 1000,
+        )
+        response.raise_for_status()
+        if not response.content:
+            return None
+        return response.json()
+
+    def get(self, path: str, params=None, headers=None, skip_auth: bool = False):
+        return self.request('GET', path, params=params, headers=headers, skip_auth=skip_auth)
+
+    def post(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
+        return self.request('POST', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth)
+
+    def put(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
+        return self.request('PUT', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth)
+
+    def patch(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
+        return self.request('PATCH', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth)
+
+    def delete(self, path: str, params=None, headers=None, skip_auth: bool = False):
+        return self.request('DELETE', path, params=params, headers=headers, skip_auth=skip_auth)
+
+    def stream_json(self, path: str, method: str = 'POST', params=None, data=None, json=None, headers=None, skip_auth: bool = False):
+        response = self._request_session(skip_auth).request(
+            method=method,
+            url=f"{self.base_url}{path}",
+            params=params,
+            data=data,
+            json=json,
+            headers=self._request_headers({'Accept': 'text/event-stream', **(headers or {})}, skip_auth),
             timeout=self.timeout / 1000,
             stream=True,
         )

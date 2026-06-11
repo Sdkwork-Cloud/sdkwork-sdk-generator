@@ -5,7 +5,7 @@ import path from 'node:path';
 import { analyzeChangeImpact, type ChangeImpactSummary } from '../change-impact.js';
 import { buildExecutionDecisionFromContext, type ExecutionDecision } from '../execution-decision.js';
 import { buildVerificationPlanFromContext, type VerificationPlan } from '../verification-plan.js';
-import type { GeneratedFile, GeneratorConfig, Language, SdkType } from './types.js';
+import type { GeneratedFile, GeneratorConfig, Language, SdkProtocol, SdkType } from './types.js';
 
 export type {
   ChangeImpactArea,
@@ -48,12 +48,14 @@ const BASE_RETRY_DELAY_MS = 50;
 export interface OutputSyncOptions {
   cleanGenerated?: boolean;
   dryRun?: boolean;
+  emitControlPlane?: boolean;
   expectedChangeFingerprint?: string;
-  sdk: Pick<GeneratorConfig, 'name' | 'version' | 'language' | 'sdkType' | 'packageName'>;
+  sdk: Pick<GeneratorConfig, 'name' | 'version' | 'language' | 'sdkType' | 'packageName' | 'protocol'>;
 }
 
 export interface OutputSyncSummary {
   dryRun: boolean;
+  controlPlaneEnabled: boolean;
   writtenFiles: number;
   skippedScaffoldFiles: number;
   skippedUnchangedGeneratedFiles: number;
@@ -88,6 +90,7 @@ export interface PersistedGeneratorSdkMetadata {
   version: string;
   language: Language;
   sdkType: SdkType;
+  protocol: SdkProtocol;
   packageName: string | null;
 }
 
@@ -110,6 +113,17 @@ export interface PersistedGeneratorChangeSummary {
   verificationPlan: VerificationPlan;
   executionDecision: ExecutionDecision;
   preservedLegacyFiles: boolean;
+}
+
+export function resolveGeneratorArtifactPaths(protocol?: GeneratorConfig['protocol']): {
+  manifestPath: typeof SDKWORK_GENERATOR_MANIFEST_PATH;
+  changeSummaryPath: typeof SDKWORK_GENERATOR_CHANGES_PATH;
+} {
+  void protocol;
+  return {
+    manifestPath: SDKWORK_GENERATOR_MANIFEST_PATH,
+    changeSummaryPath: SDKWORK_GENERATOR_CHANGES_PATH,
+  };
 }
 
 function sleepSync(ms: number): void {
@@ -144,6 +158,8 @@ export function syncGeneratedOutput(
 ): OutputSyncSummary {
   const outDir = path.resolve(outputPath);
   const dryRun = options.dryRun === true;
+  const emitControlPlane = options.emitControlPlane !== false;
+  const artifactPaths = resolveGeneratorArtifactPaths(options.sdk.protocol);
   if (!dryRun && options.expectedChangeFingerprint) {
     const preview = syncGeneratedOutput(outputPath, files, {
       ...options,
@@ -153,7 +169,7 @@ export function syncGeneratedOutput(
     assertExpectedChangeFingerprint(preview.changeFingerprint, options.expectedChangeFingerprint);
   }
   const normalizedFiles = normalizeGeneratedFiles(files);
-  const previousManifest = readGeneratorManifest(outDir);
+  const previousManifest = readGeneratorManifest(outDir, artifactPaths.manifestPath);
   const previousGeneratedByPath = new Map(
     (previousManifest?.generatedFiles || []).map((entry) => [entry.path, entry])
   );
@@ -182,7 +198,7 @@ export function syncGeneratedOutput(
       if (nextGeneratedPaths.has(entry.path)) {
         continue;
       }
-      backupExistingFile(outDir, entry.path, entry.sha256, undefined, backedUpFiles, dryRun);
+      backupExistingFile(outDir, entry.path, entry.sha256, undefined, backedUpFiles, dryRun, emitControlPlane);
       const targetPath = resolveOutputPath(outDir, entry.path);
       if (fs.existsSync(targetPath)) {
         if (!dryRun) {
@@ -197,7 +213,7 @@ export function syncGeneratedOutput(
       if (deletedGeneratedFilesByPath.has(stalePath)) {
         continue;
       }
-      backupExistingFile(outDir, stalePath, undefined, undefined, backedUpFiles, dryRun);
+      backupExistingFile(outDir, stalePath, undefined, undefined, backedUpFiles, dryRun, emitControlPlane);
       const targetPath = resolveOutputPath(outDir, stalePath);
       if (fs.existsSync(targetPath)) {
         if (!dryRun) {
@@ -212,7 +228,7 @@ export function syncGeneratedOutput(
 
   for (const file of generatedFiles) {
     const previousEntry = previousGeneratedByPath.get(file.path);
-    backupExistingFile(outDir, file.path, previousEntry?.sha256, file.content, backedUpFiles, dryRun);
+    backupExistingFile(outDir, file.path, previousEntry?.sha256, file.content, backedUpFiles, dryRun, emitControlPlane);
     const writeResult = writeTextFile(outDir, file.path, file.content, dryRun);
     switch (writeResult.state) {
       case 'created':
@@ -283,28 +299,38 @@ export function syncGeneratedOutput(
   }
 
   if (!dryRun) {
-    writeGeneratorManifest(outDir, buildGeneratorManifest(generatedFiles, scaffoldFiles, sdkMetadata));
-    writeGeneratorChangeSummary(
-      outDir,
-      buildGeneratorChangeSummary(
-        changeFingerprint,
-        changes,
-        impact,
-        verificationPlan,
-        executionDecision,
-        preservedLegacyFiles,
-        sdkMetadata
-      )
-    );
+    if (emitControlPlane) {
+      writeGeneratorManifest(
+        outDir,
+        artifactPaths.manifestPath,
+        buildGeneratorManifest(generatedFiles, scaffoldFiles, sdkMetadata)
+      );
+      writeGeneratorChangeSummary(
+        outDir,
+        artifactPaths.changeSummaryPath,
+        buildGeneratorChangeSummary(
+          changeFingerprint,
+          changes,
+          impact,
+          verificationPlan,
+          executionDecision,
+          preservedLegacyFiles,
+          sdkMetadata
+        )
+      );
+    } else {
+      removeGeneratorControlPlaneArtifacts(outDir, artifactPaths);
+    }
   }
 
   return {
     dryRun,
+    controlPlaneEnabled: emitControlPlane,
     writtenFiles,
     skippedScaffoldFiles,
     skippedUnchangedGeneratedFiles,
     deletedGeneratedFiles,
-    changeSummaryPath: SDKWORK_GENERATOR_CHANGES_PATH,
+    changeSummaryPath: artifactPaths.changeSummaryPath,
     changeFingerprint,
     changes,
     impact,
@@ -387,8 +413,8 @@ function resolveCustomRoots(scaffoldFiles: GeneratedFile[]): string[] {
   return Array.from(roots).sort((left, right) => left.localeCompare(right));
 }
 
-function readGeneratorManifest(outputDir: string): PersistedGeneratorManifest | null {
-  const manifestPath = resolveOutputPath(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH);
+function readGeneratorManifest(outputDir: string, relativeManifestPath: string): PersistedGeneratorManifest | null {
+  const manifestPath = resolveOutputPath(outputDir, relativeManifestPath);
   if (!fs.existsSync(manifestPath)) {
     return null;
   }
@@ -400,17 +426,42 @@ function readGeneratorManifest(outputDir: string): PersistedGeneratorManifest | 
   }
 }
 
-function writeGeneratorManifest(outputDir: string, manifest: PersistedGeneratorManifest): void {
+function writeGeneratorManifest(
+  outputDir: string,
+  relativeManifestPath: string,
+  manifest: PersistedGeneratorManifest
+): void {
   const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
-  writeTextFile(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH, manifestContent, false);
+  writeTextFile(outputDir, relativeManifestPath, manifestContent, false);
 }
 
 function writeGeneratorChangeSummary(
   outputDir: string,
+  relativeChangeSummaryPath: string,
   summary: PersistedGeneratorChangeSummary
 ): void {
   const changeSummaryContent = `${JSON.stringify(summary, null, 2)}\n`;
-  writeTextFile(outputDir, SDKWORK_GENERATOR_CHANGES_PATH, changeSummaryContent, false);
+  writeTextFile(outputDir, relativeChangeSummaryPath, changeSummaryContent, false);
+}
+
+function removeGeneratorControlPlaneArtifacts(
+  outputDir: string,
+  artifactPaths: ReturnType<typeof resolveGeneratorArtifactPaths>
+): void {
+  for (const relativePath of [artifactPaths.manifestPath, artifactPaths.changeSummaryPath]) {
+    const targetPath = resolveOutputPath(outputDir, relativePath);
+    if (fs.existsSync(targetPath)) {
+      withFsRetry(() => fs.rmSync(targetPath, { force: true }));
+    }
+  }
+  const manualBackupPath = resolveOutputPath(outputDir, SDKWORK_MANUAL_BACKUP_DIR);
+  if (fs.existsSync(manualBackupPath)) {
+    withFsRetry(() => fs.rmSync(manualBackupPath, { recursive: true, force: true }));
+  }
+  const stateDirPath = resolveOutputPath(outputDir, SDKWORK_STATE_DIR);
+  if (fs.existsSync(stateDirPath) && fs.readdirSync(stateDirPath).length === 0) {
+    withFsRetry(() => fs.rmdirSync(stateDirPath));
+  }
 }
 
 function writeTextFile(
@@ -455,8 +506,13 @@ function backupExistingFile(
   previousGeneratedHash?: string,
   nextContent?: string,
   backedUpFiles?: Set<string>,
-  dryRun = false
+  dryRun = false,
+  backupEnabled = true
 ): void {
+  if (!backupEnabled) {
+    return;
+  }
+
   const targetPath = resolveOutputPath(outputDir, relativePath);
   if (!fs.existsSync(targetPath)) {
     return;
@@ -667,6 +723,7 @@ function buildSdkMetadata(sdk: OutputSyncOptions['sdk']): PersistedGeneratorSdkM
     version: sdk.version,
     language: sdk.language,
     sdkType: sdk.sdkType,
+    protocol: sdk.protocol || 'http',
     packageName: sdk.packageName || null,
   };
 }

@@ -83,6 +83,19 @@ function createApplyReviewedPlanStep(execution) {
         '--expected-change-fingerprint',
         execution.syncSummary.changeFingerprint,
     ];
+    if (execution.config.protocol === 'rpc') {
+        args.splice(1, 0, '--protocol', 'rpc');
+        pushOptionalArg(args, '--proto-root', execution.config.rpc?.protoRoot);
+        for (const protoFile of execution.config.rpc?.protoFiles || []) {
+            args.push('--proto-file', protoFile);
+        }
+        for (const importRoot of execution.config.rpc?.importRoots || []) {
+            if (importRoot === execution.config.rpc?.protoRoot) {
+                continue;
+            }
+            args.push('--import-root', importRoot);
+        }
+    }
     pushOptionalArg(args, '--package-name', execution.config.packageName);
     pushOptionalArg(args, '--namespace', execution.config.namespace);
     pushOptionalArg(args, '--common-package', execution.config.commonPackage);

@@ -105,10 +105,12 @@ final class HttpClient
 
     public function request(string $method, string $path, array $options = []): mixed
     {
+        $clientHeaders = empty($options['skipAuth'])
+            ? array_merge($this->buildAuthHeaders(), $this->headers)
+            : [];
         $requestOptions = [];
         $requestOptions['headers'] = array_merge(
-            $this->buildAuthHeaders(),
-            $this->headers,
+            $clientHeaders,
             $options['headers'] ?? []
         );
 
@@ -146,12 +148,14 @@ final class HttpClient
 
     public function stream(string $method, string $path, array $options = []): \\Generator
     {
+        $clientHeaders = empty($options['skipAuth'])
+            ? array_merge($this->buildAuthHeaders(), $this->headers)
+            : [];
         $requestOptions = [
             'stream' => true,
         ];
         $requestOptions['headers'] = array_merge(
-            $this->buildAuthHeaders(),
-            $this->headers,
+            $clientHeaders,
             ['Accept' => 'text/event-stream'],
             $options['headers'] ?? []
         );

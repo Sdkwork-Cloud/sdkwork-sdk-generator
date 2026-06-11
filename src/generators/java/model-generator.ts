@@ -4,6 +4,7 @@ import { resolveDiscriminatedUnionModel } from '../../framework/discriminated-un
 import { resolveModelSchema } from '../../framework/schema.js';
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
+import { formatJavaGeneratedContent } from './format.js';
 
 export class ModelGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -13,7 +14,7 @@ export class ModelGenerator {
       Object.keys(ctx.schemas).map((schemaName) => JAVA_CONFIG.namingConventions.modelName(schemaName))
     );
     const variantBaseBySchemaName = this.resolveVariantBaseModels(ctx.schemas, knownModels);
-    
+
     for (const [name, schema] of Object.entries(ctx.schemas)) {
       files.push(this.generateClass(name, schema, ctx.schemas, identity, knownModels, variantBaseBySchemaName));
     }
@@ -139,7 +140,7 @@ public abstract class ${className} {
   }
 
   private format(content: string): string {
-    return content.trim() + '\n';
+    return formatJavaGeneratedContent(content);
   }
 
   private collectImports(fieldType: string, imports: Set<string>): void {

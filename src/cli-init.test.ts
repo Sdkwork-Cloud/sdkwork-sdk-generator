@@ -88,6 +88,9 @@ describe('runInitCommand', () => {
     expect(existsSync(join(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH))).toBe(true);
     expect(existsSync(join(outputDir, SDKWORK_GENERATOR_CHANGES_PATH))).toBe(true);
     expect(existsSync(join(outputDir, SDKWORK_GENERATOR_REPORT_PATH))).toBe(true);
+    const readme = readFileSync(join(outputDir, 'README.md'), 'utf-8');
+    expect(readme).toContain('machine-readable generated SDK evidence snapshot');
+    expect(readme).not.toContain('control-plane snapshot');
 
     const metadata = JSON.parse(readFileSync(join(outputDir, 'sdkwork-sdk.json'), 'utf-8')) as {
       schemaVersion?: number;

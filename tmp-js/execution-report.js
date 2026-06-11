@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { analyzeChangeImpact } from './change-impact.js';
 import { buildExecutionDecisionFromContext } from './execution-decision.js';
 import { buildExecutionHandoff } from './execution-handoff.js';
-import { SDKWORK_GENERATOR_CHANGES_PATH, SDKWORK_GENERATOR_MANIFEST_PATH, SDKWORK_GENERATOR_NAME, SDKWORK_MANUAL_BACKUP_DIR, SDKWORK_STATE_DIR, } from './framework/output-sync.js';
+import { SDKWORK_GENERATOR_NAME, SDKWORK_MANUAL_BACKUP_DIR, SDKWORK_STATE_DIR, resolveGeneratorArtifactPaths, } from './framework/output-sync.js';
 import { buildVerificationPlan } from './verification-plan.js';
 export const SDKWORK_GENERATOR_REPORT_PATH = '.sdkwork/sdkwork-generator-report.json';
 export const GENERATE_EXECUTION_REPORT_SCHEMA_VERSION = 1;
@@ -15,7 +15,7 @@ export function buildGenerateExecutionReport(execution) {
     return {
         schemaVersion: GENERATE_EXECUTION_REPORT_SCHEMA_VERSION,
         generator: SDKWORK_GENERATOR_NAME,
-        artifacts: buildGenerateExecutionArtifacts(),
+        artifacts: buildGenerateExecutionArtifacts(execution.config.protocol),
         status: 'ok',
         mode: execution.syncSummary.dryRun ? 'dry-run' : 'apply',
         hasChanges: hasAnyChanges(execution),
@@ -30,6 +30,7 @@ export function buildGenerateExecutionReport(execution) {
             version: execution.config.version,
             language: execution.config.language,
             sdkType: execution.config.sdkType,
+            protocol: execution.config.protocol || 'http',
             outputPath: execution.config.outputPath,
             packageName: execution.config.packageName,
         },
@@ -52,11 +53,22 @@ export function persistGenerateExecutionReport(execution) {
     if (execution.syncSummary.dryRun) {
         return null;
     }
+    if (execution.syncSummary.controlPlaneEnabled === false) {
+        removeGenerateExecutionReport(execution);
+        return null;
+    }
     const report = buildGenerateExecutionReport(execution);
-    const artifacts = resolveGenerateExecutionArtifacts(execution.config.outputPath);
+    const artifacts = resolveGenerateExecutionArtifacts(execution.config.outputPath, execution.config.protocol);
     mkdirSync(dirname(artifacts.executionReportPath), { recursive: true });
     writeFileSync(artifacts.executionReportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf-8');
     return report;
+}
+function removeGenerateExecutionReport(execution) {
+    const artifacts = resolveGenerateExecutionArtifacts(execution.config.outputPath, execution.config.protocol);
+    if (existsSync(artifacts.executionReportPath)) {
+        rmSync(artifacts.executionReportPath, { force: true });
+    }
+    removeEmptyDirectory(artifacts.stateDir);
 }
 export function buildGenerateFailureReport(error, options = {}) {
     const message = error instanceof Error ? error.message : String(error);
@@ -68,18 +80,19 @@ export function buildGenerateFailureReport(error, options = {}) {
         ...(options.outputPath ? { artifacts: buildGenerateExecutionArtifacts() } : {}),
     };
 }
-export function buildGenerateExecutionArtifacts() {
+export function buildGenerateExecutionArtifacts(protocol) {
+    const artifactPaths = resolveGeneratorArtifactPaths(protocol);
     return {
         stateDir: SDKWORK_STATE_DIR,
-        manifestPath: SDKWORK_GENERATOR_MANIFEST_PATH,
-        changeSummaryPath: SDKWORK_GENERATOR_CHANGES_PATH,
+        manifestPath: artifactPaths.manifestPath,
+        changeSummaryPath: artifactPaths.changeSummaryPath,
         executionReportPath: SDKWORK_GENERATOR_REPORT_PATH,
         manualBackupDir: SDKWORK_MANUAL_BACKUP_DIR,
     };
 }
-export function resolveGenerateExecutionArtifacts(outputPath) {
+export function resolveGenerateExecutionArtifacts(outputPath, protocol) {
     const outputRoot = resolve(outputPath);
-    const artifacts = buildGenerateExecutionArtifacts();
+    const artifacts = buildGenerateExecutionArtifacts(protocol);
     return {
         stateDir: resolve(outputRoot, artifacts.stateDir),
         manifestPath: resolve(outputRoot, artifacts.manifestPath),
@@ -88,8 +101,8 @@ export function resolveGenerateExecutionArtifacts(outputPath) {
         manualBackupDir: resolve(outputRoot, artifacts.manualBackupDir),
     };
 }
-export function readGenerateExecutionReport(outputPath) {
-    const artifacts = resolveGenerateExecutionArtifacts(outputPath);
+export function readGenerateExecutionReport(outputPath, protocol) {
+    const artifacts = resolveGenerateExecutionArtifacts(outputPath, protocol);
     if (!existsSync(artifacts.executionReportPath)) {
         return null;
     }
@@ -136,4 +149,13 @@ function hasAnyChanges(execution) {
 }
 function isRecord(value) {
     return typeof value === 'object' && value !== null;
+}
+function removeEmptyDirectory(directoryPath) {
+    if (!existsSync(directoryPath)) {
+        return;
+    }
+    if (readdirSync(directoryPath).length > 0) {
+        return;
+    }
+    rmdirSync(directoryPath);
 }

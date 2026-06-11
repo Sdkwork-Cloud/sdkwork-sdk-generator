@@ -17,6 +17,7 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 
 const GO_RESERVED_WORDS = new Set([
   'break',
@@ -294,7 +295,8 @@ ${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsReques
       ? `AppendQueryString(${prefixedPath}, rawQueryString)`
       : hasExplicitQuerySerialization
         ? `AppendQueryString(${prefixedPath}, query)`
-      : prefixedPath;
+        : prefixedPath;
+    const skipAuthArg = operationSkipsSdkworkAuth(op) ? 'true' : 'false';
 
     let call = '';
     switch (method) {
@@ -416,7 +418,11 @@ ${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsReques
         }
         break;
       default:
-        call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'})`;
+        call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg})`;
+    }
+
+    if (operationSkipsSdkworkAuth(op)) {
+      call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, true)`;
     }
 
     const docComment = op.summary ? `// ${op.summary}\n` : '';
@@ -435,7 +441,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
       : '';
 
     if (isEventStreamResponse) {
-      const streamCall = `sdkhttp.Stream[${responseType}](a.client, "${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'})`;
+      const streamCall = `sdkhttp.Stream[${responseType}](a.client, "${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg})`;
       return {
         content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) (*sdkhttp.SSEStream[${responseType}], error) {
 ${queryBlock}${requestHeaderBlock}    return ${streamCall}

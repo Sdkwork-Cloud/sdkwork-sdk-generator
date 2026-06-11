@@ -34,6 +34,13 @@ const GENERATED_ROOT_FILE_EXTENSIONS = new Set([
 const TRANSIENT_FS_ERROR_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
 const MAX_FS_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 50;
+export function resolveGeneratorArtifactPaths(protocol) {
+    void protocol;
+    return {
+        manifestPath: SDKWORK_GENERATOR_MANIFEST_PATH,
+        changeSummaryPath: SDKWORK_GENERATOR_CHANGES_PATH,
+    };
+}
 function sleepSync(ms) {
     const sab = new SharedArrayBuffer(4);
     const int32 = new Int32Array(sab);
@@ -61,6 +68,8 @@ function withFsRetry(action, onRetry) {
 export function syncGeneratedOutput(outputPath, files, options) {
     const outDir = path.resolve(outputPath);
     const dryRun = options.dryRun === true;
+    const emitControlPlane = options.emitControlPlane !== false;
+    const artifactPaths = resolveGeneratorArtifactPaths(options.sdk.protocol);
     if (!dryRun && options.expectedChangeFingerprint) {
         const preview = syncGeneratedOutput(outputPath, files, {
             ...options,
@@ -70,7 +79,7 @@ export function syncGeneratedOutput(outputPath, files, options) {
         assertExpectedChangeFingerprint(preview.changeFingerprint, options.expectedChangeFingerprint);
     }
     const normalizedFiles = normalizeGeneratedFiles(files);
-    const previousManifest = readGeneratorManifest(outDir);
+    const previousManifest = readGeneratorManifest(outDir, artifactPaths.manifestPath);
     const previousGeneratedByPath = new Map((previousManifest?.generatedFiles || []).map((entry) => [entry.path, entry]));
     const generatedFiles = normalizedFiles.filter((file) => file.ownership !== 'scaffold');
     const scaffoldFiles = normalizedFiles.filter((file) => file.ownership === 'scaffold');
@@ -95,7 +104,7 @@ export function syncGeneratedOutput(outputPath, files, options) {
             if (nextGeneratedPaths.has(entry.path)) {
                 continue;
             }
-            backupExistingFile(outDir, entry.path, entry.sha256, undefined, backedUpFiles, dryRun);
+            backupExistingFile(outDir, entry.path, entry.sha256, undefined, backedUpFiles, dryRun, emitControlPlane);
             const targetPath = resolveOutputPath(outDir, entry.path);
             if (fs.existsSync(targetPath)) {
                 if (!dryRun) {
@@ -110,7 +119,7 @@ export function syncGeneratedOutput(outputPath, files, options) {
             if (deletedGeneratedFilesByPath.has(stalePath)) {
                 continue;
             }
-            backupExistingFile(outDir, stalePath, undefined, undefined, backedUpFiles, dryRun);
+            backupExistingFile(outDir, stalePath, undefined, undefined, backedUpFiles, dryRun, emitControlPlane);
             const targetPath = resolveOutputPath(outDir, stalePath);
             if (fs.existsSync(targetPath)) {
                 if (!dryRun) {
@@ -124,7 +133,7 @@ export function syncGeneratedOutput(outputPath, files, options) {
     }
     for (const file of generatedFiles) {
         const previousEntry = previousGeneratedByPath.get(file.path);
-        backupExistingFile(outDir, file.path, previousEntry?.sha256, file.content, backedUpFiles, dryRun);
+        backupExistingFile(outDir, file.path, previousEntry?.sha256, file.content, backedUpFiles, dryRun, emitControlPlane);
         const writeResult = writeTextFile(outDir, file.path, file.content, dryRun);
         switch (writeResult.state) {
             case 'created':
@@ -191,16 +200,22 @@ export function syncGeneratedOutput(outputPath, files, options) {
         assertExpectedChangeFingerprint(changeFingerprint, options.expectedChangeFingerprint);
     }
     if (!dryRun) {
-        writeGeneratorManifest(outDir, buildGeneratorManifest(generatedFiles, scaffoldFiles, sdkMetadata));
-        writeGeneratorChangeSummary(outDir, buildGeneratorChangeSummary(changeFingerprint, changes, impact, verificationPlan, executionDecision, preservedLegacyFiles, sdkMetadata));
+        if (emitControlPlane) {
+            writeGeneratorManifest(outDir, artifactPaths.manifestPath, buildGeneratorManifest(generatedFiles, scaffoldFiles, sdkMetadata));
+            writeGeneratorChangeSummary(outDir, artifactPaths.changeSummaryPath, buildGeneratorChangeSummary(changeFingerprint, changes, impact, verificationPlan, executionDecision, preservedLegacyFiles, sdkMetadata));
+        }
+        else {
+            removeGeneratorControlPlaneArtifacts(outDir, artifactPaths);
+        }
     }
     return {
         dryRun,
+        controlPlaneEnabled: emitControlPlane,
         writtenFiles,
         skippedScaffoldFiles,
         skippedUnchangedGeneratedFiles,
         deletedGeneratedFiles,
-        changeSummaryPath: SDKWORK_GENERATOR_CHANGES_PATH,
+        changeSummaryPath: artifactPaths.changeSummaryPath,
         changeFingerprint,
         changes,
         impact,
@@ -266,8 +281,8 @@ function resolveCustomRoots(scaffoldFiles) {
     }
     return Array.from(roots).sort((left, right) => left.localeCompare(right));
 }
-function readGeneratorManifest(outputDir) {
-    const manifestPath = resolveOutputPath(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH);
+function readGeneratorManifest(outputDir, relativeManifestPath) {
+    const manifestPath = resolveOutputPath(outputDir, relativeManifestPath);
     if (!fs.existsSync(manifestPath)) {
         return null;
     }
@@ -278,13 +293,29 @@ function readGeneratorManifest(outputDir) {
         return null;
     }
 }
-function writeGeneratorManifest(outputDir, manifest) {
+function writeGeneratorManifest(outputDir, relativeManifestPath, manifest) {
     const manifestContent = `${JSON.stringify(manifest, null, 2)}\n`;
-    writeTextFile(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH, manifestContent, false);
+    writeTextFile(outputDir, relativeManifestPath, manifestContent, false);
 }
-function writeGeneratorChangeSummary(outputDir, summary) {
+function writeGeneratorChangeSummary(outputDir, relativeChangeSummaryPath, summary) {
     const changeSummaryContent = `${JSON.stringify(summary, null, 2)}\n`;
-    writeTextFile(outputDir, SDKWORK_GENERATOR_CHANGES_PATH, changeSummaryContent, false);
+    writeTextFile(outputDir, relativeChangeSummaryPath, changeSummaryContent, false);
+}
+function removeGeneratorControlPlaneArtifacts(outputDir, artifactPaths) {
+    for (const relativePath of [artifactPaths.manifestPath, artifactPaths.changeSummaryPath]) {
+        const targetPath = resolveOutputPath(outputDir, relativePath);
+        if (fs.existsSync(targetPath)) {
+            withFsRetry(() => fs.rmSync(targetPath, { force: true }));
+        }
+    }
+    const manualBackupPath = resolveOutputPath(outputDir, SDKWORK_MANUAL_BACKUP_DIR);
+    if (fs.existsSync(manualBackupPath)) {
+        withFsRetry(() => fs.rmSync(manualBackupPath, { recursive: true, force: true }));
+    }
+    const stateDirPath = resolveOutputPath(outputDir, SDKWORK_STATE_DIR);
+    if (fs.existsSync(stateDirPath) && fs.readdirSync(stateDirPath).length === 0) {
+        withFsRetry(() => fs.rmdirSync(stateDirPath));
+    }
 }
 function writeTextFile(outputDir, relativePath, content, dryRun) {
     const targetPath = resolveOutputPath(outputDir, relativePath);
@@ -315,7 +346,10 @@ function writeTextFile(outputDir, relativePath, content, dryRun) {
     });
     return { wrote: true, state: exists ? 'updated' : 'created' };
 }
-function backupExistingFile(outputDir, relativePath, previousGeneratedHash, nextContent, backedUpFiles, dryRun = false) {
+function backupExistingFile(outputDir, relativePath, previousGeneratedHash, nextContent, backedUpFiles, dryRun = false, backupEnabled = true) {
+    if (!backupEnabled) {
+        return;
+    }
     const targetPath = resolveOutputPath(outputDir, relativePath);
     if (!fs.existsSync(targetPath)) {
         return;
@@ -500,6 +534,7 @@ function buildSdkMetadata(sdk) {
         version: sdk.version,
         language: sdk.language,
         sdkType: sdk.sdkType,
+        protocol: sdk.protocol || 'http',
         packageName: sdk.packageName || null,
     };
 }

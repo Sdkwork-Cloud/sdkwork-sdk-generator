@@ -57,7 +57,10 @@ function resolvePackageRoot(config: GeneratorConfig, groupId: string, artifactId
   }
 
   const groupSegments = splitNamespaceSegments(groupId);
-  const artifactSegments = trimTrailingSdkSegment(splitIdentifierParts(artifactId).map(normalizePackageSegment));
+  const artifactSegments = trimGeneratedFallbackSegment(
+    trimTrailingSdkSegment(splitIdentifierParts(artifactId).map(normalizePackageSegment)),
+    config,
+  );
   const dedupedArtifactSegments = artifactSegments.slice(calculateOverlap(groupSegments, artifactSegments));
   const combined = [...groupSegments, ...dedupedArtifactSegments].filter(Boolean);
 
@@ -97,6 +100,14 @@ function splitIdentifierParts(value: string): string[] {
 function trimTrailingSdkSegment(segments: string[]): string[] {
   if (segments.length > 1 && segments[segments.length - 1] === 'sdk') {
     return segments.slice(0, -1);
+  }
+  return segments;
+}
+
+function trimGeneratedFallbackSegment(segments: string[], config: GeneratorConfig): string[] {
+  const sdkType = normalizePackageSegment(config.sdkType);
+  if (segments.length === 2 && segments[0] === 'generated' && segments[1] === sdkType) {
+    return [sdkType];
   }
   return segments;
 }

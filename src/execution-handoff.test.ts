@@ -100,6 +100,41 @@ describe('execution handoff', () => {
     expect(handoff.steps[0].displayCommand).toContain('--namespace Acme.App.Client');
   });
 
+  it('builds an rpc apply command with protocol and proto inputs', () => {
+    const baseline = createExecution();
+    const handoff = buildExecutionHandoff(createExecution({
+      config: {
+        ...baseline.config,
+        protocol: 'rpc',
+        apiSpecPath: '/tmp/rpc/sdkwork-rpc.manifest.json',
+        rpc: {
+          manifestPath: '/tmp/rpc/sdkwork-rpc.manifest.json',
+          protoRoot: '/tmp/rpc/proto',
+          protoFiles: [
+            '/tmp/rpc/proto/sdkwork/communication/app/v3/message_service.proto',
+          ],
+          importRoots: [
+            '/tmp/rpc/proto',
+            '/tmp/rpc/common-proto',
+          ],
+          manifest: {
+            schemaVersion: 1,
+            kind: 'sdkwork.rpc.manifest',
+            domain: 'communication',
+            sdkFamily: 'sdkwork-im-rpc-sdk',
+            services: [],
+          },
+        },
+      },
+    }));
+
+    expect(handoff.steps).toHaveLength(1);
+    expect(handoff.steps[0].displayCommand).toContain('--protocol rpc');
+    expect(handoff.steps[0].displayCommand).toContain('--proto-root /tmp/rpc/proto');
+    expect(handoff.steps[0].displayCommand).toContain('--proto-file /tmp/rpc/proto/sdkwork/communication/app/v3/message_service.proto');
+    expect(handoff.steps[0].displayCommand).toContain('--import-root /tmp/rpc/common-proto');
+  });
+
   it('quotes empty api prefix arguments in the reviewed apply command', () => {
     const baseline = createExecution();
     const handoff = buildExecutionHandoff(createExecution({

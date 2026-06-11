@@ -13,6 +13,44 @@ export type Language =
   | 'ruby';
 
 export type SdkType = 'app' | 'backend' | 'im' | 'ai' | 'custom';
+export type SdkProtocol = 'http' | 'rpc';
+
+export type RpcSurface = 'app' | 'backend' | 'internal' | 'common';
+export type RpcStreamingMode = 'unary' | 'server' | 'client' | 'bidi';
+export type RpcIdempotencyMode = 'none' | 'optional' | 'required';
+
+export interface RpcServiceManifest {
+  schemaVersion: 1;
+  kind: 'sdkwork.rpc.manifest';
+  domain: string;
+  sdkFamily: string;
+  services: RpcServiceDefinition[];
+}
+
+export interface RpcServiceDefinition {
+  package: string;
+  service: string;
+  surface: RpcSurface;
+  methods: RpcMethodDefinition[];
+}
+
+export interface RpcMethodDefinition {
+  method: string;
+  operationId: string;
+  auth: string;
+  idempotency: RpcIdempotencyMode;
+  streaming: RpcStreamingMode;
+  owner: string;
+  compatibility: string;
+}
+
+export interface RpcInputSpec {
+  manifestPath: string;
+  protoRoot: string;
+  protoFiles: string[];
+  importRoots: string[];
+  manifest: RpcServiceManifest;
+}
 
 export interface GeneratorConfig {
   name: string;
@@ -22,6 +60,7 @@ export interface GeneratorConfig {
   license?: string;
   language: Language;
   sdkType: SdkType;
+  protocol?: SdkProtocol;
   outputPath: string;
   apiSpecPath: string;
   baseUrl: string;
@@ -33,6 +72,7 @@ export interface GeneratorConfig {
   legacyClientName?: string;
   generateReadme?: boolean;
   generateTests?: boolean;
+  rpc?: RpcInputSpec;
   options?: GeneratorOptions;
 }
 
@@ -104,6 +144,8 @@ export interface ApiOperation {
   responses: Record<string, ApiResponse>;
   deprecated?: boolean;
   security?: Array<Record<string, string[]>>;
+  'x-sdkwork-auth-mode'?: 'anonymous' | 'dual-token' | 'refresh-token' | 'api-key' | 'internal' | string;
+  'x-sdkwork-forbid-credential-headers'?: boolean;
 }
 
 export interface ApiParameter {

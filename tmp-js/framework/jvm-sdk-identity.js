@@ -40,7 +40,7 @@ function resolvePackageRoot(config, groupId, artifactId) {
         return normalizeNamespace(explicitNamespace);
     }
     const groupSegments = splitNamespaceSegments(groupId);
-    const artifactSegments = trimTrailingSdkSegment(splitIdentifierParts(artifactId).map(normalizePackageSegment));
+    const artifactSegments = trimGeneratedFallbackSegment(trimTrailingSdkSegment(splitIdentifierParts(artifactId).map(normalizePackageSegment)), config);
     const dedupedArtifactSegments = artifactSegments.slice(calculateOverlap(groupSegments, artifactSegments));
     const combined = [...groupSegments, ...dedupedArtifactSegments].filter(Boolean);
     if (combined.length > 0) {
@@ -73,6 +73,13 @@ function splitIdentifierParts(value) {
 function trimTrailingSdkSegment(segments) {
     if (segments.length > 1 && segments[segments.length - 1] === 'sdk') {
         return segments.slice(0, -1);
+    }
+    return segments;
+}
+function trimGeneratedFallbackSegment(segments, config) {
+    const sdkType = normalizePackageSegment(config.sdkType);
+    if (segments.length === 2 && segments[0] === 'generated' && segments[1] === sdkType) {
+        return [sdkType];
     }
     return segments;
 }

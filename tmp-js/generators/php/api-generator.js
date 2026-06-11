@@ -5,6 +5,7 @@ import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framewo
 import { getSchemaReferenceName, resolveMediaTypeSchema } from '../../framework/schema.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 import { PHP_CONFIG, getPhpNamespace, getPhpType } from './config.js';
 export class ApiGenerator {
     generate(ctx, config) {
@@ -326,6 +327,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         const requestBodyRequired = Boolean(hasBody && op?.requestBody?.required);
         const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
         const eventStreamInfo = extractEventStreamResponseInfo(op);
+        const skipAuth = operationSkipsSdkworkAuth(op);
         const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
         const returnType = eventStreamInfo ? '\\Generator' : this.resolveReturnType(op, responseSchema);
         const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
@@ -416,7 +418,7 @@ ${this.renderHeaderParameterArray(headerBindings, 12)},
 ${this.renderHeaderParameterArray(cookieBindings, 12)}
         );`
             : '';
-        const requestOptions = this.buildRequestOptions(hasQuery && !hasExplicitQuerySerialization, hasHeaders, hasBody, requestBodyMediaType);
+        const requestOptions = this.buildRequestOptions(hasQuery && !hasExplicitQuerySerialization, hasHeaders, hasBody, requestBodyMediaType, skipAuth);
         const requestMethod = toHttpMethodLiteral(httpMethod);
         const requestLine = eventStreamInfo
             ? `        foreach ($this->client->stream('${requestMethod}', $path, ${requestOptions}) as $event) {`
@@ -667,8 +669,11 @@ ${returnLine}
         }
         return itemExpr;
     }
-    buildRequestOptions(hasQuery, hasHeaders, hasBody, requestBodyMediaType) {
+    buildRequestOptions(hasQuery, hasHeaders, hasBody, requestBodyMediaType, skipAuth) {
         const lines = [];
+        if (skipAuth) {
+            lines.push(`'skipAuth' => true,`);
+        }
         if (hasQuery) {
             lines.push(`'query' => $params,`);
         }

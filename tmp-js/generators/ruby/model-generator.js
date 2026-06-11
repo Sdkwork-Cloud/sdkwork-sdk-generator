@@ -141,7 +141,7 @@ ${exports}
         return itemExpr;
     }
     format(content) {
-        return `${content.trim()}\n`;
+        return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
     }
 }
 function wrapRubyModules(segments, body) {

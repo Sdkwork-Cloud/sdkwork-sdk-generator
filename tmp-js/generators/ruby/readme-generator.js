@@ -105,7 +105,7 @@ ${config.license || 'MIT'}
         };
     }
     format(content) {
-        return `${content.trim()}\n`;
+        return `${content.trim().split('\n').map((line) => line.trimEnd()).join('\n')}\n`;
     }
     generateExamples(ctx, planner) {
         const examples = [];

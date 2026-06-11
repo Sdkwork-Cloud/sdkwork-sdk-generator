@@ -147,7 +147,7 @@ impl SdkworkHttpClient {
     where
         T: DeserializeOwned,
     {
-        self.request(Method::GET, path, query, Option::<&Value>::None, headers, None).await
+        self.request(Method::GET, path, query, Option::<&Value>::None, headers, None, false).await
     }
 
     pub async fn post<T, B>(
@@ -162,7 +162,7 @@ impl SdkworkHttpClient {
         T: DeserializeOwned,
         B: Serialize + ?Sized,
     {
-        self.request(Method::POST, path, query, body, headers, content_type).await
+        self.request(Method::POST, path, query, body, headers, content_type, false).await
     }
 
     pub async fn put<T, B>(
@@ -177,7 +177,7 @@ impl SdkworkHttpClient {
         T: DeserializeOwned,
         B: Serialize + ?Sized,
     {
-        self.request(Method::PUT, path, query, body, headers, content_type).await
+        self.request(Method::PUT, path, query, body, headers, content_type, false).await
     }
 
     pub async fn patch<T, B>(
@@ -192,7 +192,7 @@ impl SdkworkHttpClient {
         T: DeserializeOwned,
         B: Serialize + ?Sized,
     {
-        self.request(Method::PATCH, path, query, body, headers, content_type).await
+        self.request(Method::PATCH, path, query, body, headers, content_type, false).await
     }
 
     pub async fn delete<T>(
@@ -204,7 +204,7 @@ impl SdkworkHttpClient {
     where
         T: DeserializeOwned,
     {
-        self.request(Method::DELETE, path, query, Option::<&Value>::None, headers, None).await
+        self.request(Method::DELETE, path, query, Option::<&Value>::None, headers, None, false).await
     }
 
     pub async fn request_method<T, B>(
@@ -215,12 +215,13 @@ impl SdkworkHttpClient {
         query: Option<&QueryParams>,
         headers: Option<&RequestHeaders>,
         content_type: Option<&str>,
+        skip_auth: bool,
     ) -> Result<T, SdkworkError>
     where
         T: DeserializeOwned,
         B: Serialize + ?Sized,
     {
-        self.request(method, path, query, body, headers, content_type).await
+        self.request(method, path, query, body, headers, content_type, skip_auth).await
     }
 
     pub async fn stream<T, B>(
@@ -231,6 +232,7 @@ impl SdkworkHttpClient {
         query: Option<&QueryParams>,
         headers: Option<&RequestHeaders>,
         content_type: Option<&str>,
+        skip_auth: bool,
     ) -> Result<SseStream<T>, SdkworkError>
     where
         T: DeserializeOwned,
@@ -241,7 +243,7 @@ impl SdkworkHttpClient {
             request = request.query(&normalize_query(query_values));
         }
 
-        let mut merged_headers = self.merge_headers(headers)?;
+        let mut merged_headers = self.merge_headers(headers, skip_auth)?;
         merged_headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
         request = request.headers(merged_headers);
 
@@ -283,6 +285,7 @@ impl SdkworkHttpClient {
         body: Option<&B>,
         headers: Option<&RequestHeaders>,
         content_type: Option<&str>,
+        skip_auth: bool,
     ) -> Result<T, SdkworkError>
     where
         T: DeserializeOwned,
@@ -293,7 +296,7 @@ impl SdkworkHttpClient {
             request = request.query(&normalize_query(query_values));
         }
 
-        let merged_headers = self.merge_headers(headers)?;
+        let merged_headers = self.merge_headers(headers, skip_auth)?;
         request = request.headers(merged_headers);
 
         if let Some(payload) = body {
@@ -314,10 +317,12 @@ impl SdkworkHttpClient {
         format!("{}/{}", self.base_url, path)
     }
 
-    fn merge_headers(&self, headers: Option<&RequestHeaders>) -> Result<HeaderMap, SdkworkError> {
+    fn merge_headers(&self, headers: Option<&RequestHeaders>, skip_auth: bool) -> Result<HeaderMap, SdkworkError> {
         let mut merged = HeaderMap::new();
-        for (key, value) in self.headers.read().expect("sdk headers poisoned").iter() {
-            insert_header(&mut merged, key, value)?;
+        if !skip_auth {
+            for (key, value) in self.headers.read().expect("sdk headers poisoned").iter() {
+                insert_header(&mut merged, key, value)?;
+            }
         }
         if let Some(values) = headers {
             for (key, value) in values {

@@ -7,6 +7,8 @@ import { resolveMediaTypeSchema } from '../../framework/schema.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import { formatJavaGeneratedContent } from './format.js';
 export class ApiGenerator {
     generate(ctx, config) {
         const files = [];
@@ -90,6 +92,7 @@ ${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
         const contentTypeArg = requestBodyInfo?.mediaType
             ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
             : '';
+        const skipAuth = operationSkipsSdkworkAuth(op);
         const requestType = requestBodySchema
             ? getJavaType(requestBodySchema, JAVA_CONFIG)
             : 'Object';
@@ -322,6 +325,9 @@ ${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
             default:
                 call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
         }
+        if (skipAuth) {
+            call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, true)`;
+        }
         const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
         const requestHeaderBlock = hasHeaders
             ? `        Map<String, String> requestHeaders = buildRequestHeaders(
@@ -346,6 +352,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
                 hasHeaders ? 'requestHeaders' : 'null',
                 hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null',
                 `new TypeReference<${castType}>() {}`,
+                ...(skipAuth ? ['true'] : []),
             ].join(', ');
             return `${docComment}    public Iterable<${responseType}> ${methodName}(${params.join(', ')}) throws Exception {
 ${queryBlock}${requestHeaderBlock}        return client.stream(${streamArgs});
@@ -912,6 +919,6 @@ ${exports}
         };
     }
     format(content) {
-        return content.trim() + '\n';
+        return formatJavaGeneratedContent(content);
     }
 }

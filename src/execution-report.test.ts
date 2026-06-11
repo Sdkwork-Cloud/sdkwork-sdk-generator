@@ -108,6 +108,7 @@ describe('execution report', () => {
       executionReportPath: '.sdkwork/sdkwork-generator-report.json',
       manualBackupDir: '.sdkwork/manual-backups',
     });
+    expect(report.sdk.protocol).toBe('http');
     expect(report).toEqual(cliJsonReport);
   });
 
@@ -126,6 +127,36 @@ describe('execution report', () => {
     expect(report).not.toBeNull();
     expect(existsSync(reportPath)).toBe(true);
     expect(report?.artifacts.executionReportPath).toBe(SDKWORK_GENERATOR_REPORT_PATH);
+    expect(JSON.parse(readFileSync(reportPath, 'utf-8'))).toEqual(report);
+  });
+
+  it('uses unified control-plane artifact names and rpc protocol metadata for rpc execution reports', () => {
+    const outputDir = createTempDir('sdkwork-rpc-execution-report-');
+    const baseline = createExecution();
+    const execution = createExecution({
+      config: {
+        ...baseline.config,
+        protocol: 'rpc',
+        outputPath: outputDir,
+        apiSpecPath: '/tmp/rpc/sdkwork-rpc.manifest.json',
+      },
+      syncSummary: {
+        ...baseline.syncSummary,
+        changeSummaryPath: '.sdkwork/sdkwork-generator-changes.json',
+      },
+    });
+
+    const report = persistGenerateExecutionReport(execution);
+    const reportPath = join(outputDir, SDKWORK_GENERATOR_REPORT_PATH);
+
+    expect(report).not.toBeNull();
+    expect(existsSync(reportPath)).toBe(true);
+    expect(report?.artifacts).toMatchObject({
+      manifestPath: '.sdkwork/sdkwork-generator-manifest.json',
+      changeSummaryPath: '.sdkwork/sdkwork-generator-changes.json',
+      executionReportPath: SDKWORK_GENERATOR_REPORT_PATH,
+    });
+    expect(report?.sdk.protocol).toBe('rpc');
     expect(JSON.parse(readFileSync(reportPath, 'utf-8'))).toEqual(report);
   });
 });

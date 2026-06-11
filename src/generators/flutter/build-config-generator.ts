@@ -11,7 +11,10 @@ export class BuildConfigGenerator {
     const commonPkg = resolveFlutterCommonPackage(config);
     const localCommonPackagePath = this.findLocalCommonPackagePath(
       config.outputPath,
-      ['sdk', 'sdkwork-sdk-commons', 'sdkwork-sdk-common-flutter'],
+      [
+        ['sdkwork-sdk-commons', 'sdkwork-sdk-common-flutter'],
+        ['sdk', 'sdkwork-sdk-commons', 'sdkwork-sdk-common-flutter'],
+      ],
     );
     const files = [
       this.generatePubspec(config),
@@ -68,14 +71,16 @@ dev_dependencies:
     return content.trim() + '\n';
   }
 
-  private findLocalCommonPackagePath(outputPath: string, targetSegments: string[]): string | null {
+  private findLocalCommonPackagePath(outputPath: string, targetCandidates: string[][]): string | null {
     const outputDir = path.resolve(outputPath);
     let currentDir = outputDir;
 
     while (true) {
-      const candidate = path.join(currentDir, ...targetSegments);
-      if (fs.existsSync(candidate)) {
-        return path.relative(outputDir, candidate).replace(/\\/g, '/');
+      for (const targetSegments of targetCandidates) {
+        const candidate = path.join(currentDir, ...targetSegments);
+        if (fs.existsSync(candidate)) {
+          return path.relative(outputDir, candidate).replace(/\\/g, '/');
+        }
       }
 
       const parentDir = path.dirname(currentDir);

@@ -226,6 +226,7 @@ describe('CSharp generator regressions', () => {
     expect(projectFile).toBeDefined();
     expect(apiFile).toBeDefined();
     expect(clientFile).toBeDefined();
+    expect(projectFile!.content).toContain('<TargetFramework>net8.0</TargetFramework>');
     expect(projectFile!.content).toContain('<ProjectReference Include="');
     expect(projectFile!.content).toContain('SDKwork.Common.csproj');
     expect(projectFile!.content).toContain('Condition="Exists(');

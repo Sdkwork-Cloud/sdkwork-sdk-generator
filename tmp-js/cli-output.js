@@ -1,4 +1,4 @@
-import { buildGenerateExecutionReport, buildGenerateFailureReport, SDKWORK_GENERATOR_REPORT_PATH, } from './execution-report.js';
+import { buildGenerateExecutionReport, buildGenerateFailureReport, } from './execution-report.js';
 export function formatGenerateSuccess(execution, options = {}) {
     const report = buildGenerateExecutionReport(execution);
     const changeImpact = report.changeImpact;
@@ -32,12 +32,17 @@ export function formatGenerateSuccess(execution, options = {}) {
     }
     lines.push(execution.syncSummary.dryRun ? 'Dry run completed.' : 'Generated successfully!');
     lines.push(`   Output: ${execution.config.outputPath}`);
-    lines.push(execution.syncSummary.dryRun
-        ? `   Change summary path (apply mode): ${execution.syncSummary.changeSummaryPath}`
-        : `   Change summary: ${execution.syncSummary.changeSummaryPath}`);
-    lines.push(execution.syncSummary.dryRun
-        ? `   Execution report path (apply mode): ${SDKWORK_GENERATOR_REPORT_PATH}`
-        : `   Execution report: ${SDKWORK_GENERATOR_REPORT_PATH}`);
+    if (execution.syncSummary.controlPlaneEnabled === false) {
+        lines.push('   Control plane: convention mode; no .sdkwork generator evidence files were written.');
+    }
+    else {
+        lines.push(execution.syncSummary.dryRun
+            ? `   Change summary path (apply mode): ${execution.syncSummary.changeSummaryPath}`
+            : `   Change summary: ${execution.syncSummary.changeSummaryPath}`);
+        lines.push(execution.syncSummary.dryRun
+            ? `   Execution report path (apply mode): ${report.artifacts.executionReportPath}`
+            : `   Execution report: ${report.artifacts.executionReportPath}`);
+    }
     lines.push(`   Change fingerprint: ${execution.syncSummary.changeFingerprint}`);
     lines.push(`   Impact: ${changeImpact.areas.length > 0 ? changeImpact.areas.join(', ') : 'none'}`);
     lines.push(`   Next action: ${executionDecision.nextAction} (risk: ${executionDecision.riskLevel})`);

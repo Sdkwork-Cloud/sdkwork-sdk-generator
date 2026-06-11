@@ -80,6 +80,8 @@ function normalizeReadme(file) {
     content = content.replace(/client\.setApiKey\("your-api-key"\)\n\n?/g, '');
     content = content.replace(/client\.SetApiKey\("your-api-key"\)\n\n?/g, '');
     content = content.replace(/client\.SetApiKey\("your-api-key"\);\n\n?/g, '');
+    content = content.replace(/client\.set_api_key\('your-api-key'\)\n\n?/g, '');
+    content = content.replace(/client\.set_api_key\('your-api-key'\);\n\n?/g, '');
     content = content.replace(/client\.set_api_key\("your-api-key"\)\n\n?/g, '');
     content = content.replace(/client\.set_api_key\("your-api-key"\);\n\n?/g, '');
     content = content.replace(/client->setApiKey\('your-api-key'\);\n\n?/g, '');

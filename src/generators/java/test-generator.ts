@@ -9,6 +9,7 @@ import {
   resolveJavaExpectedRequestPath,
   type JavaUsagePlan,
 } from './usage-planner.js';
+import { formatJavaGeneratedContent } from './format.js';
 
 export class TestGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -217,6 +218,6 @@ ${assertions}
   }
 
   private format(content: string): string {
-    return content.trim() + '\n';
+    return formatJavaGeneratedContent(content);
   }
 }

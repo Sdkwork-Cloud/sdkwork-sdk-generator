@@ -17,6 +17,7 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
+import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -343,6 +344,7 @@ ${methods ? `\n\n${methods}` : ''}
     const contentTypeArg = requestBodyInfo?.mediaType
       ? `, '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
       : '';
+    const skipAuth = operationSkipsSdkworkAuth(op);
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
     const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
@@ -573,6 +575,19 @@ ${methods ? `\n\n${methods}` : ''}
         call = `this.client.request<${responseType}>(${requestPathExpression}, { method: '${toHttpMethodLiteral(httpMethod)}' as any${hasBody ? ', body' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody && requestBodyInfo?.mediaType ? `, contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : ''} })`;
     }
 
+    if (skipAuth) {
+      call = this.renderDirectRequestCall(
+        responseType,
+        requestPathExpression,
+        httpMethod,
+        hasBody,
+        hasQuery && !hasExplicitQuerySerialization,
+        hasHeaders,
+        requestBodyInfo?.mediaType,
+        true,
+      );
+    }
+
     const docComment = op.summary ? `/** ${op.summary} */\n  ` : '';
     const queryBlock = hasExplicitQuerySerialization
       ? `    const query = buildQueryString([
@@ -595,6 +610,7 @@ ${this.renderNamedParameterRecord(cookieBindings, operationParametersType)}
         hasQuery && !hasExplicitQuerySerialization ? 'params' : '',
         hasHeaders ? 'headers: requestHeaders' : '',
         hasBody && requestBodyInfo?.mediaType ? `contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '',
+        skipAuth ? 'skipAuth: true' : '',
       ].filter(Boolean).join(', ');
 
       return {
@@ -613,6 +629,27 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
       referencedModels,
       typeDefinitions: this.renderOperationTypeDefinitions(operationParametersType),
     };
+  }
+
+  private renderDirectRequestCall(
+    responseType: string,
+    requestPathExpression: string,
+    httpMethod: string,
+    hasBody: boolean,
+    hasQueryParams: boolean,
+    hasHeaders: boolean,
+    mediaType: string | undefined,
+    skipAuth: boolean,
+  ): string {
+    const options = [
+      `method: '${toHttpMethodLiteral(httpMethod)}' as any`,
+      hasBody ? 'body' : '',
+      hasQueryParams ? 'params' : '',
+      hasHeaders ? 'headers: requestHeaders' : '',
+      hasBody && mediaType ? `contentType: '${this.escapeSingleQuoted(mediaType)}'` : '',
+      skipAuth ? 'skipAuth: true' : '',
+    ].filter(Boolean).join(', ');
+    return `this.client.request<${responseType}>(${requestPathExpression}, { ${options} })`;
   }
 
   private createOperationParametersType(

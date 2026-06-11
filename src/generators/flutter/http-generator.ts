@@ -47,10 +47,11 @@ class HttpClient extends BaseHttpClient {
     dynamic body,
     Map<String, String>? requestHeaders,
     String? contentType,
+    bool skipAuth = false,
   }) async {
     final uri = _buildUri(path, params);
     final mergedHeaders = <String, String>{
-      ...headers,
+      if (!skipAuth) ...headers,
       ...?requestHeaders,
     };
 
@@ -83,10 +84,11 @@ class HttpClient extends BaseHttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     String contentType = 'application/json',
+    bool skipAuth = false,
   }) async* {
     final uri = _buildUri(path, params);
     final mergedHeaders = <String, String>{
-      ...this.headers,
+      if (!skipAuth) ...this.headers,
       'Accept': 'text/event-stream',
       ...?headers,
     };

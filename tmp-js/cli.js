@@ -67,9 +67,10 @@ program
 });
 program
     .command('generate')
-    .requiredOption('-i, --input <path>', 'OpenAPI spec file or URL')
+    .requiredOption('-i, --input <path>', 'OpenAPI spec file or URL, or RPC manifest when --protocol rpc is used')
     .requiredOption('-o, --output <path>', 'Output directory')
     .requiredOption('-n, --name <name>', 'SDK name')
+    .option('--protocol <protocol>', 'SDK protocol (http or rpc)', 'http')
     .option('-t, --type <type>', 'SDK type (app, backend, ai, custom)', 'backend')
     .option('-l, --language <lang>', 'Language', 'typescript')
     .option('--base-url <url>', 'Base URL')
@@ -86,6 +87,10 @@ program
     .option('--npm-package-name <name>', 'TypeScript npm package used as the published version baseline for multi-language releases')
     .option('--sdk-root <path>', 'SDK workspace root used to scan sibling language package versions')
     .option('--sdk-name <name>', 'SDK workspace prefix, for example sdkwork-notes-app-sdk')
+    .option('--proto-root <path>', 'RPC proto root for --protocol rpc')
+    .option('--proto-file <path...>', 'Explicit RPC proto files for --protocol rpc')
+    .option('--import-root <path...>', 'Additional RPC proto import roots for --protocol rpc')
+    .option('--emit-control-plane', 'Emit optional persisted generator evidence for RPC release, CI, audit, or migration workflows')
     .option('--no-sync-published-version', 'Skip published npm version checks when resolving sdk version')
     .option('--description <text>', 'Description')
     .option('--author <name>', 'Author')
@@ -115,12 +120,13 @@ program
     }
     try {
         if (!options.json) {
-            console.log(`\nGenerating ${options.language} SDK: ${options.name}\n`);
+            console.log(`\nGenerating ${options.protocol || 'http'} ${options.language} SDK: ${options.name}\n`);
         }
         const execution = await runGenerateCommand({
             input: options.input,
             output: options.output,
             name: options.name,
+            protocol: options.protocol,
             type: options.type,
             language: options.language,
             baseUrl: options.baseUrl,
@@ -137,6 +143,10 @@ program
             npmPackageName: options.npmPackageName,
             sdkRoot: options.sdkRoot,
             sdkName: options.sdkName,
+            protoRoot: options.protoRoot,
+            protoFiles: options.protoFile,
+            importRoots: options.importRoot,
+            emitControlPlane: options.emitControlPlane,
             syncPublishedVersion: options.syncPublishedVersion,
             description: options.description,
             author: options.author,
@@ -180,8 +190,9 @@ program
 });
 program
     .command('inspect')
-    .description('Inspect persisted SDK control-plane artifacts')
+    .description('Inspect generated SDK evidence')
     .requiredOption('-o, --output <path>', 'Output directory')
+    .option('--protocol <protocol>', 'SDK protocol (http or rpc)', 'http')
     .option('--fail-on <status>', 'Fail when evaluation status is at or above empty, degraded, or invalid')
     .option('--require-action <action>', 'Fail when recommended action does not equal the expected action')
     .option('--json', 'Emit machine-readable JSON output')
@@ -189,6 +200,7 @@ program
     try {
         const snapshot = runInspectCommand({
             output: options.output,
+            protocol: options.protocol,
         });
         const inspectOptions = {
             json: options.json,

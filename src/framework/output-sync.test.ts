@@ -124,12 +124,18 @@ describe('output sync', () => {
     const manifest = JSON.parse(
       readFileSync(join(outputDir, SDKWORK_GENERATOR_MANIFEST_PATH), 'utf-8')
     ) as {
+      sdk: {
+        protocol: string;
+      };
       generatedFiles: Array<{ path: string }>;
       scaffoldFiles: string[];
     };
     const changeSummary = JSON.parse(
       readFileSync(join(outputDir, SDKWORK_GENERATOR_CHANGES_PATH), 'utf-8')
     ) as {
+      sdk: {
+        protocol: string;
+      };
       changeFingerprint: string;
       changes: {
         createdGeneratedFiles: string[];
@@ -156,6 +162,8 @@ describe('output sync', () => {
       preservedLegacyFiles: boolean;
     };
 
+    expect(manifest.sdk.protocol).toBe('http');
+    expect(changeSummary.sdk.protocol).toBe('http');
     expect(manifest.generatedFiles.map((entry) => entry.path)).toEqual(['src/api.ts']);
     expect(manifest.scaffoldFiles).toEqual(['custom/README.md']);
     expect(summary.deletedGeneratedFiles).toBe(1);
