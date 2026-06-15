@@ -7,6 +7,13 @@ export function usesSdkworkV3DualTokenOnly(
     && ['app', 'backend', 'im'].includes(config.sdkType);
 }
 
+export function usesSdkworkV3ApiKeyOnly(
+  config: Pick<GeneratorConfig, 'sdkType' | 'options'>,
+): boolean {
+  return config.options?.standardProfile === 'sdkwork-v3'
+    && config.sdkType === 'custom';
+}
+
 export function operationSkipsSdkworkAuth(
   operation: Pick<ApiOperation, 'x-sdkwork-auth-mode'> | Record<string, unknown> | undefined,
 ): boolean {

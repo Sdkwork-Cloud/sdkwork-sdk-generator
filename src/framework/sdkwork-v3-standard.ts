@@ -12,8 +12,13 @@ const AUTH_BACKEND_RESOURCE_SEGMENTS = new Set([
   'verification_codes',
   'password_reset_requests',
   'password_resets',
-  'oauth_authorization_urls',
-  'oauth_sessions',
+]);
+
+const OAUTH_BACKEND_RESOURCE_SEGMENTS = new Set([
+  'authorization_urls',
+  'device_authorizations',
+  'mini_program_sessions',
+  'sessions',
 ]);
 
 const BACKEND_COURSE_RESOURCE_SEGMENTS = new Set([
@@ -241,8 +246,11 @@ function isBackendAuthEndpoint(path: string, expectedPrefix: string): boolean {
     .slice(expectedPrefix.length)
     .split('/')
     .filter(Boolean);
-  return relativeSegments[0] === 'auth'
-    && (relativeSegments.length === 1 || AUTH_BACKEND_RESOURCE_SEGMENTS.has(relativeSegments[1]));
+  if (relativeSegments[0] === 'auth') {
+    return relativeSegments.length === 1 || AUTH_BACKEND_RESOURCE_SEGMENTS.has(relativeSegments[1]);
+  }
+  return relativeSegments[0] === 'oauth'
+    && (relativeSegments.length === 1 || OAUTH_BACKEND_RESOURCE_SEGMENTS.has(relativeSegments[1]));
 }
 
 function normalizePath(path: string): string {

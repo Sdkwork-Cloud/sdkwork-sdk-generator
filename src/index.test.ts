@@ -6658,7 +6658,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(readmeFile!.content).not.toContain('client.iam.sessions.create');
   });
 
-  it('should generate object-shaped TypeScript params for sdkwork v3 query resources', async () => {
+  it('should generate sdkwork v3 appbase OAuth authorization URL create body resource', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(
       {
@@ -6671,24 +6671,26 @@ describe('OpenAPI Security And Compliance', () => {
         ...sdkworkV3IamSpec,
         paths: {
           ...sdkworkV3IamSpec.paths,
-          '/app/v3/api/auth/oauth_authorization_urls': {
-            get: {
-              summary: 'Retrieve OAuth authorization URL',
-              operationId: 'oauthAuthorizationUrls.retrieve',
-              tags: ['auth'],
+          '/app/v3/api/oauth/authorization_urls': {
+            post: {
+              summary: 'Create OAuth authorization URL',
+              operationId: 'oauth.authorizationUrls.create',
+              tags: ['oauth'],
               security: [],
-              parameters: [
-                { name: 'provider', in: 'query', required: true, schema: { type: 'string' } },
-                { name: 'redirectUri', in: 'query', required: true, schema: { type: 'string' } },
-                { name: 'state', in: 'query', required: false, schema: { type: 'string' } },
-                { name: 'scope', in: 'query', required: false, schema: { type: 'string' } },
-              ],
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/OauthAuthorizationUrlCreateRequest' },
+                  },
+                },
+              },
               responses: {
                 '200': {
                   description: 'Success',
                   content: {
                     'application/json': {
-                      schema: { $ref: '#/components/schemas/OauthAuthorizationUrlsRetrieveResult' },
+                      schema: { $ref: '#/components/schemas/OauthAuthorizationUrlCreateResult' },
                     },
                   },
                 },
@@ -6708,7 +6710,17 @@ describe('OpenAPI Security And Compliance', () => {
           ...sdkworkV3IamSpec.components,
           schemas: {
             ...sdkworkV3IamSpec.components?.schemas,
-            OauthAuthorizationUrlsRetrieveResult: {
+            OauthAuthorizationUrlCreateRequest: {
+              type: 'object',
+              required: ['provider', 'redirectUri'],
+              properties: {
+                provider: { type: 'string' },
+                redirectUri: { type: 'string' },
+                state: { type: 'string' },
+                scope: { type: 'string' },
+              },
+            },
+            OauthAuthorizationUrlCreateResult: {
               type: 'object',
               properties: {
                 authUrl: { type: 'string' },
@@ -6718,23 +6730,18 @@ describe('OpenAPI Security And Compliance', () => {
         },
       }
     );
-    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+    const oauthApi = result.files.find((f) => f.path === 'src/api/oauth.ts');
 
     expect(result.errors).toEqual([]);
-    expect(authApi).toBeDefined();
-    expect(authApi!.content).toContain('export interface AuthOauthAuthorizationUrlsRetrieveParams');
-    expect(authApi!.content).toContain('provider: string;');
-    expect(authApi!.content).toContain('redirectUri: string;');
-    expect(authApi!.content).toContain('state?: string;');
-    expect(authApi!.content).toContain('scope?: string;');
-    expect(authApi!.content).toContain(
-      'async retrieve(params: AuthOauthAuthorizationUrlsRetrieveParams): Promise<OauthAuthorizationUrlsRetrieveResult>'
+    expect(oauthApi).toBeDefined();
+    expect(oauthApi!.content).toContain('public readonly authorizationUrls: OauthAuthorizationUrlsApi;');
+    expect(oauthApi!.content).toContain(
+      'async create(body: OauthAuthorizationUrlCreateRequest): Promise<OauthAuthorizationUrlCreateResult>'
     );
-    expect(authApi!.content).toContain("{ name: 'provider', value: params.provider, style: 'form', explode: true, allowReserved: false },");
-    expect(authApi!.content).toContain("{ name: 'redirectUri', value: params.redirectUri, style: 'form', explode: true, allowReserved: false },");
-    expect(authApi!.content).toContain("{ name: 'state', value: params.state, style: 'form', explode: true, allowReserved: false },");
-    expect(authApi!.content).not.toContain('async retrieve(provider: string, redirectUri: string');
-    expect(authApi!.content).not.toContain('value: provider');
+    expect(oauthApi!.content).toContain("appApiPath(`/oauth/authorization_urls`)");
+    expect(oauthApi!.content).toContain("'application/json')");
+    expect(oauthApi!.content).not.toContain('AuthOauthAuthorizationUrlsRetrieveParams');
+    expect(oauthApi!.content).not.toContain('oauthAuthorizationUrls.retrieve');
   });
 
   it('should allow backend admin course hyphenated content resource paths without rewriting generated URLs', async () => {

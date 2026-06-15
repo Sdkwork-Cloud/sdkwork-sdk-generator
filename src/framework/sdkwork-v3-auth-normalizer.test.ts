@@ -365,4 +365,137 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
     expect(clientFile).not.toContain('setApiKey');
     expect(portalApiFile).toContain('class PortalApi');
   });
+
+  it('generates custom open-api TypeScript output with API-key-only auth surface', async () => {
+    const openApiSpec: ApiSpec = {
+      openapi: '3.1.0',
+      info: {
+        title: 'SDKWork Knowledgebase Open API',
+        version: '1.0.0',
+      },
+      paths: {
+        '/knowledge/v3/api/retrievals': {
+          post: {
+            summary: 'Create retrieval',
+            operationId: 'retrievals.create',
+            tags: ['retrievals'],
+            security: [
+              {
+                ApiKey: [],
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    $ref: '#/components/schemas/CreateRetrievalRequest',
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      $ref: '#/components/schemas/Retrieval',
+                    },
+                  },
+                },
+              },
+              '401': {
+                description: 'Unauthorized',
+                content: {
+                  'application/problem+json': {
+                    schema: {
+                      type: 'object',
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        securitySchemes: {
+          ApiKey: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-API-Key',
+          },
+        },
+        schemas: {
+          CreateRetrievalRequest: {
+            type: 'object',
+            required: ['query'],
+            properties: {
+              query: { type: 'string' },
+            },
+          },
+          Retrieval: {
+            type: 'object',
+            required: ['id'],
+            properties: {
+              id: { type: 'string' },
+            },
+          },
+        },
+      },
+    };
+
+    const result = await generateSdk(
+      {
+        name: 'Knowledgebase',
+        version: '1.0.0',
+        language: 'typescript',
+        sdkType: 'custom',
+        outputPath: './test-output',
+        apiSpecPath: './knowledgebase-open-api.openapi.json',
+        baseUrl: '/knowledge/v3/api',
+        apiPrefix: '/knowledge/v3/api',
+        packageName: '@sdkwork/knowledgebase-sdk',
+        clientName: 'SdkworkKnowledgebaseClient',
+        options: {
+          standardProfile: 'sdkwork-v3',
+        },
+      },
+      openApiSpec,
+    );
+
+    expect(result.errors).toEqual([]);
+    const files = allGeneratedContentByPath(result.files);
+    const readme = files.get('README.md') ?? '';
+    const commonTypes = files.get('src/types/common.ts') ?? '';
+    const httpClient = files.get('src/http/client.ts') ?? '';
+    const sdkClient = files.get('src/sdk.ts') ?? '';
+    const authIndex = files.get('src/auth/index.ts') ?? '';
+    const combinedAuthSurface = [readme, commonTypes, httpClient, sdkClient, authIndex].join('\n');
+
+    expect(combinedAuthSurface).toContain('setApiKey');
+    expect(combinedAuthSurface).toContain('X-API-Key');
+    expect(readme).toContain('## Authentication');
+    expect(readme).toContain('X-API-Key: <apiKey>');
+    expect(commonTypes).toContain('apiKey?: string;');
+    expect(combinedAuthSurface).not.toContain('setAuthToken');
+    expect(combinedAuthSurface).not.toContain('setAccessToken');
+    expect(combinedAuthSurface).not.toContain('setTokenManager');
+    expect(combinedAuthSurface).not.toContain('AuthTokenManager');
+    expect(combinedAuthSurface).not.toContain('DefaultAuthTokenManager');
+    expect(combinedAuthSurface).not.toContain('createTokenManager');
+    expect(combinedAuthSurface).not.toContain('AuthTokens');
+    expect(combinedAuthSurface).not.toContain('AuthMode');
+    expect(combinedAuthSurface).not.toContain('authToken?:');
+    expect(combinedAuthSurface).not.toContain('accessToken?:');
+    expect(combinedAuthSurface).not.toContain('tokenManager?:');
+    expect(combinedAuthSurface).not.toContain('authMode?:');
+    expect(combinedAuthSurface).not.toContain('Authorization: Bearer <authToken>');
+    expect(combinedAuthSurface).not.toContain('Access-Token: <accessToken>');
+    expect(combinedAuthSurface).not.toContain('Mode B: Dual Token');
+    expect(combinedAuthSurface).not.toContain('Authentication Modes');
+    expect(combinedAuthSurface).not.toContain('your-auth-token');
+    expect(combinedAuthSurface).not.toContain('your-access-token');
+  });
 });

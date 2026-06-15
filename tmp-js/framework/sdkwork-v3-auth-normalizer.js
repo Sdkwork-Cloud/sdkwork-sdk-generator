@@ -1,4 +1,4 @@
-import { usesSdkworkV3DualTokenOnly } from './sdkwork-v3-auth.js';
+import { usesSdkworkV3ApiKeyOnly, usesSdkworkV3DualTokenOnly } from './sdkwork-v3-auth.js';
 const CODE_BLOCK_RE = /```[\s\S]*?```/g;
 const forbiddenAuthTerms = [
     'setApiKey',
@@ -13,11 +13,36 @@ const forbiddenAuthTerms = [
     'Mode A: API Key',
     'Authentication Modes',
 ];
+const forbiddenApiKeyOnlyAuthTerms = [
+    'setAuthToken',
+    'setAccessToken',
+    'setTokenManager',
+    'AuthTokenManager',
+    'DefaultAuthTokenManager',
+    'createTokenManager',
+    'AuthTokens',
+    'AuthMode',
+    'authToken?:',
+    'accessToken?:',
+    'tokenManager?:',
+    'authMode?:',
+    'ACCESS_TOKEN_HEADER',
+    'Access-Token',
+    'Authorization: Bearer <authToken>',
+    'Mode B: Dual Token',
+    'Authentication Modes',
+    'your-auth-token',
+    'your-access-token',
+    'dual-token',
+];
 export function normalizeSdkworkV3AuthSurface(files, config) {
-    if (!usesSdkworkV3DualTokenOnly(config)) {
-        return files;
+    if (usesSdkworkV3DualTokenOnly(config)) {
+        return files.map((file) => normalizeFile(file, config));
     }
-    return files.map((file) => normalizeFile(file, config));
+    if (usesSdkworkV3ApiKeyOnly(config)) {
+        return files.map((file) => normalizeApiKeyOnlyFile(file, config));
+    }
+    return files;
 }
 function normalizeFile(file, config) {
     if (!isAuthSurfaceFile(file)) {
@@ -30,6 +55,19 @@ function normalizeFile(file, config) {
     }
     const normalizedFile = normalizer(file);
     assertNoApiKeyDebt(normalizedFile, config);
+    return normalizedFile;
+}
+function normalizeApiKeyOnlyFile(file, config) {
+    if (!isAuthSurfaceFile(file)) {
+        return file;
+    }
+    const normalizedPath = file.path.replace(/\\/g, '/');
+    const normalizer = resolveApiKeyOnlyNormalizer(file.language, normalizedPath);
+    if (!normalizer) {
+        return file;
+    }
+    const normalizedFile = normalizer(file);
+    assertNoDualTokenDebt(normalizedFile, config);
     return normalizedFile;
 }
 function isAuthSurfaceFile(file) {
@@ -72,6 +110,15 @@ function resolveNormalizer(language, normalizedPath) {
             return undefined;
     }
 }
+function resolveApiKeyOnlyNormalizer(language, normalizedPath) {
+    if (language !== 'typescript') {
+        return undefined;
+    }
+    if (normalizedPath === 'README.md') {
+        return normalizeApiKeyOnlyReadme;
+    }
+    return resolveTypeScriptApiKeyOnlyNormalizer(normalizedPath);
+}
 function normalizeReadme(file) {
     let content = removeAuthModesSection(file.content);
     content = replaceApiKeyQuickStartLine(content);
@@ -91,6 +138,32 @@ function normalizeReadme(file) {
     content = content.replace(/> Set `NPM_TOKEN` \(and optional `NPM_REGISTRY_URL`\) before release publish\./g, '> Configure npm registry credentials before release publish.');
     content = content.replace(/Professional ([A-Za-z+#]+) SDK for SDKWork API\./g, 'Generated SDKWork v3 dual-token transport SDK.');
     content = content.replace(/Professional SDK for SDKWork API\./g, 'Generated SDKWork v3 dual-token transport SDK.');
+    return {
+        ...file,
+        content,
+    };
+}
+function normalizeApiKeyOnlyReadme(file) {
+    let content = file.content;
+    const authSection = [
+        '## Authentication',
+        '',
+        '```text',
+        'X-API-Key: <apiKey>',
+        '```',
+        '',
+        'Configure API key credentials through the generated client API:',
+        '',
+        '```typescript',
+        "client.setApiKey('your-api-key');",
+        '```',
+    ].join('\n');
+    content = content.replace(/\/\/ Mode A: API Key \(recommended for server-to-server calls\)\nclient\.setApiKey\('your-api-key'\);\n/g, "client.setApiKey('your-api-key');\n");
+    content = content.replace(/## Authentication Modes \(Mutually Exclusive\)[\s\S]*?(?=\n## Configuration \(Non-Auth\)|\n## API Modules|\n## Usage Examples|\n## Error Handling|\n## Publishing|\n## License|\n## Regeneration Contract|$)/, `${authSection}\n\n`);
+    if (!content.includes('## Authentication')) {
+        content = content.replace(/(\n## Configuration \(Non-Auth\))/, `\n${authSection}\n$1`);
+    }
+    content = content.replace(/Professional TypeScript SDK for SDKWork API\./g, 'Generated SDKWork v3 API-key open-api transport SDK.');
     return {
         ...file,
         content,
@@ -167,10 +240,38 @@ function resolveTypeScriptNormalizer(normalizedPath) {
     }
     return undefined;
 }
+function resolveTypeScriptApiKeyOnlyNormalizer(normalizedPath) {
+    if (normalizedPath === 'src/types/common.ts') {
+        return normalizeTypeScriptApiKeyOnlyCommonTypes;
+    }
+    if (normalizedPath === 'src/http/client.ts') {
+        return normalizeTypeScriptApiKeyOnlyHttpClient;
+    }
+    if (normalizedPath === 'src/sdk.ts') {
+        return normalizeTypeScriptApiKeyOnlySdkClient;
+    }
+    if (normalizedPath === 'src/auth/index.ts') {
+        return normalizeTypeScriptApiKeyOnlyAuthIndex;
+    }
+    return undefined;
+}
 function normalizeTypeScriptCommonTypes(file) {
     return {
         ...file,
         content: file.content.replace(/\n\s+apiKey\?: string;/g, ''),
+    };
+}
+function normalizeTypeScriptApiKeyOnlyCommonTypes(file) {
+    let content = file.content;
+    content = content.replace(/\nimport type \{ AuthTokenManager, AuthMode, AuthTokens \} from '[^']+';/g, '');
+    content = content.replace(/\nexport type \{ AuthTokenManager, AuthMode, AuthTokens \};/g, '');
+    content = content.replace(/\n\s+authToken\?: string;/g, '');
+    content = content.replace(/\n\s+accessToken\?: string;/g, '');
+    content = content.replace(/\n\s+tokenManager\?: AuthTokenManager;/g, '');
+    content = content.replace(/\n\s+authMode\?: AuthMode;/g, '');
+    return {
+        ...file,
+        content,
     };
 }
 function normalizeTypeScriptHttpClient(file) {
@@ -201,10 +302,64 @@ function normalizeTypeScriptHttpClient(file) {
         content,
     };
 }
+function normalizeTypeScriptApiKeyOnlyHttpClient(file) {
+    let content = file.content;
+    content = content.replace(/\nimport type \{ AuthTokenManager \} from '[^']+';/g, '');
+    content = content.replace(/\n\s+private static readonly ACCESS_TOKEN_HEADER: string = '[^']+';/g, '');
+    content = content.replace(/\n\s+private getInternalHeaders\(\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestHeaders)/, '\n');
+    content = content.replace(/\n\s+protected buildHeaders\(config: any, skipAuth = false\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestBody)/, [
+        '',
+        '  protected buildHeaders(config: any, skipAuth = false): Record<string, string> {',
+        '    const headers = super.buildHeaders(config, true);',
+        '    if (!skipAuth && !config?.skipAuth) {',
+        '      const apiKey = this.getInternalAuthConfig().apiKey;',
+        "      if (typeof apiKey === 'string' && apiKey.length > 0) {",
+        '        headers[HttpClient.API_KEY_HEADER] = HttpClient.API_KEY_USE_BEARER',
+        '          ? `Bearer ${apiKey}`',
+        '          : apiKey;',
+        '      }',
+        '    }',
+        '    return headers;',
+        '  }',
+        '',
+    ].join('\n'));
+    content = content.replace(/\n\s+setApiKey\(apiKey: string\): void \{[\s\S]*?\n\s+}\n\n(?=\s+setAuthToken\()/, [
+        '',
+        '  setApiKey(apiKey: string): void {',
+        '    this.getInternalAuthConfig().apiKey = apiKey;',
+        '  }',
+        '',
+    ].join('\n'));
+    content = content.replace(/\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+async request)/, '\n');
+    content = content.replace(/const requestHeaders = skipAuth \? headers : this\.applySdkworkAuthHeaders\(headers\);/g, 'const requestHeaders = headers;');
+    content = content.replace(/const authHeaders = skipAuth \? headers : this\.applySdkworkAuthHeaders\(headers\);\n\s+const requestHeaders = this\.buildRequestHeaders\(\n\s+\{ Accept: 'text\/event-stream', \.\.\.\(authHeaders \?\? \{\}\) \},/g, [
+        'const requestHeaders = this.buildRequestHeaders(',
+        "      { Accept: 'text/event-stream', ...(headers ?? {}) },",
+    ].join('\n'));
+    return {
+        ...file,
+        content,
+    };
+}
 function normalizeTypeScriptSdkClient(file) {
     return {
         ...file,
         content: file.content.replace(/\n\s+setApiKey\(apiKey: string\): this \{[\s\S]*?\n\s+}\n\n(?=\s+setAuthToken\()/, '\n'),
+    };
+}
+function normalizeTypeScriptApiKeyOnlySdkClient(file) {
+    let content = file.content;
+    content = content.replace(/\nimport type \{ AuthTokenManager \} from '[^']+';/g, '');
+    content = content.replace(/\n\s+setAuthToken\(token: string\): this \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): this \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): this \{[\s\S]*?\n\s+}\n\n(?=\s+get http)/, '\n');
+    return {
+        ...file,
+        content,
+    };
+}
+function normalizeTypeScriptApiKeyOnlyAuthIndex(file) {
+    return {
+        ...file,
+        content: 'export {};\n',
     };
 }
 function resolveDartNormalizer(normalizedPath) {
@@ -580,4 +735,15 @@ function assertNoApiKeyDebt(file, _config) {
         return;
     }
     throw new Error(`sdkwork-v3 dual-token auth normalizer left API key auth debt "${match}" in ${normalizedPath}.`);
+}
+function assertNoDualTokenDebt(file, _config) {
+    const normalizedPath = file.path.replace(/\\/g, '/');
+    const searchable = normalizedPath === 'README.md'
+        ? file.content
+        : file.content.replace(CODE_BLOCK_RE, '');
+    const match = forbiddenApiKeyOnlyAuthTerms.find((term) => searchable.includes(term));
+    if (!match) {
+        return;
+    }
+    throw new Error(`sdkwork-v3 open-api auth normalizer left dual-token auth debt "${match}" in ${normalizedPath}.`);
 }
