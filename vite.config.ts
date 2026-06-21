@@ -29,7 +29,7 @@ export default defineConfig(({ mode }) => {
     },
     target: 'es2020',
   },
-      plugins: [
+          plugins: [
     dts({
       include: ['src/**/*'],
       outDir: 'dist',
@@ -42,4 +42,5 @@ export default defineConfig(({ mode }) => {
       '@': resolve(__dirname, 'src'),
     },
   },
+  };
 });
