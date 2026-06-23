@@ -110,6 +110,7 @@ export class HttpClient extends BaseHttpClient {
     ].forEach((key) => {
       delete headers[key];
     });
+    this.applyCredentialEntryBootstrapAccessToken(headers);
     return headers;
   }
 
@@ -286,6 +287,15 @@ export class HttpClient extends BaseHttpClient {
       return;
     }
     this.getInternalAuthConfig().tokenManager = manager;
+  }
+
+  private applyCredentialEntryBootstrapAccessToken(headers: Record<string, string>): void {
+    const authConfig = this.getInternalAuthConfig();
+    const tokenManager = authConfig.tokenManager;
+    const accessToken = tokenManager?.getAccessToken?.();
+    if (typeof accessToken === 'string' && accessToken.length > 0) {
+      headers[HttpClient.ACCESS_TOKEN_HEADER] = accessToken;
+    }
   }
 
   private applySdkworkAuthHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
