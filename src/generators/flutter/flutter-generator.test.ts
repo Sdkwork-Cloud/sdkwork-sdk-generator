@@ -523,8 +523,8 @@ describe('Flutter generator regressions', () => {
         workspaceRoot,
         'sdkwork-appbase',
         'sdks',
-        'sdkwork-appbase-app-sdk',
-        'sdkwork-appbase-app-sdk-flutter',
+        'sdkwork-iam-app-sdk',
+        'sdkwork-iam-app-sdk-flutter',
         'generated',
         'server-openapi',
       );
