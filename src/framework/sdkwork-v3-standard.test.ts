@@ -52,9 +52,13 @@ const openApiKeySpec: ApiSpec = {
     schemas: {
       ProblemDetail: {
         type: 'object',
+        required: ['type', 'title', 'status', 'code', 'traceId'],
         properties: {
+          type: { type: 'string' },
           title: { type: 'string' },
           status: { type: 'integer' },
+          code: { type: 'integer' },
+          traceId: { type: 'string', format: 'uuid' },
         },
       },
     },

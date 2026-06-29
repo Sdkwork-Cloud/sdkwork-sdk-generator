@@ -330,7 +330,7 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file) {
         '  }',
         '',
     ].join('\n'));
-    content = content.replace(/\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+async request)/, '\n');
+    content = content.replace(/\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applyCredentialEntryBootstrapAccessToken\(headers: Record<string, string>\): void \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+private unwrapSdkworkV3Payload)/, '\n');
     content = content.replace(/const requestHeaders = skipAuth \? headers : this\.applySdkworkAuthHeaders\(headers\);/g, 'const requestHeaders = headers;');
     content = content.replace(/const authHeaders = skipAuth \? headers : this\.applySdkworkAuthHeaders\(headers\);\n\s+const requestHeaders = this\.buildRequestHeaders\(\n\s+\{ Accept: 'text\/event-stream', \.\.\.\(authHeaders \?\? \{\}\) \},/g, [
         'const requestHeaders = this.buildRequestHeaders(',

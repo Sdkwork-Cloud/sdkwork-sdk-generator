@@ -1,4 +1,5 @@
 import { normalizeOpenApiPathItemOperations } from './http-methods.js';
+import { validateSdkworkV3Envelope } from './sdkwork-v3-envelope.js';
 const ACCESS_TOKEN_HEADER = 'Access-Token';
 const API_KEY_HEADER = 'X-API-Key';
 const API_KEY_SCHEME = 'ApiKey';
@@ -33,6 +34,7 @@ export function validateSdkworkV3Standard(spec, options) {
     }
     const securitySchemes = spec.components?.securitySchemes || {};
     validateSecuritySchemes(securitySchemes, options.sdkType, issues);
+    issues.push(...validateSdkworkV3Envelope(spec, { sdkType: options.sdkType }));
     for (const [rawPath, pathItem] of Object.entries(spec.paths || {})) {
         const path = normalizePath(rawPath);
         if (!path.startsWith(`${expectedPrefix}/`) && path !== expectedPrefix) {

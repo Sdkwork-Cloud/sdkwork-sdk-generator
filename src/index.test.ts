@@ -23,6 +23,10 @@ import {
   generateSdk,
 } from './index.js';
 import type { GeneratorConfig, ApiSpec } from './framework/types.js';
+import {
+  SDKWORK_V3_TEST_ENVELOPE_SCHEMAS,
+  typedSdkWorkResourceResponse,
+} from './framework/sdkwork-v3-envelope-fixtures.js';
 
 const mockSpec: ApiSpec = {
   openapi: '3.0.0',
@@ -644,14 +648,6 @@ const sdkworkV3IamSpec: ApiSpec = {
         operationId: 'sessions.create',
         tags: ['auth'],
         security: [],
-        parameters: [
-          {
-            name: 'X-Request-Id',
-            in: 'header',
-            required: false,
-            schema: { type: 'string' },
-          },
-        ],
         requestBody: {
           required: true,
           content: {
@@ -665,7 +661,7 @@ const sdkworkV3IamSpec: ApiSpec = {
             description: 'Success',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AuthSession' },
+                schema: { $ref: '#/components/schemas/AuthSessionResponse' },
               },
             },
           },
@@ -691,7 +687,7 @@ const sdkworkV3IamSpec: ApiSpec = {
             description: 'Success',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AuthSession' },
+                schema: { $ref: '#/components/schemas/AuthSessionResponse' },
               },
             },
           },
@@ -742,7 +738,7 @@ const sdkworkV3IamSpec: ApiSpec = {
             description: 'Success',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/AuthSession' },
+                schema: { $ref: '#/components/schemas/AuthSessionResponse' },
               },
             },
           },
@@ -776,7 +772,7 @@ const sdkworkV3IamSpec: ApiSpec = {
             description: 'Success',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/VerificationCodeResult' },
+                schema: { $ref: '#/components/schemas/VerificationCodeResultResponse' },
               },
             },
           },
@@ -810,7 +806,7 @@ const sdkworkV3IamSpec: ApiSpec = {
             description: 'Success',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/VerificationCodeVerifyResult' },
+                schema: { $ref: '#/components/schemas/VerificationCodeVerifyResultResponse' },
               },
             },
           },
@@ -832,6 +828,10 @@ const sdkworkV3IamSpec: ApiSpec = {
       AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
     },
     schemas: {
+      ...SDKWORK_V3_TEST_ENVELOPE_SCHEMAS,
+      AuthSessionResponse: typedSdkWorkResourceResponse('#/components/schemas/AuthSession'),
+      VerificationCodeResultResponse: typedSdkWorkResourceResponse('#/components/schemas/VerificationCodeResult'),
+      VerificationCodeVerifyResultResponse: typedSdkWorkResourceResponse('#/components/schemas/VerificationCodeVerifyResult'),
       CreateSessionRequest: {
         type: 'object',
         properties: {
@@ -879,16 +879,6 @@ const sdkworkV3IamSpec: ApiSpec = {
           refreshToken: { type: 'string' },
         },
       },
-      ProblemDetail: {
-        type: 'object',
-        properties: {
-          type: { type: 'string' },
-          title: { type: 'string' },
-          status: { type: 'integer' },
-          detail: { type: 'string' },
-          instance: { type: 'string' },
-        },
-      },
     },
   },
 };
@@ -916,7 +906,7 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
             description: 'Device route resumed',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/DeviceSessionResumeView' },
+                schema: { $ref: '#/components/schemas/DeviceSessionResumeViewResponse' },
               },
             },
           },
@@ -950,7 +940,7 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
             description: 'Presence snapshot after disconnect',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/PresenceSnapshotView' },
+                schema: { $ref: '#/components/schemas/PresenceSnapshotViewResponse' },
               },
             },
           },
@@ -984,7 +974,7 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
             description: 'Registered device view',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/RegisteredDeviceView' },
+                schema: { $ref: '#/components/schemas/RegisteredDeviceViewResponse' },
               },
             },
           },
@@ -1014,7 +1004,7 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
             description: 'Device sync feed',
             content: {
               'application/json': {
-                schema: { $ref: '#/components/schemas/DeviceSyncFeedResponse' },
+                schema: { $ref: '#/components/schemas/DeviceSyncFeedResponseEnvelope' },
               },
             },
           },
@@ -1036,6 +1026,11 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
       AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
     },
     schemas: {
+      ...SDKWORK_V3_TEST_ENVELOPE_SCHEMAS,
+      DeviceSessionResumeViewResponse: typedSdkWorkResourceResponse('#/components/schemas/DeviceSessionResumeView'),
+      PresenceSnapshotViewResponse: typedSdkWorkResourceResponse('#/components/schemas/PresenceSnapshotView'),
+      RegisteredDeviceViewResponse: typedSdkWorkResourceResponse('#/components/schemas/RegisteredDeviceView'),
+      DeviceSyncFeedResponseEnvelope: typedSdkWorkResourceResponse('#/components/schemas/DeviceSyncFeedResponse'),
       ResumeDeviceSessionRequest: { type: 'object', properties: { deviceId: { type: 'string' } } },
       DeviceSessionResumeView: { type: 'object', properties: { resumed: { type: 'boolean' } } },
       PresenceDeviceRequest: { type: 'object', properties: { deviceId: { type: 'string' } } },
@@ -1043,7 +1038,6 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
       RegisterDeviceRequest: { type: 'object', properties: { deviceId: { type: 'string' } } },
       RegisteredDeviceView: { type: 'object', properties: { deviceId: { type: 'string' } } },
       DeviceSyncFeedResponse: { type: 'object', properties: { nextSeq: { type: 'integer' } } },
-      ProblemDetail: { type: 'object', properties: { title: { type: 'string' } } },
     },
   },
 };
@@ -6274,9 +6268,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(authApi!.content).toContain('this.sessions = new AuthSessionsApi(client);');
     expect(authApi!.content).toContain('export class AuthSessionsApi');
     expect(authApi!.content).toContain('public readonly current: AuthSessionsCurrentApi;');
-    expect(authApi!.content).toContain('export interface AuthSessionsCreateParams');
-    expect(authApi!.content).toContain('xRequestId?: string;');
-    expect(authApi!.content).toContain('async create(body: CreateSessionRequest, params?: AuthSessionsCreateParams): Promise<AuthSession>');
+    expect(authApi!.content).not.toContain('export interface AuthSessionsCreateParams');
+    expect(authApi!.content).not.toContain('xRequestId?: string;');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest): Promise<AuthSession>');
     expect(authApi!.content).toContain('async refresh(body: RefreshSessionRequest): Promise<AuthSession>');
     expect(authApi!.content).toContain('async retrieve(): Promise<AuthSession>');
     expect(authApi!.content).toContain('async delete(): Promise<void>');
@@ -6290,11 +6284,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(authApi!.content).not.toContain('async createSession(');
     expect(authApi!.content).not.toContain('async sessionsCreate(');
     expect(readmeFile).toBeDefined();
-    expect(readmeFile!.content).toContain("const xRequestId = 'X-Request-Id';");
-    expect(readmeFile!.content).toContain("const params = {");
-    expect(readmeFile!.content).toContain("  xRequestId,");
-    expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body, params);');
-    expect(readmeFile!.content).not.toContain('client.auth.sessions.create(body)');
+    expect(readmeFile!.content).not.toContain("const xRequestId = 'X-Request-Id';");
+    expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body);');
+    expect(readmeFile!.content).not.toContain('client.auth.sessions.create(body, params)');
   });
 
   it('should support IM sdkwork v3 generated clients without backend masquerading', async () => {
@@ -6390,7 +6382,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { method: 'POST' as any, body, headers: requestHeaders, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
     );
     expect(authApi!.content).toContain(
       "this.client.get<AuthSession>(appApiPath(`/auth/sessions/current`))",
@@ -6651,10 +6643,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(sdkFile!.content).not.toContain('public readonly iam: IamApi;');
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain('public readonly sessions: AuthSessionsApi;');
-    expect(authApi!.content).toContain('async create(body: CreateSessionRequest, params?: AuthSessionsCreateParams): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest): Promise<AuthSession>');
     expect(iamApi).toBeUndefined();
     expect(readmeFile).toBeDefined();
-    expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body, params);');
+    expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body);');
     expect(readmeFile!.content).not.toContain('client.iam.sessions.create');
   });
 
@@ -6690,7 +6682,7 @@ describe('OpenAPI Security And Compliance', () => {
                   description: 'Success',
                   content: {
                     'application/json': {
-                      schema: { $ref: '#/components/schemas/OauthAuthorizationUrlCreateResult' },
+                      schema: { $ref: '#/components/schemas/OauthAuthorizationUrlCreateResultResponse' },
                     },
                   },
                 },
@@ -6726,6 +6718,7 @@ describe('OpenAPI Security And Compliance', () => {
                 authUrl: { type: 'string' },
               },
             },
+            OauthAuthorizationUrlCreateResultResponse: typedSdkWorkResourceResponse('#/components/schemas/OauthAuthorizationUrlCreateResult'),
           },
         },
       }

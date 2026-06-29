@@ -451,7 +451,7 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file: GeneratedFile): Generated
     ].join('\n'),
   );
   content = content.replace(
-    /\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+async request)/,
+    /\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applyCredentialEntryBootstrapAccessToken\(headers: Record<string, string>\): void \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+private unwrapSdkworkV3Payload)/,
     '\n',
   );
   content = content.replace(

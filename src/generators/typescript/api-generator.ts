@@ -18,6 +18,7 @@ import {
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
 import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -153,7 +154,7 @@ export class ApiGenerator {
       if (!metadata) {
         continue;
       }
-      files.push(this.generateApiFile(metadata, group.operations, config, knownModels));
+      files.push(this.generateApiFile(metadata, group.operations, config, knownModels, ctx.schemas));
     }
 
     files.push(this.generateBaseApi());
@@ -167,7 +168,8 @@ export class ApiGenerator {
     metadata: TypeScriptApiTagMetadata,
     operations: any[],
     config: GeneratorConfig,
-    knownModels: Set<string>
+    knownModels: Set<string>,
+    schemas: SchemaContext['schemas'],
   ): GeneratedFile {
     const className = metadata.className;
     const fileName = metadata.fileName;
@@ -176,8 +178,8 @@ export class ApiGenerator {
       ? buildTypeScriptResourceTree(metadata.tag, operations, metadata, config)
       : undefined;
     const methods = resourceTree
-      ? this.generateResourceClasses(resourceTree, config, knownModels, referencedModels)
-      : this.generateFlatApiClass(metadata, operations, config, knownModels, referencedModels);
+      ? this.generateResourceClasses(resourceTree, config, knownModels, referencedModels, schemas)
+      : this.generateFlatApiClass(metadata, operations, config, knownModels, referencedModels, schemas);
     const needsRequestHeaderHelpers = operations.some((op) => {
       const allParameters = op.allParameters || op.parameters || [];
       return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
@@ -229,11 +231,12 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
     config: GeneratorConfig,
     knownModels: Set<string>,
     referencedModels: Set<string>,
+    schemas: SchemaContext['schemas'],
   ): string {
     const methodNames = this.resolveMethodNames(operations, metadata.tag, config);
     const generatedMethods = operations
       .map((op) => {
-        const generated = this.generateMethod(op, config, metadata.className, methodNames.get(op) || 'operation', knownModels);
+        const generated = this.generateMethod(op, config, metadata.className, methodNames.get(op) || 'operation', knownModels, schemas);
         generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
         return generated;
       });
@@ -260,10 +263,11 @@ export function create${metadata.className}(client: HttpClient): ${metadata.clas
     config: GeneratorConfig,
     knownModels: Set<string>,
     referencedModels: Set<string>,
+    schemas: SchemaContext['schemas'],
   ): string {
     const classes = this.flattenResourceNodes(root)
       .reverse()
-      .map((node) => this.generateResourceClass(node, config, knownModels, referencedModels))
+      .map((node) => this.generateResourceClass(node, config, knownModels, referencedModels, schemas))
       .join('\n\n');
 
     return `${classes}
@@ -278,6 +282,7 @@ export function create${root.className}(client: HttpClient): ${root.className} {
     config: GeneratorConfig,
     knownModels: Set<string>,
     referencedModels: Set<string>,
+    schemas: SchemaContext['schemas'],
   ): string {
     const methodNames = this.resolveMethodNames(node.operations, node.propertyName, config, node.resourcePathSegments);
     const childProperties = node.children
@@ -288,7 +293,7 @@ export function create${root.className}(client: HttpClient): ${root.className} {
       .join('\n');
     const generatedMethods = node.operations
       .map((op) => {
-        const generated = this.generateMethod(op, config, node.className, methodNames.get(op) || 'operation', knownModels);
+        const generated = this.generateMethod(op, config, node.className, methodNames.get(op) || 'operation', knownModels, schemas);
         generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
         return generated;
       });
@@ -317,7 +322,8 @@ ${methods ? `\n\n${methods}` : ''}
     config: GeneratorConfig,
     className: string,
     methodName: string,
-    knownModels: Set<string>
+    knownModels: Set<string>,
+    schemas: SchemaContext['schemas'],
   ): GeneratedMethod {
     const rawPathParams = this.extractPathParams(op.path);
     const allParameters = op.allParameters || op.parameters || [];
@@ -347,7 +353,10 @@ ${methods ? `\n\n${methods}` : ''}
     const skipAuth = operationSkipsSdkworkAuth(op);
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
-    const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+    const rawResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+    const responseSchema = config.options?.standardProfile === 'sdkwork-v3' && rawResponseSchema
+      ? resolveSdkworkV3ConsumerSchema(rawResponseSchema, schemas).consumerSchema
+      : rawResponseSchema;
     const responseType = responseSchema
       ? getTypeScriptType(responseSchema, TYPESCRIPT_CONFIG, knownModels)
       : this.inferFallbackResponseType(op);

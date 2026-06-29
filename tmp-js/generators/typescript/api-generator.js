@@ -7,6 +7,7 @@ import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
 const TYPESCRIPT_RESERVED_WORDS = new Set([
     'abstract',
     'any',
@@ -95,14 +96,14 @@ export class ApiGenerator {
             if (!metadata) {
                 continue;
             }
-            files.push(this.generateApiFile(metadata, group.operations, config, knownModels));
+            files.push(this.generateApiFile(metadata, group.operations, config, knownModels, ctx.schemas));
         }
         files.push(this.generateBaseApi());
         files.push(this.generatePaths(config));
         files.push(this.generateApiIndex(tagMetadataList, config));
         return files;
     }
-    generateApiFile(metadata, operations, config, knownModels) {
+    generateApiFile(metadata, operations, config, knownModels, schemas) {
         const className = metadata.className;
         const fileName = metadata.fileName;
         const referencedModels = new Set();
@@ -110,8 +111,8 @@ export class ApiGenerator {
             ? buildTypeScriptResourceTree(metadata.tag, operations, metadata, config)
             : undefined;
         const methods = resourceTree
-            ? this.generateResourceClasses(resourceTree, config, knownModels, referencedModels)
-            : this.generateFlatApiClass(metadata, operations, config, knownModels, referencedModels);
+            ? this.generateResourceClasses(resourceTree, config, knownModels, referencedModels, schemas)
+            : this.generateFlatApiClass(metadata, operations, config, knownModels, referencedModels, schemas);
         const needsRequestHeaderHelpers = operations.some((op) => {
             const allParameters = op.allParameters || op.parameters || [];
             return allParameters.some((param) => param?.in === 'header' || param?.in === 'cookie');
@@ -155,11 +156,11 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
             description: `${metadata.tag} API module`,
         };
     }
-    generateFlatApiClass(metadata, operations, config, knownModels, referencedModels) {
+    generateFlatApiClass(metadata, operations, config, knownModels, referencedModels, schemas) {
         const methodNames = this.resolveMethodNames(operations, metadata.tag, config);
         const generatedMethods = operations
             .map((op) => {
-            const generated = this.generateMethod(op, config, metadata.className, methodNames.get(op) || 'operation', knownModels);
+            const generated = this.generateMethod(op, config, metadata.className, methodNames.get(op) || 'operation', knownModels, schemas);
             generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
             return generated;
         });
@@ -179,10 +180,10 @@ export function create${metadata.className}(client: HttpClient): ${metadata.clas
   return new ${metadata.className}(client);
 }`;
     }
-    generateResourceClasses(root, config, knownModels, referencedModels) {
+    generateResourceClasses(root, config, knownModels, referencedModels, schemas) {
         const classes = this.flattenResourceNodes(root)
             .reverse()
-            .map((node) => this.generateResourceClass(node, config, knownModels, referencedModels))
+            .map((node) => this.generateResourceClass(node, config, knownModels, referencedModels, schemas))
             .join('\n\n');
         return `${classes}
 
@@ -190,7 +191,7 @@ export function create${root.className}(client: HttpClient): ${root.className} {
   return new ${root.className}(client);
 }`;
     }
-    generateResourceClass(node, config, knownModels, referencedModels) {
+    generateResourceClass(node, config, knownModels, referencedModels, schemas) {
         const methodNames = this.resolveMethodNames(node.operations, node.propertyName, config, node.resourcePathSegments);
         const childProperties = node.children
             .map((child) => `  public readonly ${child.propertyName}: ${child.className};`)
@@ -200,7 +201,7 @@ export function create${root.className}(client: HttpClient): ${root.className} {
             .join('\n');
         const generatedMethods = node.operations
             .map((op) => {
-            const generated = this.generateMethod(op, config, node.className, methodNames.get(op) || 'operation', knownModels);
+            const generated = this.generateMethod(op, config, node.className, methodNames.get(op) || 'operation', knownModels, schemas);
             generated.referencedModels.forEach((modelName) => referencedModels.add(modelName));
             return generated;
         });
@@ -221,7 +222,7 @@ ${methods ? `\n\n${methods}` : ''}
             ...root.children.flatMap((child) => this.flattenResourceNodes(child)),
         ];
     }
-    generateMethod(op, config, className, methodName, knownModels) {
+    generateMethod(op, config, className, methodName, knownModels, schemas) {
         const rawPathParams = this.extractPathParams(op.path);
         const allParameters = op.allParameters || op.parameters || [];
         const queryParams = allParameters.filter((param) => param?.in === 'query');
@@ -250,7 +251,10 @@ ${methods ? `\n\n${methods}` : ''}
         const skipAuth = operationSkipsSdkworkAuth(op);
         const eventStreamInfo = extractEventStreamResponseInfo(op);
         const isEventStreamResponse = Boolean(eventStreamInfo);
-        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+        const rawResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+        const responseSchema = config.options?.standardProfile === 'sdkwork-v3' && rawResponseSchema
+            ? resolveSdkworkV3ConsumerSchema(rawResponseSchema, schemas).consumerSchema
+            : rawResponseSchema;
         const responseType = responseSchema
             ? getTypeScriptType(responseSchema, TYPESCRIPT_CONFIG, knownModels)
             : this.inferFallbackResponseType(op);

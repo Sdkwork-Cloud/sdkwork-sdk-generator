@@ -910,6 +910,10 @@ export class BaseGenerator {
             'authorization',
             'access-token',
         ]);
+        if (this.config.options?.standardProfile === 'sdkwork-v3') {
+            managedHeaders.add('x-request-id');
+            managedHeaders.add('x-sdkwork-trace-id');
+        }
         if (auth?.apiKeyHeader) {
             managedHeaders.add(String(auth.apiKeyHeader).trim().toLowerCase());
         }
