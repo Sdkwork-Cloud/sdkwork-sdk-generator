@@ -55,7 +55,8 @@
     "test": "node ./bin/test-runner.mjs",
     "test:vitest": "vitest",
     "clean": "node ./bin/clean.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "check:app-composition": "node ../sdkwork-specs/tools/verify-repo.mjs --root ."
   },
   "keywords": [
     "sdkwork",
@@ -102,5 +103,9 @@
     "vite": "^7.3.1",
     "vite-plugin-dts": "^4.5.4",
     "vitest": "^4.1.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

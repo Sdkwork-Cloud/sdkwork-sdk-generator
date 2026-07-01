@@ -1,4 +1,5 @@
 # SDKWork SDK Generator
+repository-kind: foundation-dependency
 
 Professional SDK code generator for multiple programming languages. Generate type-safe, well-structured SDKs from OpenAPI specifications.
 
