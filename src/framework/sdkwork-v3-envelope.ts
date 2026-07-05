@@ -70,6 +70,9 @@ export function validateSdkworkV3Envelope(
         continue;
       }
       const op = operation as Record<string, any>;
+      if (operationUsesExternalWireProtocol(op)) {
+        continue;
+      }
       for (const parameter of op.parameters || []) {
         if (
           parameter?.in === 'header'
@@ -268,6 +271,12 @@ function unwrapKindForDataSchema(
 function extractJsonSchema(response: any): Record<string, any> | undefined {
   const content = response?.content?.['application/json']?.schema;
   return content && typeof content === 'object' ? content : undefined;
+}
+
+function operationUsesExternalWireProtocol(operation: Record<string, any>): boolean {
+  return operation['x-sdkwork-wire-protocol'] === 'external'
+    && typeof operation['x-sdkwork-external-protocol-id'] === 'string'
+    && operation['x-sdkwork-external-protocol-id'].trim().length > 0;
 }
 
 function resolveSchema(

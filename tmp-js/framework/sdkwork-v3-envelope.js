@@ -44,6 +44,9 @@ export function validateSdkworkV3Envelope(spec, options = {}) {
                 continue;
             }
             const op = operation;
+            if (operationUsesExternalWireProtocol(op)) {
+                continue;
+            }
             for (const parameter of op.parameters || []) {
                 if (parameter?.in === 'header'
                     && typeof parameter.name === 'string'
@@ -203,6 +206,11 @@ function unwrapKindForDataSchema(dataSchema, components) {
 function extractJsonSchema(response) {
     const content = response?.content?.['application/json']?.schema;
     return content && typeof content === 'object' ? content : undefined;
+}
+function operationUsesExternalWireProtocol(operation) {
+    return operation['x-sdkwork-wire-protocol'] === 'external'
+        && typeof operation['x-sdkwork-external-protocol-id'] === 'string'
+        && operation['x-sdkwork-external-protocol-id'].trim().length > 0;
 }
 function resolveSchema(schema, components, seen) {
     if (!schema || typeof schema !== 'object') {
