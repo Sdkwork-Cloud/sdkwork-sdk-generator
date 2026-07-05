@@ -76,7 +76,7 @@ describe('TypeScript build config generator', () => {
 
     const packageJson = generatedPackageJson(result.files);
 
-    expect(packageJson.name).toBe('@sdkwork/im-sdk-generated');
+    expect(packageJson.name).toBe('sdkwork-im-sdk-generated-typescript');
     expect(packageJson.private).toBe(true);
     expect(packageJson.description).toBe('Generator-owned TypeScript transport SDK for sdkwork-im-sdk.');
   });

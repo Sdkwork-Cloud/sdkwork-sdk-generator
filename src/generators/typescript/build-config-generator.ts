@@ -3,7 +3,8 @@ import type { GeneratorConfig } from '../../framework/types.js';
 import { resolveTypeScriptCommonPackage } from '../../framework/common-package.js';
 import {
   resolveDefaultPackageToken,
-  resolveDefaultTypeScriptPackageName,
+  resolveDefaultTypeScriptConsumerPackageName,
+  resolveDefaultTypeScriptTransportPackageName,
 } from '../../framework/package-identity.js';
 
 export class BuildConfigGenerator {
@@ -16,11 +17,13 @@ export class BuildConfigGenerator {
   }
 
   private generatePackageJson(config: GeneratorConfig): GeneratedFile {
-    const pkgName = config.packageName || resolveDefaultTypeScriptPackageName(config);
+    const isSdkworkV3TransportPackage = config.options?.standardProfile === 'sdkwork-v3';
+    const pkgName = isSdkworkV3TransportPackage
+      ? resolveDefaultTypeScriptTransportPackageName(config)
+      : (config.packageName || resolveDefaultTypeScriptTransportPackageName(config));
     const commonPkg = resolveTypeScriptCommonPackage(config);
     const trimmedName = (config.name || '').trim();
     const inferredDescription = /sdk$/i.test(trimmedName) ? trimmedName : `${trimmedName} SDK`;
-    const isSdkworkV3TransportPackage = config.options?.standardProfile === 'sdkwork-v3';
     const sdkFamilyName = `sdkwork-${resolveDefaultPackageToken(config)}`;
     const description = isSdkworkV3TransportPackage
       ? `Generator-owned TypeScript transport SDK for ${sdkFamilyName}.`
@@ -40,6 +43,7 @@ export class BuildConfigGenerator {
       name: pkgName,
       version: config.version,
       private: isSdkworkV3TransportPackage ? true : undefined,
+      sdkworkRole: isSdkworkV3TransportPackage ? 'transport' : undefined,
       description,
       author: config.author || 'SDKWork Team',
       license: config.license || 'MIT',

@@ -85,6 +85,12 @@ export function resolveDefaultPackageToken(config) {
     return inferred || `generated-${config.sdkType}-sdk`;
 }
 export function resolveDefaultTypeScriptPackageName(config) {
+    return resolveDefaultTypeScriptTransportPackageName(config);
+}
+export function resolveDefaultTypeScriptTransportPackageName(config) {
+    return `${resolveDefaultDistributionName(config)}-generated-typescript`;
+}
+export function resolveDefaultTypeScriptConsumerPackageName(config) {
     return `@sdkwork/${resolveDefaultPackageToken(config)}`;
 }
 export function resolveDefaultDistributionName(config) {

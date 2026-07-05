@@ -108,6 +108,18 @@ export function resolveDefaultPackageToken(
 export function resolveDefaultTypeScriptPackageName(
   config: Pick<GeneratorConfig, 'name' | 'sdkType'>,
 ): string {
+  return resolveDefaultTypeScriptTransportPackageName(config);
+}
+
+export function resolveDefaultTypeScriptTransportPackageName(
+  config: Pick<GeneratorConfig, 'name' | 'sdkType'>,
+): string {
+  return `${resolveDefaultDistributionName(config)}-generated-typescript`;
+}
+
+export function resolveDefaultTypeScriptConsumerPackageName(
+  config: Pick<GeneratorConfig, 'name' | 'sdkType'>,
+): string {
   return `@sdkwork/${resolveDefaultPackageToken(config)}`;
 }
 

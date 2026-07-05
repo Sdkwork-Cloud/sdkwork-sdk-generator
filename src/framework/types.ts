@@ -289,7 +289,10 @@ export interface SdkMetadataManifest {
   version: string;
   language: Language;
   sdkType: SdkType;
+  /** @deprecated Use transportPackageName. Kept for generator idempotency readers. */
   packageName: string | null;
+  transportPackageName: string;
+  consumerPackageName: string;
   generator: string;
   capabilities: SdkMetadataCapabilities;
   generation: SdkMetadataGeneration;

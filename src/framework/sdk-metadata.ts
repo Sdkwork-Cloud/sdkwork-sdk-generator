@@ -1,4 +1,8 @@
 import { getLanguageCapability } from '../language-capabilities.js';
+import {
+  resolveDefaultTypeScriptConsumerPackageName,
+  resolveDefaultTypeScriptTransportPackageName,
+} from './package-identity.js';
 import type {
   GeneratorConfig,
   GeneratedFileOwnership,
@@ -11,7 +15,7 @@ export const SDKWORK_METADATA_SCHEMA_VERSION = 1;
 export const SDKWORK_GENERATOR_PACKAGE = '@sdkwork/sdk-generator';
 
 export function buildSdkMetadataManifest(
-  config: Pick<GeneratorConfig, 'name' | 'version' | 'language' | 'sdkType' | 'packageName' | 'generateReadme' | 'generateTests'>,
+  config: Pick<GeneratorConfig, 'name' | 'version' | 'language' | 'sdkType' | 'packageName' | 'generateReadme' | 'generateTests' | 'options'>,
   _options?: {
     supportsGeneratedTests?: boolean;
   },
@@ -21,13 +25,20 @@ export function buildSdkMetadataManifest(
     throw new Error(`Unsupported language for sdk metadata manifest: ${config.language}`);
   }
 
+  const transportPackageName = config.options?.standardProfile === 'sdkwork-v3'
+    ? resolveDefaultTypeScriptTransportPackageName(config)
+    : (config.packageName || resolveDefaultTypeScriptTransportPackageName(config));
+  const consumerPackageName = resolveDefaultTypeScriptConsumerPackageName(config);
+
   return {
     schemaVersion: SDKWORK_METADATA_SCHEMA_VERSION,
     name: config.name,
     version: config.version,
     language: config.language,
     sdkType: config.sdkType,
-    packageName: config.packageName || null,
+    packageName: transportPackageName,
+    transportPackageName,
+    consumerPackageName,
     generator: SDKWORK_GENERATOR_PACKAGE,
     capabilities: {
       supportsGeneratedTests: capability.supportsGeneratedTests,
@@ -72,13 +83,26 @@ export function parseSdkMetadataManifest(value: unknown): SdkMetadataManifest | 
     return null;
   }
 
+  const transportPackageName = typeof value.transportPackageName === 'string'
+    ? value.transportPackageName
+    : (typeof value.packageName === 'string' ? value.packageName : '');
+  const consumerPackageName = typeof value.consumerPackageName === 'string'
+    ? value.consumerPackageName
+    : '';
+
+  if (!transportPackageName || !consumerPackageName) {
+    return null;
+  }
+
   return {
     schemaVersion: SDKWORK_METADATA_SCHEMA_VERSION,
     name: value.name,
     version: value.version,
     language: value.language,
     sdkType: value.sdkType,
-    packageName: value.packageName,
+    packageName: typeof value.packageName === 'string' ? value.packageName : transportPackageName,
+    transportPackageName,
+    consumerPackageName,
     generator: SDKWORK_GENERATOR_PACKAGE,
     capabilities: {
       supportsGeneratedTests: value.capabilities.supportsGeneratedTests,
