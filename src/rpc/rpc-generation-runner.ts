@@ -247,7 +247,7 @@ function createReadmeFile(config: GeneratorConfig, rpc: RpcInputSpec): Generated
     language: config.language,
     description: 'RPC SDK README',
     ownership: 'scaffold',
-    overwriteStrategy: 'if-missing',
+    overwriteStrategy: 'always',
   };
 }
 
@@ -310,6 +310,10 @@ function createTypeScriptPackageScaffoldFiles(
         },
         devDependencies: {
           typescript: '^5.3.0',
+        },
+        publishConfig: {
+          access: 'public',
+          registry: 'https://registry.npmjs.org/',
         },
       }, null, 2)}\n`,
       language: 'typescript',

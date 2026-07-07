@@ -55,6 +55,12 @@ message CreateMessageResponse { string message_id = 1; }
   return { manifestPath, protoRoot };
 }
 
+function rewriteRpcFixtureOperationId(manifestPath: string, operationId: string): void {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  manifest.services[0].methods[0].operationId = operationId;
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
+}
+
 describe('RPC generate command runner', () => {
   afterEach(() => {
     while (tempDirs.length > 0) {
@@ -145,6 +151,40 @@ describe('RPC generate command runner', () => {
     expect(existsSync(join(outputDir, '.sdkwork', 'sdkwork-generator-manifest.json'))).toBe(false);
     expect(existsSync(join(outputDir, '.sdkwork', 'sdkwork-generator-changes.json'))).toBe(false);
     expect(existsSync(join(outputDir, '.sdkwork', 'sdkwork-generator-report.json'))).toBe(false);
+  });
+
+  it('refreshes rpc README service catalog when manifest operationIds change', async () => {
+    const workDir = createTempDir('sdkwork-cli-runner-rpc-readme-refresh-');
+    const outputDir = join(workDir, 'sdkwork-im-rpc-sdk-typescript');
+    const fixture = writeRpcFixture(workDir);
+    const baseOptions = {
+      protocol: 'rpc' as const,
+      input: fixture.manifestPath,
+      protoRoot: fixture.protoRoot,
+      output: outputDir,
+      name: 'SdkworkImRpc',
+      sdkName: 'sdkwork-im-rpc-sdk',
+      language: 'typescript' as const,
+      packageName: '@sdkwork/im-rpc-sdk',
+      syncPublishedVersion: false,
+      fixedSdkVersion: '1.0.5',
+    };
+
+    await runGenerateCommand(baseOptions);
+    rewriteRpcFixtureOperationId(fixture.manifestPath, 'messages.publish');
+
+    await runGenerateCommand(baseOptions);
+
+    const readme = readFileSync(join(outputDir, 'README.md'), 'utf-8');
+    const methodCatalog = JSON.parse(readFileSync(join(outputDir, 'rpc-methods.json'), 'utf-8'));
+    expect(readme).toContain('CreateMessage: messages.publish');
+    expect(readme).not.toContain('CreateMessage: messages.create');
+    expect(methodCatalog.methods).toEqual([
+      expect.objectContaining({
+        methodKey: 'sdkwork.communication.app.v3.MessageService/CreateMessage',
+        operationId: 'messages.publish',
+      }),
+    ]);
   });
 
   it('removes prior rpc generator state and does not create manual backups in convention mode', async () => {
@@ -293,6 +333,10 @@ describe('RPC generate command runner', () => {
         expect(packageJson.dependencies).toMatchObject({
           '@bufbuild/protobuf': '^2.12.0',
           '@connectrpc/connect': '^2.1.0',
+        });
+        expect(packageJson.publishConfig).toEqual({
+          access: 'public',
+          registry: 'https://registry.npmjs.org/',
         });
         expect(tsconfigJson.compilerOptions.rootDir).toBe('.');
         expect(tsconfigJson.include).toContain('generated/proto/**/*.ts');

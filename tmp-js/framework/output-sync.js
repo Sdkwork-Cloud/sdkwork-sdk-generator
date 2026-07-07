@@ -152,14 +152,17 @@ export function syncGeneratedOutput(outputPath, files, options) {
     }
     for (const file of scaffoldFiles) {
         const targetPath = resolveOutputPath(outDir, file.path);
-        if (fs.existsSync(targetPath)) {
+        if (fs.existsSync(targetPath) && file.overwriteStrategy !== 'always') {
             skippedScaffoldFiles += 1;
             preservedScaffoldFiles.add(file.path);
             continue;
         }
-        writeTextFile(outDir, file.path, file.content, dryRun);
-        scaffoldedFiles.add(file.path);
-        writtenFiles += 1;
+        backupExistingFile(outDir, file.path, undefined, file.content, backedUpFiles, dryRun, emitControlPlane);
+        const writeResult = writeTextFile(outDir, file.path, file.content, dryRun);
+        if (writeResult.state !== 'unchanged') {
+            scaffoldedFiles.add(file.path);
+            writtenFiles += 1;
+        }
     }
     const changes = buildOutputChangeSet({
         createdGeneratedFiles: Array.from(createdGeneratedFiles),
