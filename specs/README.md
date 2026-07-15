@@ -9,3 +9,7 @@ This directory is the local SDKWork component contract for `@sdkwork/sdk-generat
 Read `specs/component.spec.json` before changing this component's public exports, runtime entrypoints, SDK clients, generated artifacts, config keys, or verification commands.
 
 Do not copy root standards into this directory. Link to files under `../sdkwork-specs/` instead.
+
+## Repository Local Conventions
+
+- [`sdk-generator-local-conventions.md`](sdk-generator-local-conventions.md): task-scoped generator source ownership, SDKWork v3 implementation routing, local verification, and contribution expectations.

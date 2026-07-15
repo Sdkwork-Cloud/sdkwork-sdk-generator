@@ -1,5 +1,6 @@
 import { getLanguageCapability } from '../language-capabilities.js';
 import {
+  resolveDefaultDistributionName,
   resolveDefaultTypeScriptConsumerPackageName,
   resolveDefaultTypeScriptTransportPackageName,
 } from './package-identity.js';
@@ -25,10 +26,10 @@ export function buildSdkMetadataManifest(
     throw new Error(`Unsupported language for sdk metadata manifest: ${config.language}`);
   }
 
-  const transportPackageName = config.options?.standardProfile === 'sdkwork-v3'
-    ? resolveDefaultTypeScriptTransportPackageName(config)
-    : (config.packageName || resolveDefaultTypeScriptTransportPackageName(config));
-  const consumerPackageName = resolveDefaultTypeScriptConsumerPackageName(config);
+  const transportPackageName = resolveTransportPackageName(config);
+  const consumerPackageName = config.language === 'typescript'
+    ? resolveDefaultTypeScriptConsumerPackageName(config)
+    : transportPackageName;
 
   return {
     schemaVersion: SDKWORK_METADATA_SCHEMA_VERSION,
@@ -58,6 +59,18 @@ export function buildSdkMetadataManifest(
       stateRoots: ['.sdkwork/'],
     },
   };
+}
+
+function resolveTransportPackageName(
+  config: Pick<GeneratorConfig, 'name' | 'language' | 'sdkType' | 'packageName' | 'options'>,
+): string {
+  if (config.language !== 'typescript') {
+    return config.packageName || resolveDefaultDistributionName(config);
+  }
+
+  return config.options?.standardProfile === 'sdkwork-v3'
+    ? resolveDefaultTypeScriptTransportPackageName(config)
+    : (config.packageName || resolveDefaultTypeScriptTransportPackageName(config));
 }
 
 export function parseSdkMetadataManifest(value: unknown): SdkMetadataManifest | null {

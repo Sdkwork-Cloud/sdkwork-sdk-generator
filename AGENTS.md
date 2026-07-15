@@ -222,33 +222,6 @@ Authority: `PAGINATION_SPEC.md`, `API_SPEC.md` §14.1/§16, `DATABASE_SPEC.md` �
 
 Request human review before breaking SDKWORK standards, changing public naming, altering security/auth behavior, changing database migrations or production deployment config, deleting data/files, or changing generated SDK ownership. Surface unresolved spec paths, app identity conflicts, component ownership conflicts, and API authority ambiguity instead of guessing.
 
-## Existing Local Guidance
+## Local Conventions
 
-The repository-specific guidance below was preserved from the previous `AGENTS.md`. If it conflicts with the SDKWORK sections above or with `../sdkwork-specs/`, the SDKWORK standards win.
-
-### Project Structure & Module Organization
-`src/` is the source of truth. Core generator contracts live under `src/framework/`, CLI entrypoints and orchestration live in top-level `src/*.ts`, and each language generator has its own folder under `src/generators/<language>/` with the usual split of `config.ts`, `model-generator.ts`, `api-generator.ts`, `http-generator.ts`, `build-config-generator.ts`, and `readme-generator.ts`. Most tests are colocated as `src/**/*.test.ts`; `test/` is reserved for broader helper or verification scripts. `bin/` contains CLI shims, while `dist/` and `tmp-js/` are build outputs and should not be edited by hand.
-
-### Build, Test, and Development Commands
-Use Node 18+.
-
-- `npm install` installs local dependencies.
-- `npm run build` emits declarations to `dist/`, bundles the library with Vite, and builds runtime entrypoints.
-- `npm test` runs the Vitest suite.
-- `npx vitest run src/generators/java/java-generator.test.ts` runs a focused regression test while iterating.
-- `npm run dev` rebuilds in watch mode.
-- `node bin/sdkgen.js generate -i .\\test-openapi.json -o .\\tmp-out -n Demo -l typescript --dry-run` is a quick CLI smoke test.
-
-### Coding Style & Naming Conventions
-Write strict TypeScript with 2-space indentation and ES module syntax. Keep relative imports explicit with `.js` suffixes inside `.ts` files, matching the current source layout. Use `PascalCase` for classes and generator types, `camelCase` for functions and variables, and `kebab-case` for filenames. Follow the existing small-module pattern instead of adding large cross-language files.
-
-### Previous SDKWORK Standards Notes
-Before changing domains, APIs, SDK contracts, database schemas, reusable modules, frontend UI/service logic, app manifests, IAM/auth/permission behavior, deployment/runtime configuration, external integrations, events, observability, performance, privacy, or generated-client integration, read the canonical standards in `../sdkwork-specs/README.md` and then the relevant spec files under `../sdkwork-specs/`. Local conventions may extend these standards but must not contradict them.
-
-For generator behavior, `../sdkwork-specs/API_SPEC.md` and `../sdkwork-specs/SDK_SPEC.md` are authoritative. The SDKWork v3 profile must generate nested resource clients from `tag + dotted operationId`, for example tag `auth` and operationId `sessions.create` becomes `client.auth.sessions.create(body)`. Do not introduce flat aliases such as `client.auth.createSession()` for new contracts. The generator must preserve the dual-token header model and the `/app/v3/api` plus `/backend/v3/api` surface split.
-
-### Testing Guidelines
-Use Vitest (`describe`, `it`, `expect`) and place tests next to the code they protect. Name files `*.test.ts`. Favor targeted assertions on generated file paths and contents over broad snapshots so regressions stay readable. There is no enforced coverage threshold in this package, so every behavior change should add or update the closest regression test.
-
-### Commit & Pull Request Guidelines
-Recent history follows short conventional subjects such as `feat: ...`, `fix: ...`, and `chore: ...`; keep commits imperative and focused. For pull requests, summarize the affected generators or CLI flows, list the verification you ran (`npm test`, targeted Vitest runs, CLI dry-run output), and include before/after examples when generated SDK output changes. Link the relevant issue when one exists.
+Read [`specs/sdk-generator-local-conventions.md`](specs/sdk-generator-local-conventions.md) only when a task reaches generator source ownership, a language emitter, CLI or output handling, SDKWork v3 materialization, or local build and test workflow. It narrows this repository's implementation workflow; `specs/component.spec.json` and `../sdkwork-specs/` remain the applicable authorities.
