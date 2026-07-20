@@ -334,6 +334,11 @@ export interface AuthContext {
   apiKeyIn?: 'header' | 'query' | 'cookie';
   apiKeyHeader?: string;
   apiKeyAsBearer: boolean;
+  apiKeySchemes?: Array<{
+    schemeName: string;
+    location?: 'header' | 'query' | 'cookie';
+    headerName?: string;
+  }>;
 }
 
 export interface ApiOperationGroup {

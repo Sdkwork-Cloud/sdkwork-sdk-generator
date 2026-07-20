@@ -1341,6 +1341,11 @@ export abstract class BaseGenerator {
       apiKeyIn: selectedApiKey?.location,
       apiKeyHeader,
       apiKeyAsBearer,
+      apiKeySchemes: apiKeySchemes.map((scheme) => ({
+        schemeName: scheme.schemeName,
+        location: scheme.location,
+        headerName: scheme.headerName,
+      })),
     };
   }
 

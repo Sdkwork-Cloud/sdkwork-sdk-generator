@@ -80,3 +80,44 @@ describe('sdkwork-v3 standard open-api validation', () => {
     })).toContain('apiPrefix must not be "/app/v3/api" or "/backend/v3/api" for sdkwork-v3 custom open-api SDKs.');
   });
 });
+
+describe('sdkwork-v3 backend agent-token validation', () => {
+  const backendAgentSpec: ApiSpec = {
+    ...openApiKeySpec,
+    info: { title: 'SDKWork Backend Agent API', version: '1.0.0' },
+    paths: {
+      '/backend/v3/api/agent/heartbeat': {
+        post: {
+          summary: 'Report an agent heartbeat',
+          operationId: 'agent.heartbeat',
+          tags: ['agent'],
+          security: [{ AgentToken: [] }],
+          'x-sdkwork-auth-mode': 'api-key',
+          'x-sdkwork-route-auth': 'agent-token',
+          responses: openApiKeySpec.paths['/image/v3/api/compat/openai/images/generations'].post.responses,
+        },
+      },
+    },
+    components: {
+      ...openApiKeySpec.components,
+      securitySchemes: {
+        AuthToken: { type: 'http', scheme: 'bearer' },
+        AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
+        AgentToken: { type: 'apiKey', in: 'header', name: 'X-SDKWork-Agent-Token' },
+      },
+    },
+  };
+
+  it('accepts an explicitly declared AgentToken backend route', () => {
+    const issues = validateSdkworkV3Standard(backendAgentSpec, { sdkType: 'backend' });
+    expect(issues.filter((issue) => issue.includes('AgentToken'))).toEqual([]);
+    expect(issues.filter((issue) => issue.includes('must require both AuthToken'))).toEqual([]);
+  });
+
+  it('rejects an agent-token route that is declared anonymous', () => {
+    const anonymousSpec = structuredClone(backendAgentSpec);
+    anonymousSpec.paths['/backend/v3/api/agent/heartbeat'].post.security = [];
+    expect(validateSdkworkV3Standard(anonymousSpec, { sdkType: 'backend' }))
+      .toContain('POST /backend/v3/api/agent/heartbeat agent-token route must require AgentToken.');
+  });
+});

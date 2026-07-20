@@ -13,11 +13,31 @@ export class HttpClientGenerator {
     const apiNames = resolveRustApiNames(tags, resolvedTagNames);
     const apiKeyHeader = ctx.auth.apiKeyHeader || 'Authorization';
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
+    const agentTokenHeader = ctx.auth.apiKeySchemes?.find(
+      (scheme) =>
+        scheme.location === 'header'
+        && (scheme.schemeName === 'AgentToken'
+          || scheme.headerName?.toLowerCase() === 'x-sdkwork-agent-token'),
+    )?.headerName;
+    const sdkworkV3Envelope = config.options?.standardProfile === 'sdkwork-v3';
 
     return [
-      this.generateHttpClient(apiKeyHeader, apiKeyUseBearer, config),
+      this.generateHttpClient(
+        apiKeyHeader,
+        apiKeyUseBearer,
+        agentTokenHeader,
+        sdkworkV3Envelope,
+        config,
+      ),
       this.generateHttpIndex(),
-      this.generateSdkClient(clientName, legacyClientName, tags, apiNames, config),
+      this.generateSdkClient(
+        clientName,
+        legacyClientName,
+        tags,
+        apiNames,
+        agentTokenHeader,
+        config,
+      ),
       this.generateLibFile(config),
     ];
   }
@@ -25,6 +45,8 @@ export class HttpClientGenerator {
   private generateHttpClient(
     apiKeyHeader: string,
     apiKeyUseBearer: boolean,
+    agentTokenHeader: string | undefined,
+    sdkworkV3Envelope: boolean,
     config: GeneratorConfig
   ): GeneratedFile {
     return {
@@ -46,11 +68,14 @@ pub type RequestHeaders = HashMap<String, String>;
 
 const DEFAULT_API_KEY_HEADER: &str = "${apiKeyHeader}";
 const DEFAULT_API_KEY_USE_BEARER: bool = ${apiKeyUseBearer ? 'true' : 'false'};
+const SDKWORK_V3_ENVELOPE: bool = ${sdkworkV3Envelope ? 'true' : 'false'};
+const DEFAULT_MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct SdkworkConfig {
     pub base_url: String,
     pub timeout_ms: u64,
+    pub max_response_body_bytes: usize,
     pub headers: RequestHeaders,
 }
 
@@ -59,6 +84,7 @@ impl SdkworkConfig {
         Self {
             base_url: base_url.into(),
             timeout_ms: 30_000,
+            max_response_body_bytes: DEFAULT_MAX_RESPONSE_BODY_BYTES,
             headers: RequestHeaders::new(),
         }
     }
@@ -78,6 +104,10 @@ pub enum SdkworkError {
     InvalidHttpMethod(#[from] http::method::InvalidMethod),
     #[error("http status {status}: {body}")]
     HttpStatus { status: u16, body: String },
+    #[error("response body exceeds {maximum_bytes} bytes")]
+    ResponseBodyTooLarge { maximum_bytes: usize },
+    #[error("SDKWork API returned code {code} (traceId={trace_id})")]
+    ApiStatus { code: i64, trace_id: String },
 }
 
 #[derive(Clone)]
@@ -85,6 +115,7 @@ pub struct SdkworkHttpClient {
     base_url: String,
     client: Client,
     headers: Arc<RwLock<RequestHeaders>>,
+    max_response_body_bytes: usize,
 }
 
 pub struct SseStream<T> {
@@ -107,6 +138,7 @@ impl SdkworkHttpClient {
             base_url: config.base_url.trim_end_matches('/').to_string(),
             client,
             headers: Arc::new(RwLock::new(config.headers)),
+            max_response_body_bytes: config.max_response_body_bytes.max(1),
         })
     }
 
@@ -141,6 +173,12 @@ impl SdkworkHttpClient {
         }
         headers.insert("Access-Token".to_string(), token.into());
     }
+${agentTokenHeader ? `
+    pub fn set_agent_token(&self, token: impl Into<String>) {
+        let mut headers = self.headers.write().expect("sdk headers poisoned");
+        headers.insert("${agentTokenHeader}".to_string(), token.into());
+    }
+` : ''}
 
     pub fn set_header(&self, key: impl Into<String>, value: impl Into<String>) {
         let mut headers = self.headers.write().expect("sdk headers poisoned");
@@ -262,7 +300,8 @@ impl SdkworkHttpClient {
 
         let response = request.send().await?;
         let status = response.status();
-        let body = response.text().await?;
+        let body = read_response_body_bounded(response, self.max_response_body_bytes).await?;
+        let body = String::from_utf8_lossy(&body).to_string();
         if !status.is_success() {
             return Err(SdkworkError::HttpStatus {
                 status: status.as_u16(),
@@ -313,7 +352,7 @@ impl SdkworkHttpClient {
         }
 
         let response = request.send().await?;
-        decode_response(response).await
+        decode_response(response, self.max_response_body_bytes).await
     }
 
     fn build_url(&self, path: &str) -> String {
@@ -415,7 +454,30 @@ fn insert_header(headers: &mut HeaderMap, key: &str, value: &str) -> Result<(), 
     Ok(())
 }
 
-async fn decode_response<T>(response: Response) -> Result<T, SdkworkError>
+async fn read_response_body_bounded(
+    mut response: Response,
+    maximum_bytes: usize,
+) -> Result<Vec<u8>, SdkworkError> {
+    if response.content_length().is_some_and(|length| length > maximum_bytes as u64) {
+        return Err(SdkworkError::ResponseBodyTooLarge { maximum_bytes });
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        let next_length = body
+            .len()
+            .checked_add(chunk.len())
+            .ok_or(SdkworkError::ResponseBodyTooLarge { maximum_bytes })?;
+        if next_length > maximum_bytes {
+            return Err(SdkworkError::ResponseBodyTooLarge { maximum_bytes });
+        }
+        body.try_reserve(chunk.len())
+            .map_err(|_| SdkworkError::ResponseBodyTooLarge { maximum_bytes })?;
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+async fn decode_response<T>(response: Response, maximum_bytes: usize) -> Result<T, SdkworkError>
 where
     T: DeserializeOwned,
 {
@@ -426,7 +488,7 @@ where
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let body = response.bytes().await?;
+    let body = read_response_body_bounded(response, maximum_bytes).await?;
 
     if !status.is_success() {
         return Err(SdkworkError::HttpStatus {
@@ -440,11 +502,48 @@ where
     }
 
     if content_type.to_ascii_lowercase().contains("json") {
-        return Ok(serde_json::from_slice(&body)?);
+        let payload: Value = serde_json::from_slice(&body)?;
+        if SDKWORK_V3_ENVELOPE {
+            return decode_sdkwork_v3_payload(payload);
+        }
+        return Ok(serde_json::from_value(payload)?);
     }
 
     let text = String::from_utf8_lossy(&body).to_string();
     Ok(serde_json::from_value(Value::String(text))?)
+}
+
+fn decode_sdkwork_v3_payload<T>(payload: Value) -> Result<T, SdkworkError>
+where
+    T: DeserializeOwned,
+{
+    let envelope = payload.as_object().ok_or_else(|| {
+        SdkworkError::Serialization(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "SDKWork response envelope must be an object",
+        )))
+    })?;
+    let code = envelope.get("code").and_then(Value::as_i64).ok_or_else(|| {
+        SdkworkError::Serialization(serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "SDKWork response envelope must contain an integer code",
+        )))
+    })?;
+    let trace_id = envelope
+        .get("traceId")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if code != 0 {
+        return Err(SdkworkError::ApiStatus { code, trace_id });
+    }
+    let data = envelope.get("data").cloned().unwrap_or(Value::Null);
+    let consumer_payload = data
+        .as_object()
+        .and_then(|object| object.get("item"))
+        .cloned()
+        .unwrap_or(data);
+    Ok(serde_json::from_value(consumer_payload)?)
 }`),
       language: 'rust',
       description: `Rust HTTP client for ${config.name}`,
@@ -467,6 +566,7 @@ pub use client::{QueryParams, RequestHeaders, SdkworkConfig, SdkworkError, Sdkwo
     legacyClientName: string | undefined,
     tags: string[],
     apiNames: Map<string, RustApiName>,
+    agentTokenHeader: string | undefined,
     _config: GeneratorConfig
   ): GeneratedFile {
     const getters = tags.map((tag) => {
@@ -517,6 +617,12 @@ impl ${clientName} {
         self.http.set_access_token(token);
         self
     }
+${agentTokenHeader ? `
+    pub fn set_agent_token(&self, token: impl Into<String>) -> &Self {
+        self.http.set_agent_token(token);
+        self
+    }
+` : ''}
 
     pub fn set_header(&self, key: impl Into<String>, value: impl Into<String>) -> &Self {
         self.http.set_header(key, value);

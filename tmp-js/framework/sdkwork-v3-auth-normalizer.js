@@ -427,6 +427,7 @@ function resolveRustNormalizer(normalizedPath) {
 }
 function normalizeRustHttpClient(file) {
     let content = file.content;
+    const agentTokenMethod = content.match(/\n\s+pub fn set_agent_token\(&self, token: impl Into<String>\) \{[\s\S]*?\n\s+\}\n/)?.[0];
     content = content.replace(/\nconst DEFAULT_API_KEY_HEADER: &str = "[^"]+";/g, '');
     content = content.replace(/\nconst DEFAULT_API_KEY_USE_BEARER: bool = (?:true|false);/g, '');
     content = content.replace(/\n\s+pub fn set_api_key\(&self, api_key: impl Into<String>\) \{[\s\S]*?\n\s+}\n\n(?=\s+pub fn set_auth_token)/, '\n');
@@ -448,6 +449,9 @@ function normalizeRustHttpClient(file) {
         '',
         '    pub fn set_header',
     ].join('\n'));
+    if (agentTokenMethod && !content.includes('pub fn set_agent_token(')) {
+        content = content.replace(/\n(\s+pub fn set_header)/, `${agentTokenMethod}\n$1`);
+    }
     return {
         ...file,
         content,

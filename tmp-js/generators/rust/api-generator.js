@@ -6,10 +6,15 @@ import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { resolveRustApiNames, sanitizeRustRawIdentifier } from './identifiers.js';
 export class ApiGenerator {
+    constructor() {
+        this.schemas = {};
+    }
     generate(ctx, config) {
+        this.schemas = ctx.schemas;
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSdkTagNames(tags, config);
@@ -121,16 +126,19 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
         const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const eventStreamInfo = extractEventStreamResponseInfo(op);
         const isEventStreamResponse = Boolean(eventStreamInfo);
-        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+        const wireResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+        const responseSchema = wireResponseSchema && config.options?.standardProfile === 'sdkwork-v3'
+            ? resolveSdkworkV3ConsumerSchema(wireResponseSchema, this.schemas).consumerSchema
+            : wireResponseSchema;
         const responseType = responseSchema
             ? getRustType(responseSchema, RUST_CONFIG)
             : this.inferFallbackResponseType(op);
         const referencedModels = new Set();
         if (requestBodySchema) {
-            this.collectReferencedModels(requestBodySchema, knownModels, referencedModels);
+            this.collectReferencedModelsForType(getRustType(requestBodySchema, RUST_CONFIG), knownModels, referencedModels);
         }
         if (responseSchema) {
-            this.collectReferencedModels(responseSchema, knownModels, referencedModels);
+            this.collectReferencedModelsForType(responseType, knownModels, referencedModels);
         }
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => sanitizeRustIdentifier(value), [
             hasBody ? 'body' : '',
@@ -275,6 +283,13 @@ ${requestHeaderBlock}    ${clientCall}
 }`,
             referencedModels,
         };
+    }
+    collectReferencedModelsForType(rustType, knownModels, referencedModels) {
+        for (const modelName of knownModels) {
+            if (new RegExp(`(?:^|[^A-Za-z0-9_])${modelName}(?:$|[^A-Za-z0-9_])`, 'u').test(rustType)) {
+                referencedModels.add(modelName);
+            }
+        }
     }
     createNamedParameterBindings(parameters, reservedNames) {
         const keys = parameters.map((parameter, index) => `${parameter?.in || 'parameter'}:${parameter?.name || 'value'}:${index}`);

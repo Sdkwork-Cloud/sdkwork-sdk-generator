@@ -434,9 +434,45 @@ describe('Rust generator', () => {
     expect(cargoFile!.content).toContain('http = "1.0"');
     expect(httpFile!.content).toContain('InvalidHttpMethod(#[from] http::method::InvalidMethod)');
     expect(httpFile!.content).not.toContain('reqwest::http::method::InvalidMethod');
+    expect(httpFile!.content).toContain('max_response_body_bytes: usize');
+    expect(httpFile!.content).toContain('read_response_body_bounded(');
+    expect(httpFile!.content).toContain('ResponseBodyTooLarge { maximum_bytes: usize }');
+    expect(httpFile!.content).not.toContain('response.bytes().await?');
     expect(apiFile!.content).not.toContain('use reqwest::Method;');
     expect(apiFile!.content).not.toContain('Method::from_bytes');
     expect(apiFile!.content).not.toContain('append_query_string');
+  });
+
+  it('generates a typed AgentToken setter when the authority declares that security scheme', async () => {
+    const generator = getGenerator('rust' as any);
+    expect(generator).toBeDefined();
+
+    const spec: ApiSpec = {
+      ...rustSpec,
+      security: [{ AgentToken: [] }],
+      components: {
+        ...rustSpec.components,
+        securitySchemes: {
+          AgentToken: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-SDKWork-Agent-Token',
+          },
+        },
+      },
+    };
+    const result = await generator!.generate(rustConfig, spec);
+    const httpFile = result.files.find((file) => file.path === 'src/http/client.rs');
+    const clientFile = result.files.find((file) => file.path === 'src/client.rs');
+
+    expect(result.errors).toEqual([]);
+    expect(httpFile!.content).toContain('pub fn set_agent_token(&self, token: impl Into<String>)');
+    expect(httpFile!.content).toContain(
+      'headers.insert("X-SDKWork-Agent-Token".to_string(), token.into());',
+    );
+    expect(clientFile!.content).toContain(
+      'pub fn set_agent_token(&self, token: impl Into<String>) -> &Self',
+    );
   });
 
   it('marks generated rust SDK crates as standalone workspaces for nested repository output', async () => {

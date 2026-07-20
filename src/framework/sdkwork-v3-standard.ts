@@ -4,7 +4,9 @@ import { validateSdkworkV3Envelope } from './sdkwork-v3-envelope.js';
 
 const ACCESS_TOKEN_HEADER = 'Access-Token';
 const API_KEY_HEADER = 'X-API-Key';
+const AGENT_TOKEN_HEADER = 'X-SDKWork-Agent-Token';
 const API_KEY_SCHEME = 'ApiKey';
+const AGENT_TOKEN_SCHEME = 'AgentToken';
 const AUTH_TOKEN_SCHEME = 'AuthToken';
 const ACCESS_TOKEN_SCHEME = 'AccessToken';
 
@@ -144,6 +146,20 @@ function validateSecuritySchemes(
       `components.securitySchemes.${ACCESS_TOKEN_SCHEME} must be an apiKey header named "${ACCESS_TOKEN_HEADER}".`,
     );
   }
+
+  const agentScheme = securitySchemes[AGENT_TOKEN_SCHEME];
+  if (
+    agentScheme !== undefined
+    && (
+      agentScheme?.type !== 'apiKey'
+      || agentScheme.in !== 'header'
+      || agentScheme.name !== AGENT_TOKEN_HEADER
+    )
+  ) {
+    issues.push(
+      `components.securitySchemes.${AGENT_TOKEN_SCHEME} must be an apiKey header named "${AGENT_TOKEN_HEADER}".`,
+    );
+  }
 }
 
 function validateOperationId(operationLabel: string, operationId: string | undefined, issues: string[]): void {
@@ -193,6 +209,17 @@ function validateSecurity(
   sdkType: SdkType,
   issues: string[],
 ): void {
+  const routeAuth = (operation as unknown as Record<string, unknown>)['x-sdkwork-route-auth'];
+  if (sdkType === 'backend' && routeAuth === 'agent-token') {
+    const hasAgentTokenRequirement = (operation.security || []).some((requirement) => (
+      Object.prototype.hasOwnProperty.call(requirement, AGENT_TOKEN_SCHEME)
+    ));
+    if (!hasAgentTokenRequirement) {
+      issues.push(`${operationLabel} agent-token route must require ${AGENT_TOKEN_SCHEME}.`);
+    }
+    return;
+  }
+
   if (Array.isArray(operation.security) && operation.security.length === 0) {
     return;
   }
