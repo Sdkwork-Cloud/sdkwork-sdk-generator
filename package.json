@@ -48,7 +48,8 @@
     "README.md"
   ],
   "scripts": {
-    "stop": "node ../sdkwork-specs/tools/stop-sdkwork-workspace-processes.mjs --workspace .",    "dev": "vite build --watch",
+    "stop": "node ../sdkwork-specs/tools/stop-sdkwork-workspace-processes.mjs --workspace .",
+    "dev": "vite build --watch",
     "build": "npm run clean && tsc --emitDeclarationOnly && npm run build:bundle && tsc -p tsconfig.runtime.json",
     "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=es2020 --format=esm --outfile=dist/index.js --sourcemap --external:@sdkwork/sdk-common --external:@sdkwork/sdk-common/* && esbuild src/index.ts --bundle --platform=node --target=es2020 --format=cjs --outfile=dist/index.cjs --sourcemap --external:@sdkwork/sdk-common --external:@sdkwork/sdk-common/*",
     "lint": "tsc --noEmit && tsc --noEmit -p tsconfig.runtime.json",
@@ -56,7 +57,9 @@
     "test:vitest": "vitest",
     "clean": "node ./bin/clean.mjs",
     "prepublishOnly": "npm run build",
-    "check:app-composition": "node ../sdkwork-specs/tools/verify-repo.mjs --root ."
+    "check:app-composition": "node ../sdkwork-specs/tools/verify-repo.mjs --root .",
+    "api:assembly:materialize": "node ../sdkwork-specs/tools/materialize-api-assembly.mjs --root .",
+    "api:assembly:validate": "node ../sdkwork-specs/tools/validate-api-assembly.mjs --root ."
   },
   "keywords": [
     "sdkwork",

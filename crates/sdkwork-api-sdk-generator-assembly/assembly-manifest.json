@@ -1,0 +1,9 @@
+{
+  "kind": "sdkwork.api.assembly",
+  "schemaVersion": 1,
+  "applicationCode": "sdk-generator",
+  "apiMode": "none",
+  "packageName": "sdkwork-api-sdk-generator-assembly",
+  "crateDir": "crates/sdkwork-api-sdk-generator-assembly",
+  "routeCrates": []
+}
