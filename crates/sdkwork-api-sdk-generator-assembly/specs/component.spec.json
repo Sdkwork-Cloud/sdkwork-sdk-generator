@@ -6,7 +6,7 @@
     "displayName": "SDKWork sdk-generator API Assembly",
     "version": "0.1.0",
     "type": "rust-api-assembly",
-    "root": "sdkwork-sdk-generator/crates/sdkwork-api-sdk-generator-assembly",
+    "root": "crates/sdkwork-api-sdk-generator-assembly",
     "domain": "application",
     "capability": "api-assembly",
     "surface": "api-assembly",
@@ -52,7 +52,8 @@
     "dependencyApiExports": [],
     "dependencyApiSurfaces": [],
     "events": [],
-    "configKeys": []
+    "configKeys": [],
+    "layerRole": "runtime-composition"
   },
   "verification": {
     "commands": [
