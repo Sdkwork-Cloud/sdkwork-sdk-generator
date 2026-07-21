@@ -244,6 +244,31 @@ ${agentTokenHeader ? `
         self.request(method, path, query, body, headers, content_type, skip_auth).await
     }
 
+    pub async fn request_bytes<B>(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&B>,
+        query: Option<&QueryParams>,
+        headers: Option<&RequestHeaders>,
+        content_type: Option<&str>,
+        skip_auth: bool,
+    ) -> Result<Vec<u8>, SdkworkError>
+    where
+        B: Serialize + ?Sized,
+    {
+        let mut request = self.client.request(method, self.build_url(path));
+        if let Some(query_values) = query {
+            request = request.query(&normalize_query(query_values));
+        }
+        request = request.headers(self.merge_headers(headers, skip_auth)?);
+        if let Some(payload) = body {
+            request = apply_body(request, payload, content_type)?;
+        }
+        let response = request.send().await?;
+        decode_binary_response(response, self.max_response_body_bytes).await
+    }
+
     pub async fn stream<T, B>(
         &self,
         method: Method,
@@ -484,6 +509,21 @@ where
 
     let text = String::from_utf8_lossy(&body).to_string();
     Ok(serde_json::from_value(Value::String(text))?)
+}
+
+async fn decode_binary_response(
+    response: Response,
+    maximum_bytes: usize,
+) -> Result<Vec<u8>, SdkworkError> {
+    let status = response.status();
+    let body = read_response_body_bounded(response, maximum_bytes).await?;
+    if !status.is_success() {
+        return Err(SdkworkError::HttpStatus {
+            status: status.as_u16(),
+            body: String::from_utf8_lossy(&body).to_string(),
+        });
+    }
+    Ok(body)
 }
 
 fn decode_sdkwork_v3_payload<T>(payload: Value) -> Result<T, SdkworkError>

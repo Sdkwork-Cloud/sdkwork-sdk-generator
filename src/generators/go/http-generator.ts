@@ -201,6 +201,31 @@ func (c *Client) Request(
     return c.request(method, path, query, body, requestHeaders, contentType, skipAuth)
 }
 
+func (c *Client) RequestBytes(
+    method string,
+    path string,
+    body interface{},
+    query map[string]interface{},
+    requestHeaders map[string]string,
+    contentType string,
+    skipAuth bool,
+) ([]byte, error) {
+    raw, err := c.request(method, path, query, body, requestHeaders, contentType, skipAuth)
+    if err != nil {
+        return nil, err
+    }
+    switch value := raw.(type) {
+    case nil:
+        return []byte{}, nil
+    case []byte:
+        return value, nil
+    case string:
+        return []byte(value), nil
+    default:
+        return nil, fmt.Errorf("expected binary response, got %T", raw)
+    }
+}
+
 type SSEStream[T any] struct {
     scanner *bufio.Scanner
     body    io.ReadCloser

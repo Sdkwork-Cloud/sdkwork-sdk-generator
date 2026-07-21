@@ -113,7 +113,7 @@ export function getPythonType(schema, config) {
     const type = resolveSchemaType(schema).effectiveType;
     const format = schema.format;
     if (type === 'string') {
-        return 'str';
+        return format === 'binary' ? 'bytes' : 'str';
     }
     if (type === 'number') {
         return 'float';

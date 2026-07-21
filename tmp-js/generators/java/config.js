@@ -139,7 +139,7 @@ export function getJavaType(schema, config) {
     }
     const type = resolveSchemaType(schema).effectiveType;
     if (type === 'string')
-        return 'String';
+        return schema.format === 'binary' ? 'byte[]' : 'String';
     if (type === 'number')
         return 'Double';
     if (type === 'integer')

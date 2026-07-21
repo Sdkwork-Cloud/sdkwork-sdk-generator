@@ -10,7 +10,7 @@ import {
 import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
-import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { extractBinaryResponseInfo, extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { GO_CONFIG, getGoType } from './config.js';
 import {
   extractOpenApiParameterContentSchema,
@@ -73,7 +73,10 @@ interface HeaderParameterBinding extends NamedParameterBinding {
 }
 
 export class ApiGenerator {
+  private schemas: Record<string, any> = {};
+
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
+    this.schemas = ctx.schemas;
     const files: GeneratedFile[] = [];
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
@@ -200,9 +203,14 @@ ${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsReques
     const requestType = this.qualifyGoType(rawRequestType, knownModels);
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
-    const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+    const binaryResponseInfo = isEventStreamResponse
+      ? undefined
+      : extractBinaryResponseInfo(op, this.schemas);
+    const responseSchema = eventStreamInfo?.schema
+      ?? binaryResponseInfo?.schema
+      ?? this.extractResponseSchema(op);
     const rawResponseType = responseSchema
-      ? getGoType(responseSchema, GO_CONFIG)
+      ? binaryResponseInfo ? '[]byte' : getGoType(responseSchema, GO_CONFIG)
       : this.inferFallbackResponseType(op);
     const responseType = this.qualifyGoType(rawResponseType, knownModels);
     const referencedModels = new Set<string>();
@@ -425,6 +433,10 @@ ${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsReques
       call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, true)`;
     }
 
+    if (binaryResponseInfo) {
+      call = `a.client.RequestBytes("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg})`;
+    }
+
     const docComment = op.summary ? `// ${op.summary}\n` : '';
     const requestHeaderBlock = hasHeaders
       ? `    headers := BuildRequestHeaders(
@@ -445,6 +457,15 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
       return {
         content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) (*sdkhttp.SSEStream[${responseType}], error) {
 ${queryBlock}${requestHeaderBlock}    return ${streamCall}
+}`,
+        referencedModels,
+      };
+    }
+
+    if (binaryResponseInfo) {
+      return {
+        content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) ([]byte, error) {
+${queryBlock}${requestHeaderBlock}    return ${call}
 }`,
         referencedModels,
       };

@@ -67,6 +67,9 @@ export function getRustType(schema: any, config: LanguageConfig): string {
   const type = resolveSchemaType(schema).effectiveType;
 
   if (type === 'string') {
+    if (schema.format === 'binary') {
+      return 'Vec<u8>';
+    }
     return 'String';
   }
   if (type === 'number') {

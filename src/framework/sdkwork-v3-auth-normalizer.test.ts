@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { generateSdk } from '../index.js';
 import type { ApiSpec, GeneratorConfig, Language } from './types.js';
+import { SDKWORK_V3_TEST_ENVELOPE_SCHEMAS } from './sdkwork-v3-envelope-fixtures.js';
 
 const languages: Language[] = [
   'typescript',
@@ -53,20 +54,7 @@ const spec: ApiSpec = {
             description: 'OK',
             content: {
               'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    items: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          id: { type: 'string' },
-                        },
-                      },
-                    },
-                  },
-                },
+                schema: { $ref: '#/components/schemas/SdkWorkListResponse' },
               },
             },
           },
@@ -86,7 +74,7 @@ const spec: ApiSpec = {
         name: 'Access-Token',
       },
     },
-    schemas: {},
+    schemas: { ...SDKWORK_V3_TEST_ENVELOPE_SCHEMAS },
   },
 };
 
@@ -172,20 +160,7 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
                 description: 'OK',
                 content: {
                   'application/json': {
-                    schema: {
-                      type: 'object',
-                      properties: {
-                        items: {
-                          type: 'array',
-                          items: {
-                            type: 'object',
-                            properties: {
-                              id: { type: 'string' },
-                            },
-                          },
-                        },
-                      },
-                    },
+                    schema: { $ref: '#/components/schemas/SdkWorkListResponse' },
                   },
                 },
               },
@@ -253,12 +228,7 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
                 description: 'OK',
                 content: {
                   'application/json': {
-                    schema: {
-                      type: 'object',
-                      properties: {
-                        id: { type: 'string' },
-                      },
-                    },
+                    schema: { $ref: '#/components/schemas/SdkWorkResourceResponse' },
                   },
                 },
               },
@@ -269,6 +239,7 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
       components: {
         ...spec.components,
         schemas: {
+          ...SDKWORK_V3_TEST_ENVELOPE_SCHEMAS,
           AdminChannelCredentialInput: {
             type: 'object',
             required: ['apiKey'],
@@ -327,12 +298,7 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
                 description: 'OK',
                 content: {
                   'application/json': {
-                    schema: {
-                      type: 'object',
-                      properties: {
-                        enabled: { type: 'boolean' },
-                      },
-                    },
+                    schema: { $ref: '#/components/schemas/SdkWorkResourceResponse' },
                   },
                 },
               },
@@ -409,9 +375,7 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
                 description: 'Unauthorized',
                 content: {
                   'application/problem+json': {
-                    schema: {
-                      type: 'object',
-                    },
+                    schema: { $ref: '#/components/schemas/ProblemDetail' },
                   },
                 },
               },
@@ -428,6 +392,7 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
           },
         },
         schemas: {
+          ProblemDetail: SDKWORK_V3_TEST_ENVELOPE_SCHEMAS.ProblemDetail,
           CreateRetrievalRequest: {
             type: 'object',
             required: ['query'],

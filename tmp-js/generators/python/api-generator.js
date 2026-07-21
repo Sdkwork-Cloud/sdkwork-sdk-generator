@@ -2,13 +2,17 @@ import { createUniqueIdentifierMap } from '../../framework/identifiers.js';
 import { resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
-import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { extractBinaryResponseInfo, extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { PYTHON_CONFIG, getPythonPackageRoot, getPythonType } from './config.js';
 import { buildPythonResourceTree, resolvePythonMethodNames, usesPythonNestedResourceSurfaceForOperations, } from './usage-planner.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 export class ApiGenerator {
+    constructor() {
+        this.schemas = {};
+    }
     generate(ctx, config) {
+        this.schemas = ctx.schemas;
         const files = [];
         const tags = Object.keys(ctx.apiGroups);
         const resolvedTagNames = resolveSdkTagNames(tags, config);
@@ -145,9 +149,14 @@ ${methods ? `\n\n${methods}` : ''}`;
         const hasExplicitQuerySerialization = queryParams.some((param) => requiresExplicitOpenApiQuerySerialization(param));
         const eventStreamInfo = extractEventStreamResponseInfo(op);
         const isEventStreamResponse = Boolean(eventStreamInfo);
-        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+        const binaryResponseInfo = isEventStreamResponse
+            ? undefined
+            : extractBinaryResponseInfo(op, this.schemas);
+        const responseSchema = eventStreamInfo?.schema
+            ?? binaryResponseInfo?.schema
+            ?? this.extractResponseSchema(op);
         const responseType = responseSchema
-            ? getPythonType(responseSchema, PYTHON_CONFIG)
+            ? binaryResponseInfo ? 'bytes' : getPythonType(responseSchema, PYTHON_CONFIG)
             : this.inferFallbackResponseType(op);
         const referencedModels = new Set();
         if (requestBodySchema) {
@@ -271,6 +280,9 @@ ${methods ? `\n\n${methods}` : ''}`;
                 break;
             default:
                 call = `self._client.request('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg}${skipAuthArg})`;
+        }
+        if (binaryResponseInfo) {
+            call = `self._client.request_bytes('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg}${skipAuthArg})`;
         }
         const docComment = op.summary
             ? `        """${op.summary}"""\n`

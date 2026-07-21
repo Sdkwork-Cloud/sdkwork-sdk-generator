@@ -4,13 +4,17 @@ import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenA
 import { resolveJvmSdkIdentity } from '../../framework/jvm-sdk-identity.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { resolveMediaTypeSchema } from '../../framework/schema.js';
-import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { extractBinaryResponseInfo, extractEventStreamResponseInfo } from '../../framework/responses.js';
 import { JAVA_CONFIG, getJavaType } from './config.js';
 import { extractOpenApiParameterContentSchema, requiresExplicitOpenApiQuerySerialization, resolveOpenApiParameterSerialization, } from '../../framework/parameter-serialization.js';
 import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
 import { formatJavaGeneratedContent } from './format.js';
 export class ApiGenerator {
+    constructor() {
+        this.schemas = {};
+    }
     generate(ctx, config) {
+        this.schemas = ctx.schemas;
         const files = [];
         const identity = resolveJvmSdkIdentity(config);
         const tags = Object.keys(ctx.apiGroups);
@@ -98,9 +102,14 @@ ${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
             : 'Object';
         const eventStreamInfo = extractEventStreamResponseInfo(op);
         const isEventStreamResponse = Boolean(eventStreamInfo);
-        const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+        const binaryResponseInfo = isEventStreamResponse
+            ? undefined
+            : extractBinaryResponseInfo(op, this.schemas);
+        const responseSchema = eventStreamInfo?.schema
+            ?? binaryResponseInfo?.schema
+            ?? this.extractResponseSchema(op);
         const responseType = responseSchema
-            ? getJavaType(responseSchema, JAVA_CONFIG)
+            ? binaryResponseInfo ? 'byte[]' : getJavaType(responseSchema, JAVA_CONFIG)
             : this.inferFallbackResponseType(op);
         const pathParamNames = createUniqueIdentifierMap(rawPathParams, (value) => JAVA_CONFIG.namingConventions.propertyName(value), [
             hasBody ? 'body' : '',
@@ -328,6 +337,9 @@ ${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
         if (skipAuth) {
             call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, true)`;
         }
+        if (binaryResponseInfo) {
+            call = `client.requestBytes("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, ${skipAuth ? 'true' : 'false'})`;
+        }
         const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
         const requestHeaderBlock = hasHeaders
             ? `        Map<String, String> requestHeaders = buildRequestHeaders(
@@ -356,6 +368,11 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
             ].join(', ');
             return `${docComment}    public Iterable<${responseType}> ${methodName}(${params.join(', ')}) throws Exception {
 ${queryBlock}${requestHeaderBlock}        return client.stream(${streamArgs});
+    }`;
+        }
+        if (binaryResponseInfo) {
+            return `${docComment}    public byte[] ${methodName}(${params.join(', ')}) throws Exception {
+${queryBlock}${requestHeaderBlock}        return ${call};
     }`;
         }
         if (responseType === 'Void') {

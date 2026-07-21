@@ -113,6 +113,19 @@ class HttpClient(BaseHttpClient):
             return None
         return response.json()
 
+    def request_bytes(self, method: str, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False) -> bytes:
+        response = self._request_session(skip_auth).request(
+            method=method,
+            url=f"{self.base_url}{path}",
+            params=params,
+            data=data,
+            json=json,
+            headers=self._request_headers(headers, skip_auth),
+            timeout=self.timeout / 1000,
+        )
+        response.raise_for_status()
+        return response.content
+
     def get(self, path: str, params=None, headers=None, skip_auth: bool = False):
         return self.request('GET', path, params=params, headers=headers, skip_auth=skip_auth)
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
+import { SDKWORK_V3_TEST_ENVELOPE_SCHEMAS } from '../../framework/sdkwork-v3-envelope-fixtures.js';
 import { TypeScriptGenerator } from './index.js';
 
 const spec: ApiSpec = {
@@ -18,7 +19,14 @@ const spec: ApiSpec = {
           },
         ],
         responses: {
-          '200': { description: 'OK' },
+          '200': {
+            description: 'OK',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SdkWorkListResponse' },
+              },
+            },
+          },
         },
       },
     },
@@ -35,7 +43,7 @@ const spec: ApiSpec = {
         name: 'Access-Token',
       },
     },
-    schemas: {},
+    schemas: { ...SDKWORK_V3_TEST_ENVELOPE_SCHEMAS },
   },
 };
 

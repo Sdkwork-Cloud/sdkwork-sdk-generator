@@ -415,7 +415,7 @@ describe('Generator registry', () => {
       version: '1.0.0',
       language: 'typescript',
       sdkType: 'backend',
-      packageName: null,
+      packageName: 'sdkwork-test-backend-sdk-generated-typescript',
       generator: '@sdkwork/sdk-generator',
       capabilities: {
         supportsGeneratedTests: true,
@@ -6760,7 +6760,7 @@ describe('OpenAPI Security And Compliance', () => {
                   description: 'Success',
                   content: {
                     'application/json': {
-                      schema: { $ref: '#/components/schemas/CourseApplicationsListResult' },
+                      schema: { $ref: '#/components/schemas/SdkWorkListResponse' },
                     },
                   },
                 },
@@ -6797,7 +6797,7 @@ describe('OpenAPI Security And Compliance', () => {
                   description: 'Success',
                   content: {
                     'application/json': {
-                      schema: { $ref: '#/components/schemas/CourseApplicationsReviewResult' },
+                      schema: { $ref: '#/components/schemas/SdkWorkCommandResponse' },
                     },
                   },
                 },
@@ -6834,7 +6834,7 @@ describe('OpenAPI Security And Compliance', () => {
                   description: 'Success',
                   content: {
                     'application/json': {
-                      schema: { $ref: '#/components/schemas/CourseSectionsUpdateResult' },
+                      schema: { $ref: '#/components/schemas/SdkWorkResourceResponse' },
                     },
                   },
                 },
@@ -6859,14 +6859,7 @@ describe('OpenAPI Security And Compliance', () => {
                 { name: 'lessonId', in: 'path', required: true, schema: { type: 'string' } },
               ],
               responses: {
-                '200': {
-                  description: 'Success',
-                  content: {
-                    'application/json': {
-                      schema: { $ref: '#/components/schemas/CourseLessonsDeleteResult' },
-                    },
-                  },
-                },
+                '204': { description: 'Deleted' },
                 '400': {
                   description: 'Bad request',
                   content: {

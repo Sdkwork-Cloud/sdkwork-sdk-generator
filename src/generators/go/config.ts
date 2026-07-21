@@ -72,7 +72,7 @@ export function getGoType(schema: any, config: LanguageConfig): string {
 
   const type = resolveSchemaType(schema).effectiveType;
   
-  if (type === 'string') return 'string';
+  if (type === 'string') return schema.format === 'binary' ? '[]byte' : 'string';
   if (type === 'number') return 'float64';
   if (type === 'integer') return 'int';
   if (type === 'boolean') return 'bool';

@@ -128,7 +128,7 @@ export function getPythonType(schema: any, config: LanguageConfig): string {
   const format = schema.format;
   
   if (type === 'string') {
-    return 'str';
+    return format === 'binary' ? 'bytes' : 'str';
   }
   
   if (type === 'number') {

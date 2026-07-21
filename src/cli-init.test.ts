@@ -110,7 +110,7 @@ describe('runInitCommand', () => {
       version: '1.0.0',
       language: 'typescript',
       sdkType: 'backend',
-      packageName: null,
+      packageName: 'sdkwork-test-backend-sdk-generated-typescript',
       generator: '@sdkwork/sdk-generator',
       capabilities: {
         supportsGeneratedTests: true,

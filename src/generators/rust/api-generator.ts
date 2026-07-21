@@ -9,7 +9,7 @@ import {
 import { resolveOpenAIStyleMethodNames, resolveSdkTagNames, selectCanonicalOpenAIStyleOperations } from '../../framework/openai-surface.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
 import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
-import { extractEventStreamResponseInfo } from '../../framework/responses.js';
+import { extractBinaryResponseInfo, extractEventStreamResponseInfo } from '../../framework/responses.js';
 import {
   extractOpenApiParameterContentSchema,
   requiresExplicitOpenApiQuerySerialization,
@@ -113,8 +113,10 @@ export class ApiGenerator {
     });
     const needsCustomMethod = operations.some((op) => !['get', 'post', 'put', 'patch', 'delete'].includes(String(op.method || '').toLowerCase()));
     const needsEventStream = operations.some((op) => Boolean(extractEventStreamResponseInfo(op)));
+    const needsBinaryResponse = operations.some((op) => Boolean(extractBinaryResponseInfo(op, this.schemas)));
     const needsMethodImport = needsCustomMethod
       || needsEventStream
+      || needsBinaryResponse
       || operations.some((op) => operationSkipsSdkworkAuth(op));
     const modelImports = referencedModels.size > 0
       ? `use crate::models::{${Array.from(referencedModels).sort().join(', ')}};\n`
@@ -176,13 +178,18 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
     const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
-    const wireResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
+    const binaryResponseInfo = isEventStreamResponse
+      ? undefined
+      : extractBinaryResponseInfo(op, this.schemas);
+    const wireResponseSchema = eventStreamInfo?.schema
+      ?? binaryResponseInfo?.schema
+      ?? this.extractResponseSchema(op);
     const responseSchema =
       wireResponseSchema && config.options?.standardProfile === 'sdkwork-v3'
         ? resolveSdkworkV3ConsumerSchema(wireResponseSchema, this.schemas).consumerSchema
         : wireResponseSchema;
     const responseType = responseSchema
-      ? getRustType(responseSchema, RUST_CONFIG)
+      ? binaryResponseInfo ? 'Vec<u8>' : getRustType(responseSchema, RUST_CONFIG)
       : this.inferFallbackResponseType(op);
     const referencedModels = new Set<string>();
 
@@ -314,6 +321,13 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
       default:
         clientCall = `self.client.request_method(Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await`;
         break;
+    }
+
+    if (binaryResponseInfo) {
+      const methodExpression = ['get', 'post', 'put', 'patch', 'delete'].includes(method)
+        ? `Method::${toHttpMethodLiteral(httpMethod)}`
+        : `Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?`;
+      clientCall = `self.client.request_bytes(${methodExpression}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await`;
     }
 
     const docComment = op.summary
