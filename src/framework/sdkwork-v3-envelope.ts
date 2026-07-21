@@ -92,6 +92,12 @@ export function validateSdkworkV3Envelope(
         }
         const schema = extractJsonSchema(response);
         if (!schema) {
+          if (
+            options.sdkType === 'custom'
+            && extractBinarySuccessSchema(response, schemas)
+          ) {
+            continue;
+          }
           issues.push(`${method.toUpperCase()} ${rawPath} ${statusCode} must declare application/json success schema.`);
           continue;
         }
@@ -271,6 +277,27 @@ function unwrapKindForDataSchema(
 function extractJsonSchema(response: any): Record<string, any> | undefined {
   const content = response?.content?.['application/json']?.schema;
   return content && typeof content === 'object' ? content : undefined;
+}
+
+function extractBinarySuccessSchema(
+  response: any,
+  components: Record<string, any>,
+): Record<string, any> | undefined {
+  for (const [mediaType, media] of Object.entries(response?.content || {})) {
+    const normalizedMediaType = mediaType.toLowerCase();
+    if (normalizedMediaType === 'application/json' || normalizedMediaType.endsWith('+json')) {
+      continue;
+    }
+    const schema = (media as Record<string, any>)?.schema;
+    if (!schema || typeof schema !== 'object') {
+      continue;
+    }
+    const resolved = resolveSchema(schema, components, new Set());
+    if (resolved.type === 'string' && resolved.format === 'binary') {
+      return schema;
+    }
+  }
+  return undefined;
 }
 
 function operationUsesExternalWireProtocol(operation: Record<string, any>): boolean {

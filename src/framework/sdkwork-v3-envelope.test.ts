@@ -126,4 +126,117 @@ describe('sdkwork-v3 envelope helpers', () => {
     );
     expect(issues.some((issue) => issue.includes('must use SdkWorkApiResponse envelope'))).toBe(false);
   });
+
+  it('accepts explicit binary success responses for custom SDKs', () => {
+    const issues = validateSdkworkV3Envelope(
+      {
+        openapi: '3.1.0',
+        info: { title: 't', version: '1.0.0' },
+        paths: {
+          '/internal/v3/api/files/{fileId}/content': {
+            get: {
+              operationId: 'fileContent.retrieve',
+              tags: ['fileContent'],
+              responses: {
+                '200': {
+                  description: 'Full content',
+                  content: {
+                    'application/octet-stream': {
+                      schema: { type: 'string', format: 'binary' },
+                    },
+                  },
+                },
+                '206': {
+                  description: 'Partial content',
+                  content: {
+                    'application/octet-stream': {
+                      schema: { $ref: '#/components/schemas/BinaryContent' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            ProblemDetail: SDKWORK_V3_TEST_ENVELOPE_SCHEMAS.ProblemDetail,
+            BinaryContent: { type: 'string', format: 'binary' },
+          },
+        },
+      },
+      { sdkType: 'custom' },
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it('rejects binary success responses for app SDKs without a standard exception', () => {
+    const issues = validateSdkworkV3Envelope(
+      {
+        openapi: '3.1.0',
+        info: { title: 't', version: '1.0.0' },
+        paths: {
+          '/app/v3/api/files/{fileId}/content': {
+            get: {
+              operationId: 'fileContent.retrieve',
+              tags: ['fileContent'],
+              responses: {
+                '200': {
+                  description: 'Full content',
+                  content: {
+                    'application/octet-stream': {
+                      schema: { type: 'string', format: 'binary' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas,
+        },
+      },
+      { sdkType: 'app' },
+    );
+    expect(issues).toContain(
+      'GET /app/v3/api/files/{fileId}/content 200 must declare application/json success schema.',
+    );
+  });
+
+  it('rejects malformed non-json success responses for custom SDKs', () => {
+    const issues = validateSdkworkV3Envelope(
+      {
+        openapi: '3.1.0',
+        info: { title: 't', version: '1.0.0' },
+        paths: {
+          '/internal/v3/api/files/{fileId}/content': {
+            get: {
+              operationId: 'fileContent.retrieve',
+              tags: ['fileContent'],
+              responses: {
+                '200': {
+                  description: 'Malformed content',
+                  content: {
+                    'application/octet-stream': {
+                      schema: { type: 'object', additionalProperties: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            ProblemDetail: SDKWORK_V3_TEST_ENVELOPE_SCHEMAS.ProblemDetail,
+          },
+        },
+      },
+      { sdkType: 'custom' },
+    );
+    expect(issues).toContain(
+      'GET /internal/v3/api/files/{fileId}/content 200 must declare application/json success schema.',
+    );
+  });
 });

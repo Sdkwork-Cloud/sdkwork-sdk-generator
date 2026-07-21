@@ -1,4 +1,4 @@
-﻿{
+{
     "name":  "@sdkwork/sdk-generator",
     "version":  "1.0.9",
     "description":  "SDKWork SDK Generator - Professional SDK code generator for TypeScript, Dart, Python, Go, Java, Kotlin, Swift, C#, Flutter, Rust, PHP, and Ruby",

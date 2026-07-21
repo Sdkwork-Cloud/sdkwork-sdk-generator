@@ -64,6 +64,10 @@ export function validateSdkworkV3Envelope(spec, options = {}) {
                 }
                 const schema = extractJsonSchema(response);
                 if (!schema) {
+                    if (options.sdkType === 'custom'
+                        && extractBinarySuccessSchema(response, schemas)) {
+                        continue;
+                    }
                     issues.push(`${method.toUpperCase()} ${rawPath} ${statusCode} must declare application/json success schema.`);
                     continue;
                 }
@@ -206,6 +210,23 @@ function unwrapKindForDataSchema(dataSchema, components) {
 function extractJsonSchema(response) {
     const content = response?.content?.['application/json']?.schema;
     return content && typeof content === 'object' ? content : undefined;
+}
+function extractBinarySuccessSchema(response, components) {
+    for (const [mediaType, media] of Object.entries(response?.content || {})) {
+        const normalizedMediaType = mediaType.toLowerCase();
+        if (normalizedMediaType === 'application/json' || normalizedMediaType.endsWith('+json')) {
+            continue;
+        }
+        const schema = media?.schema;
+        if (!schema || typeof schema !== 'object') {
+            continue;
+        }
+        const resolved = resolveSchema(schema, components, new Set());
+        if (resolved.type === 'string' && resolved.format === 'binary') {
+            return schema;
+        }
+    }
+    return undefined;
 }
 function operationUsesExternalWireProtocol(operation) {
     return operation['x-sdkwork-wire-protocol'] === 'external'
