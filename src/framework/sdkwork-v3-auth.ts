@@ -20,3 +20,10 @@ export function operationSkipsSdkworkAuth(
   const authMode = String(operation?.['x-sdkwork-auth-mode'] ?? '').trim().toLowerCase();
   return authMode === 'anonymous' || authMode === 'refresh-token';
 }
+
+export function operationUsesCredentialEntryBootstrap(
+  operation: Pick<ApiOperation, 'x-sdkwork-auth-mode'> | Record<string, unknown> | undefined,
+): boolean {
+  return String(operation?.['x-sdkwork-auth-mode'] ?? '').trim().toLowerCase()
+    === 'credential-entry-bootstrap';
+}

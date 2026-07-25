@@ -29,6 +29,43 @@ describe('TypeScript config', () => {
         expect(type).toBe('Record<string, string>');
     });
 
+    it('preserves required and optional fields on inline object schemas', () => {
+        const type = getTypeScriptType(
+            {
+                type: 'object',
+                required: ['item'],
+                properties: {
+                    item: { $ref: '#/components/schemas/AgentRecord' },
+                    'next-cursor': { type: 'string' },
+                },
+            },
+            TYPESCRIPT_CONFIG,
+            new Set(['AgentRecord']),
+        );
+
+        expect(type).toBe("{ item: AgentRecord; 'next-cursor'?: string; }");
+    });
+
+    it('preserves inline fields when additional properties are allowed', () => {
+        const type = getTypeScriptType(
+            {
+                type: 'object',
+                required: ['items'],
+                properties: {
+                    items: {
+                        type: 'array',
+                        items: { $ref: '#/components/schemas/AgentRecord' },
+                    },
+                },
+                additionalProperties: true,
+            },
+            TYPESCRIPT_CONFIG,
+            new Set(['AgentRecord']),
+        );
+
+        expect(type).toBe('{ items: AgentRecord[]; } & Record<string, unknown>');
+    });
+
     it('wraps union item types before applying array suffixes', () => {
         const type = getTypeScriptType(
             {

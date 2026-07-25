@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
+import type { ApiSpec, GeneratorConfig, SchemaContext } from '../../framework/types.js';
+import { HttpClientGenerator } from './http-generator.js';
 import { TypeScriptGenerator } from './index.js';
 
 const config: GeneratorConfig = {
@@ -60,5 +61,38 @@ describe('TypeScript HTTP generator', () => {
 
     expect(httpClient?.content).toBeDefined();
     expect(httpClient?.content).not.toMatch(/[ \t]+$/m);
+  });
+
+  it('normalizes sdkwork-v3 data whether the common transport preserved or removed the envelope', async () => {
+    const generator = new HttpClientGenerator();
+    const files = generator.generate(
+      {
+        schemas: {},
+        schemaFileMap: new Map(),
+        apiGroups: {},
+        auth: {
+          hasApiKeyScheme: false,
+          hasBearerScheme: false,
+          hasSecurityRequirements: false,
+          apiKeyAsBearer: false,
+        },
+      } satisfies SchemaContext,
+      {
+        ...config,
+        sdkType: 'app',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+    );
+
+    const httpClient = files.find((file) => file.path === 'src/http/client.ts');
+
+    expect(httpClient?.content).toContain(
+      "return this.unwrapSdkworkV3Data<T>(record);",
+    );
+    expect(httpClient?.content).toContain(
+      "return this.unwrapSdkworkV3Data<T>(data as Record<string, unknown>);",
+    );
+    expect(httpClient?.content).toContain("if ('item' in data)");
+    expect(httpClient?.content).toContain('return data.item as T;');
   });
 });

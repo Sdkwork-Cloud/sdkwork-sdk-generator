@@ -39,6 +39,43 @@ describe('sdkwork-v3 envelope helpers', () => {
     expect(resolved.consumerSchema).toEqual({ $ref: '#/components/schemas/AuthSession' });
   });
 
+  it('resolves typed item payloads composed with SdkWorkResourceData', () => {
+    const composedSchemas = {
+      ...schemas,
+      ComposedAuthSessionResponse: {
+        allOf: [
+          { $ref: '#/components/schemas/SdkWorkApiResponse' },
+          {
+            type: 'object',
+            required: ['data'],
+            properties: {
+              data: {
+                allOf: [
+                  { $ref: '#/components/schemas/SdkWorkResourceData' },
+                  {
+                    type: 'object',
+                    required: ['item'],
+                    properties: {
+                      item: { $ref: '#/components/schemas/AuthSession' },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    };
+
+    const resolved = resolveSdkworkV3ConsumerSchema(
+      { $ref: '#/components/schemas/ComposedAuthSessionResponse' },
+      composedSchemas,
+    );
+
+    expect(resolved.plan.unwrapKind).toBe('item');
+    expect(resolved.consumerSchema).toEqual({ $ref: '#/components/schemas/AuthSession' });
+  });
+
   it('resolves consumer schema to typed page payload refs', () => {
     const pageSchemas = {
       ...SDKWORK_V3_TEST_ENVELOPE_SCHEMAS,

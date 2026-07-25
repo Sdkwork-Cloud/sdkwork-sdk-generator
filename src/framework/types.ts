@@ -144,7 +144,19 @@ export interface ApiOperation {
   responses: Record<string, ApiResponse>;
   deprecated?: boolean;
   security?: Array<Record<string, string[]>>;
-  'x-sdkwork-auth-mode'?: 'anonymous' | 'dual-token' | 'refresh-token' | 'api-key' | 'internal' | string;
+  'x-sdkwork-auth-mode'?:
+    | 'anonymous'
+    | 'credential-entry-bootstrap'
+    | 'refresh-token'
+    | 'dual-token'
+    | 'api-key'
+    | 'oauth'
+    | 'open-api-flexible'
+    | 'ingress-token'
+    | 'agent-token'
+    | 'compatibility'
+    | 'internal'
+    | string;
   'x-sdkwork-forbid-credential-headers'?: boolean;
 }
 

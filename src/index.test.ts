@@ -3160,7 +3160,9 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
     expect(apiFile!.content).toContain('import type { RoleVO, UserRoleKey } from');
-    expect(apiFile!.content).toContain('async getById(id: UserRoleKey): Promise<RoleVO>');
+    expect(apiFile!.content).toContain(
+      'async getById(id: UserRoleKey, requestOptions?: ApiRequestOptions): Promise<RoleVO>',
+    );
   });
 
   it('should emit deferred annotations for python model references', async () => {
@@ -3515,8 +3517,8 @@ describe('OpenAPI Security And Compliance', () => {
         filePath: 'src/api/event.ts',
         expected: [
           'import type { Event',
-          'async streamEvents(): Promise<Event[]>',
-          'this.client.get<Event[]>',
+          'async streamEvents(requestOptions?: ApiRequestOptions): Promise<Event[]>',
+          'this.client.request<Event[]>',
         ],
         forbidden: ['Promise<unknown>', 'Promise<void>'],
       },
@@ -3607,7 +3609,9 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(apiFile.content).toContain('import type { Event, ListInlineEventsResponseItem } from');
-    expect(apiFile.content).toContain('async listInlineEvents(): Promise<ListInlineEventsResponseItem[]>');
+    expect(apiFile.content).toContain(
+      'async listInlineEvents(requestOptions?: ApiRequestOptions): Promise<ListInlineEventsResponseItem[]>',
+    );
     expect(modelFile.content).toContain('export interface ListInlineEventsResponseItem');
     expect(modelFile.content).toContain('sequence: number;');
     expect(modelFile.content).toContain('value?: string;');
@@ -4279,7 +4283,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     const auditApi = getGeneratedFile(result.files, 'src/api/audit.ts');
     expect(auditApi.content).toContain('export interface AuditGetAuditEventWithEscapedRefsParams');
-    expect(auditApi.content).toContain('async getAuditEventWithEscapedRefs(eventId: string, params?: AuditGetAuditEventWithEscapedRefsParams): Promise<AuditEvent>');
+    expect(auditApi.content).toContain('async getAuditEventWithEscapedRefs(eventId: string, params?: AuditGetAuditEventWithEscapedRefsParams, requestOptions?: ApiRequestOptions): Promise<AuditEvent>');
     expect(auditApi.content).toContain('filter?: string');
     expect(auditApi.content).toContain('xTraceId?: string');
     expect(auditApi.content).toContain("name: 'filter'");
@@ -4477,11 +4481,15 @@ describe('OpenAPI Security And Compliance', () => {
     expect(apiFile!.content).toContain('export interface ResourceListResourcesParams');
     expect(apiFile!.content).toContain('xTraceId: string;');
     expect(apiFile!.content).toContain('sessionId?: string;');
-    expect(apiFile!.content).toContain('async listResources(params: ResourceListResourcesParams): Promise<void>');
+    expect(apiFile!.content).toContain(
+      'async listResources(params: ResourceListResourcesParams, requestOptions?: ApiRequestOptions): Promise<void>',
+    );
     expect(apiFile!.content).toContain("const requestHeaders = buildRequestHeaders(");
     expect(apiFile!.content).toContain("'X-Trace-Id': { value: params.xTraceId, style: 'simple', explode: false }");
     expect(apiFile!.content).toContain("session_id: { value: params.sessionId, style: 'form', explode: true }");
-    expect(apiFile!.content).toContain('this.client.get<void>(backendApiPath(`/resources`), undefined, requestHeaders)');
+    expect(apiFile!.content).toContain(
+      "this.client.request<void>(backendApiPath(`/resources`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, headers: requestHeaders })",
+    );
     expect(apiFile!.content).not.toContain('headers?: Record<string, string>');
   });
 
@@ -4567,11 +4575,13 @@ describe('OpenAPI Security And Compliance', () => {
     expect(apiFile).toBeDefined();
     expect(apiFile!.content).toContain('export interface ResourceSearchResourcesParams');
     expect(apiFile!.content).toContain('tag: string[];');
-    expect(apiFile!.content).toContain('filter?: Record<string, unknown>;');
+    expect(apiFile!.content).toContain('filter?: { status?: string; owner?: string; };');
     expect(apiFile!.content).toContain('range?: Record<string, number>;');
-    expect(apiFile!.content).toContain('jsonFilter?: Record<string, unknown>;');
+    expect(apiFile!.content).toContain('jsonFilter?: { state?: string; };');
     expect(apiFile!.content).toContain('q?: string;');
-    expect(apiFile!.content).toContain('async searchResources(params: ResourceSearchResourcesParams): Promise<void>');
+    expect(apiFile!.content).toContain(
+      'async searchResources(params: ResourceSearchResourcesParams, requestOptions?: ApiRequestOptions): Promise<void>',
+    );
     expect(apiFile!.content).toContain('const query = buildQueryString([');
     expect(apiFile!.content).toContain("name: 'tag'");
     expect(apiFile!.content).toContain("value: params.tag");
@@ -5007,7 +5017,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tsApi.content).toContain('page: number;');
     expect(tsApi.content).toContain('limit?: number;');
     expect(tsApi.content).toContain('sort?: string;');
-    expect(tsApi.content).toContain('async listResources(params: ResourceListResourcesParams): Promise<void>');
+    expect(tsApi.content).toContain('async listResources(params: ResourceListResourcesParams, requestOptions?: ApiRequestOptions): Promise<void>');
     expect(tsApi.content).toContain('const query = buildQueryString([');
     expect(tsApi.content).toContain("{ name: 'page', value: params.page, style: 'form', explode: true, allowReserved: false },");
     expect(tsApi.content).toContain('appendQueryString(backendApiPath(`/resources`), query)');
@@ -5300,7 +5310,7 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'conversationId: string;',
           'conversationId_?: string;',
-          'async stop(params: ChatStopParams): Promise<void>',
+          'async stop(params: ChatStopParams, requestOptions?: ApiRequestOptions): Promise<void>',
           "{ name: 'conversation_id', value: params.conversationId, style: 'form', explode: true, allowReserved: false }",
           "conversationId: { value: params.conversationId_, style: 'simple', explode: false }",
         ],
@@ -5453,8 +5463,8 @@ describe('OpenAPI Security And Compliance', () => {
         expected: [
           'export interface ResourceReadSerializedParams',
           'xTraceParts: Record<string, string>;',
-          'session?: Record<string, unknown>;',
-          'async readSerialized(tenant: string, labels: Record<string, string>, matrix: string[], params: ResourceReadSerializedParams): Promise<void>',
+          'session?: { mode?: string; };',
+          'async readSerialized(tenant: string, labels: Record<string, string>, matrix: string[], params: ResourceReadSerializedParams, requestOptions?: ApiRequestOptions): Promise<void>',
           'serializePathParameter(tenant, { name: \'tenant\', style: \'simple\', explode: false })',
           'serializePathParameter(labels, { name: \'labels\', style: \'label\', explode: true })',
           'serializePathParameter(matrix, { name: \'matrix\', style: \'matrix\', explode: false })',
@@ -5669,7 +5679,7 @@ describe('OpenAPI Security And Compliance', () => {
     const tsApi = getGeneratedFile(tsResult.files, 'src/api/chat.ts');
     const tsHttp = getGeneratedFile(tsResult.files, 'src/http/client.ts');
     expect(tsResult.errors).toEqual([]);
-    expect(tsApi.content).toContain('async create(body: CreateChatCompletionRequest): Promise<AsyncIterable<ChatCompletionChunk>>');
+    expect(tsApi.content).toContain('async create(body: CreateChatCompletionRequest, requestOptions?: ApiRequestOptions): Promise<AsyncIterable<ChatCompletionChunk>>');
     expect(tsApi.content).toContain("this.client.streamJson<ChatCompletionChunk>(aiApiPath(`/chat/completions`)");
     expect(tsApi.content).not.toContain('this.client.post<ChatCompletionChunk>');
     expect(tsHttp.content).toContain('async *streamJson<T>(');
@@ -6208,13 +6218,13 @@ describe('OpenAPI Security And Compliance', () => {
     expect(tenantApi!.content).toContain('page?: number;');
     expect(tenantApi!.content).toContain('size?: number;');
     expect(tenantApi!.content).toContain(
-      'async listByPage(body?: PlusTenantQueryListForm, params?: TenantListByPageParams): Promise<PlusApiResultPagePlusTenantVO>'
+      'async listByPage(body?: PlusTenantQueryListForm, params?: TenantListByPageParams, requestOptions?: ApiRequestOptions): Promise<PlusApiResultPagePlusTenantVO>'
     );
     expect(tenantApi!.content).toContain('const query = buildQueryString([');
     expect(tenantApi!.content).toContain("{ name: 'page', value: params?.page, style: 'form', explode: true, allowReserved: false },");
     expect(tenantApi!.content).toContain("{ name: 'size', value: params?.size, style: 'form', explode: true, allowReserved: false },");
     expect(tenantApi!.content).toContain(
-      'return this.client.post<PlusApiResultPagePlusTenantVO>(appendQueryString(backendApiPath(`/tenant/list`), query), body, undefined'
+      'return this.client.request<PlusApiResultPagePlusTenantVO>(appendQueryString(backendApiPath(`/tenant/list`), query),'
     );
     expect(tenantApi!.content).not.toContain('params?: QueryParams');
     expect(tenantApi!.content).toContain(`'application/json'`);
@@ -6270,13 +6280,13 @@ describe('OpenAPI Security And Compliance', () => {
     expect(authApi!.content).toContain('public readonly current: AuthSessionsCurrentApi;');
     expect(authApi!.content).not.toContain('export interface AuthSessionsCreateParams');
     expect(authApi!.content).not.toContain('xRequestId?: string;');
-    expect(authApi!.content).toContain('async create(body: CreateSessionRequest): Promise<AuthSession>');
-    expect(authApi!.content).toContain('async refresh(body: RefreshSessionRequest): Promise<AuthSession>');
-    expect(authApi!.content).toContain('async retrieve(): Promise<AuthSession>');
-    expect(authApi!.content).toContain('async delete(): Promise<void>');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest, requestOptions?: ApiRequestOptions): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async refresh(body: RefreshSessionRequest, requestOptions?: ApiRequestOptions): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async retrieve(requestOptions?: ApiRequestOptions): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async delete(requestOptions?: ApiRequestOptions): Promise<void>');
     expect(authApi!.content).toContain('export class AuthVerificationCodesApi');
-    expect(authApi!.content).toContain('async create(body: CreateVerificationCodeRequest): Promise<VerificationCodeResult>');
-    expect(authApi!.content).toContain('async verify(body: VerifyVerificationCodeRequest): Promise<VerificationCodeVerifyResult>');
+    expect(authApi!.content).toContain('async create(body: CreateVerificationCodeRequest, requestOptions?: ApiRequestOptions): Promise<VerificationCodeResult>');
+    expect(authApi!.content).toContain('async verify(body: VerifyVerificationCodeRequest, requestOptions?: ApiRequestOptions): Promise<VerificationCodeVerifyResult>');
     expect(authApi!.content).not.toContain('public readonly refresh: AuthSessionsRefreshApi;');
     expect(authApi!.content).not.toContain('export class AuthSessionsRefreshApi');
     expect(authApi!.content).not.toContain('public readonly verify: AuthVerificationCodesVerifyApi;');
@@ -6319,12 +6329,12 @@ describe('OpenAPI Security And Compliance', () => {
     expect(deviceApi!.content).toContain('public readonly sessions: DeviceSessionsApi;');
     expect(deviceApi!.content).toContain('this.sessions = new DeviceSessionsApi(client);');
     expect(deviceApi!.content).toContain('export class DeviceSessionsApi');
-    expect(deviceApi!.content).toContain('async resume(body: ResumeDeviceSessionRequest): Promise<DeviceSessionResumeView>');
-    expect(deviceApi!.content).toContain('async disconnect(body: PresenceDeviceRequest): Promise<PresenceSnapshotView>');
+    expect(deviceApi!.content).toContain('async resume(body: ResumeDeviceSessionRequest, requestOptions?: ApiRequestOptions): Promise<DeviceSessionResumeView>');
+    expect(deviceApi!.content).toContain('async disconnect(body: PresenceDeviceRequest, requestOptions?: ApiRequestOptions): Promise<PresenceSnapshotView>');
     expect(deviceApi!.content).toContain('export class DeviceRegistrationsApi');
-    expect(deviceApi!.content).toContain('async create(body: RegisterDeviceRequest): Promise<RegisteredDeviceView>');
+    expect(deviceApi!.content).toContain('async create(body: RegisterDeviceRequest, requestOptions?: ApiRequestOptions): Promise<RegisteredDeviceView>');
     expect(deviceApi!.content).toContain('export class DeviceSyncFeedApi');
-    expect(deviceApi!.content).toContain('async retrieve(deviceId: string, params?: DeviceSyncFeedRetrieveParams): Promise<DeviceSyncFeedResponse>');
+    expect(deviceApi!.content).toContain('async retrieve(deviceId: string, params?: DeviceSyncFeedRetrieveParams, requestOptions?: ApiRequestOptions): Promise<DeviceSyncFeedResponse>');
     expect(deviceApi!.content).not.toContain('DeviceSessionsApi(client).resume');
     expect(deviceApi!.content).not.toContain('async deviceSessions');
     expect(indexFile).toBeDefined();
@@ -6382,20 +6392,20 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
     );
     expect(authApi!.content).toContain(
-      "this.client.get<AuthSession>(appApiPath(`/auth/sessions/current`))",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/current`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any })",
     );
     expect(authApi!.content).not.toContain(
       "this.client.request<AuthSession>(appApiPath(`/auth/sessions/current`), { method: 'GET' as any, skipAuth: true })",
     );
     expect(httpClient).toBeDefined();
     expect(httpClient!.content).toMatch(
-      /const requestHeaders = skipAuth\s*\?\s*headers\s*:\s*this\.applySdkworkAuthHeaders\(headers\)/u,
+      /const requestHeaders = credentialEntryBootstrap[\s\S]*this\.applyCredentialEntryBootstrapHeaders\(headers\)[\s\S]*skipAuth[\s\S]*this\.applySdkworkAuthHeaders\(headers\)/u,
     );
     expect(httpClient!.content).toMatch(
-      /const authHeaders = skipAuth\s*\?\s*headers\s*:\s*this\.applySdkworkAuthHeaders\(headers\)/u,
+      /const authHeaders = credentialEntryBootstrap[\s\S]*this\.applyCredentialEntryBootstrapHeaders\(headers\)[\s\S]*skipAuth[\s\S]*this\.applySdkworkAuthHeaders\(headers\)/u,
     );
   });
 
@@ -6416,6 +6426,7 @@ describe('OpenAPI Security And Compliance', () => {
             post: {
               ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions/refresh'] as Record<string, any>).post,
               'x-sdkwork-auth-mode': 'refresh-token',
+              security: [],
             },
           },
         },
@@ -6426,7 +6437,50 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+    );
+  });
+
+  it('should generate fail-fast bootstrap Access-Token transport for credential-entry operations', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'app',
+        apiPrefix: '/app/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          ...sdkworkV3IamSpec.paths,
+          '/app/v3/api/auth/sessions': {
+            post: {
+              ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
+              'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
+              'x-sdkwork-forbid-credential-headers': true,
+              security: [{ AccessToken: [] }],
+            },
+          },
+        },
+      },
+    );
+    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
+    const httpClient = result.files.find((f) => f.path === 'src/http/client.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(authApi).toBeDefined();
+    expect(authApi!.content).toContain(
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', credentialEntryBootstrap: true })",
+    );
+    expect(httpClient).toBeDefined();
+    expect(httpClient!.content).toContain('credentialEntryBootstrap?: boolean;');
+    expect(httpClient!.content).toContain(
+      'credential-entry-bootstrap requires a bootstrap Access-Token before request dispatch',
+    );
+    expect(httpClient!.content).toContain("...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),");
+    expect(httpClient!.content).toMatch(
+      /if \(config\?\.credentialEntryBootstrap\)[\s\S]*stripCredentialHeaders\(headers, true\)/u,
     );
   });
 
@@ -6459,7 +6513,7 @@ describe('OpenAPI Security And Compliance', () => {
         httpPath: 'src/http/client.ts',
           anonymousCall: /auth\/sessions`[\s\S]*skipAuth: true/u,
           refreshCall: /auth\/sessions\/refresh`[\s\S]*skipAuth: true/u,
-          protectedCall: /auth\/sessions\/current`\)\)/u,
+          protectedCall: /auth\/sessions\/current`\), \{ signal: requestOptions\?\.signal, timeout: requestOptions\?\.timeout, method: 'GET' as any \}\)/u,
           transportSkip: /protected buildHeaders\(config: any, skipAuth = false\)[\s\S]*config\?\.skipAuth[\s\S]*X-Sdkwork-Organization-Id[\s\S]*skipAuth,/u,
         },
       {
@@ -6643,7 +6697,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(sdkFile!.content).not.toContain('public readonly iam: IamApi;');
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain('public readonly sessions: AuthSessionsApi;');
-    expect(authApi!.content).toContain('async create(body: CreateSessionRequest): Promise<AuthSession>');
+    expect(authApi!.content).toContain('async create(body: CreateSessionRequest, requestOptions?: ApiRequestOptions): Promise<AuthSession>');
     expect(iamApi).toBeUndefined();
     expect(readmeFile).toBeDefined();
     expect(readmeFile!.content).toContain('const result = await client.auth.sessions.create(body);');
@@ -6729,10 +6783,10 @@ describe('OpenAPI Security And Compliance', () => {
     expect(oauthApi).toBeDefined();
     expect(oauthApi!.content).toContain('public readonly authorizationUrls: OauthAuthorizationUrlsApi;');
     expect(oauthApi!.content).toContain(
-      'async create(body: OauthAuthorizationUrlCreateRequest): Promise<OauthAuthorizationUrlCreateResult>'
+      'async create(body: OauthAuthorizationUrlCreateRequest, requestOptions?: ApiRequestOptions): Promise<OauthAuthorizationUrlCreateResult>'
     );
     expect(oauthApi!.content).toContain("appApiPath(`/oauth/authorization_urls`)");
-    expect(oauthApi!.content).toContain("'application/json')");
+    expect(oauthApi!.content).toContain("contentType: 'application/json'");
     expect(oauthApi!.content).not.toContain('AuthOauthAuthorizationUrlsRetrieveParams');
     expect(oauthApi!.content).not.toContain('oauthAuthorizationUrls.retrieve');
   });
@@ -7798,7 +7852,7 @@ describe('OpenAPI Security And Compliance', () => {
 
     expect(result.errors).toEqual([]);
     expect(apiFile).toBeDefined();
-    expect(apiFile!.content).toContain('async queryResources(rawQueryString: string)');
+    expect(apiFile!.content).toContain('async queryResources(rawQueryString: string, requestOptions?: ApiRequestOptions)');
     expect(apiFile!.content).toContain('appendQueryString(backendApiPath(`/resources`), rawQueryString)');
     expect(apiFile!.content).toContain("method: 'QUERY' as any");
   });
@@ -7843,7 +7897,7 @@ describe('OpenAPI Security And Compliance', () => {
         config: baseConfig,
         apiPath: 'src/api/resource.ts',
         expectedSnippets: [
-          'async queryResources(rawQueryString: string)',
+          'async queryResources(rawQueryString: string, requestOptions?: ApiRequestOptions)',
           'appendQueryString(backendApiPath(`/resources`), rawQueryString)',
         ],
       },

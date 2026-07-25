@@ -17,7 +17,10 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesCredentialEntryBootstrap,
+} from '../../framework/sdkwork-v3-auth.js';
 import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
 
 interface NamedParameterBinding {
@@ -202,7 +205,7 @@ export class ApiGenerator {
     return {
       path: `src/api/${fileName}.ts`,
       content: this.format(`import { ${config.sdkType}ApiPath } from './paths';
-import type { HttpClient } from '../http/client';
+import type { ApiRequestOptions, HttpClient } from '../http/client';
 ${needsQueryParamsImport ? "import type { QueryParams } from '../types/common';" : ''}
 ${typeImports}
 
@@ -351,6 +354,7 @@ ${methods ? `\n\n${methods}` : ''}
       ? `, '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
       : '';
     const skipAuth = operationSkipsSdkworkAuth(op);
+    const credentialEntryBootstrap = operationUsesCredentialEntryBootstrap(op);
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
     const rawResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
@@ -439,6 +443,7 @@ ${methods ? `\n\n${methods}` : ''}
     if (operationParametersType && !operationParametersType.required) {
       params.push(`params?: ${operationParametersType.typeName}`);
     }
+    params.push('requestOptions?: ApiRequestOptions');
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
@@ -584,18 +589,17 @@ ${methods ? `\n\n${methods}` : ''}
         call = `this.client.request<${responseType}>(${requestPathExpression}, { method: '${toHttpMethodLiteral(httpMethod)}' as any${hasBody ? ', body' : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params' : ''}${hasHeaders ? ', headers: requestHeaders' : ''}${hasBody && requestBodyInfo?.mediaType ? `, contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : ''} })`;
     }
 
-    if (skipAuth) {
-      call = this.renderDirectRequestCall(
-        responseType,
-        requestPathExpression,
-        httpMethod,
-        hasBody,
-        hasQuery && !hasExplicitQuerySerialization,
-        hasHeaders,
-        requestBodyInfo?.mediaType,
-        true,
-      );
-    }
+    call = this.renderDirectRequestCall(
+      responseType,
+      requestPathExpression,
+      httpMethod,
+      hasBody,
+      hasQuery && !hasExplicitQuerySerialization,
+      hasHeaders,
+      requestBodyInfo?.mediaType,
+      skipAuth,
+      credentialEntryBootstrap,
+    );
 
     const docComment = op.summary ? `/** ${op.summary} */\n  ` : '';
     const queryBlock = hasExplicitQuerySerialization
@@ -614,12 +618,15 @@ ${this.renderNamedParameterRecord(cookieBindings, operationParametersType)}
 
     if (isEventStreamResponse) {
       const streamOptions = [
+        'signal: requestOptions?.signal',
+        'timeout: requestOptions?.timeout',
         `method: '${toHttpMethodLiteral(httpMethod)}' as any`,
         hasBody ? 'body' : '',
         hasQuery && !hasExplicitQuerySerialization ? 'params' : '',
         hasHeaders ? 'headers: requestHeaders' : '',
         hasBody && requestBodyInfo?.mediaType ? `contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '',
         skipAuth ? 'skipAuth: true' : '',
+        credentialEntryBootstrap ? 'credentialEntryBootstrap: true' : '',
       ].filter(Boolean).join(', ');
 
       return {
@@ -649,14 +656,18 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
     hasHeaders: boolean,
     mediaType: string | undefined,
     skipAuth: boolean,
+    credentialEntryBootstrap: boolean,
   ): string {
     const options = [
+      'signal: requestOptions?.signal',
+      'timeout: requestOptions?.timeout',
       `method: '${toHttpMethodLiteral(httpMethod)}' as any`,
       hasBody ? 'body' : '',
       hasQueryParams ? 'params' : '',
       hasHeaders ? 'headers: requestHeaders' : '',
       hasBody && mediaType ? `contentType: '${this.escapeSingleQuoted(mediaType)}'` : '',
       skipAuth ? 'skipAuth: true' : '',
+      credentialEntryBootstrap ? 'credentialEntryBootstrap: true' : '',
     ].filter(Boolean).join(', ');
     return `this.client.request<${responseType}>(${requestPathExpression}, { ${options} })`;
   }

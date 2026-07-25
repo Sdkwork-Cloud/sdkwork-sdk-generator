@@ -105,7 +105,7 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
     return schema.nullable ? `${modelName} | null` : modelName;
   }
 
-  if (schema.additionalProperties) {
+  if (schema.additionalProperties && !schema.properties) {
     const valueType = schema.additionalProperties === true
       ? 'unknown'
       : getTypeScriptType(schema.additionalProperties, config, knownModels);
@@ -182,12 +182,48 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
     return nullable ? `${arrayType} | null` : arrayType;
   }
   
-  if (type === 'object') {
-    const objectType = 'Record<string, unknown>';
+  if (type === 'object' || schema.properties) {
+    const objectType = renderInlineObjectType(schema, config, knownModels);
     return nullable ? `${objectType} | null` : objectType;
   }
   
   return 'unknown';
+}
+
+function renderInlineObjectType(
+  schema: any,
+  config: LanguageConfig,
+  knownModels?: Set<string>,
+): string {
+  const properties = Object.entries(schema.properties || {}) as Array<[string, any]>;
+  if (properties.length === 0) {
+    if (schema.additionalProperties === false) {
+      return '{}';
+    }
+    if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+      return `Record<string, ${getTypeScriptType(schema.additionalProperties, config, knownModels)}>`;
+    }
+    return 'Record<string, unknown>';
+  }
+
+  const required = new Set<string>(schema.required || []);
+  const fields = properties.map(([name, propertySchema]) => {
+    const propertyKey = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)
+      ? name
+      : `'${name.replace(/'/g, "\\'")}'`;
+    const optional = required.has(name) ? '' : '?';
+    return `${propertyKey}${optional}: ${getTypeScriptType(propertySchema, config, knownModels)};`;
+  });
+  const declaredShape = `{ ${fields.join(' ')} }`;
+
+  if (schema.additionalProperties === true) {
+    return `${declaredShape} & Record<string, unknown>`;
+  }
+  if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+    const valueType = getTypeScriptType(schema.additionalProperties, config, knownModels);
+    return `${declaredShape} & Record<string, ${valueType}>`;
+  }
+  return declaredShape;
 }
 
 function normalizeSchemaType(type: unknown): { type: string | undefined; nullable: boolean } {

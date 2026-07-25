@@ -222,15 +222,19 @@ function extractNestedPropertySchema(
   if (!schema) {
     return undefined;
   }
-  const resolved = resolveSchema(schema, components, new Set());
-  const propertySchema = resolved?.properties?.[propertyName];
-  if (!propertySchema || typeof propertySchema !== 'object') {
-    return undefined;
+
+  const candidates = resolveComposedSchemas(schema, components).reverse();
+  for (const candidate of candidates) {
+    const propertySchema = candidate?.properties?.[propertyName];
+    if (!propertySchema || typeof propertySchema !== 'object') {
+      continue;
+    }
+    if (typeof propertySchema.$ref === 'string') {
+      return propertySchema;
+    }
+    return resolveSchema(propertySchema, components, new Set());
   }
-  if (typeof propertySchema.$ref === 'string') {
-    return propertySchema;
-  }
-  return resolveSchema(propertySchema, components, new Set());
+  return undefined;
 }
 
 function unwrapKindForEnvelopeName(name: string): SdkworkV3UnwrapKind {
@@ -250,18 +254,24 @@ function unwrapKindForDataSchema(
   dataSchema: Record<string, any> | undefined,
   components: Record<string, any>,
 ): SdkworkV3UnwrapKind {
-  const resolved = resolveSchema(dataSchema || {}, components, new Set());
-  const ref = refName(resolved?.$ref);
-  if (ref === 'SdkWorkPageData') {
+  const directRef = refName(dataSchema?.$ref);
+  if (directRef === 'SdkWorkPageData') {
     return 'page';
   }
-  if (ref === 'SdkWorkResourceData') {
+  if (directRef === 'SdkWorkResourceData') {
     return 'item';
   }
-  if (ref === 'SdkWorkCommandData') {
+  if (directRef === 'SdkWorkCommandData') {
     return 'command';
   }
-  const required = new Set(resolved?.required || []);
+
+  const candidates = resolveComposedSchemas(dataSchema || {}, components);
+  const required = new Set<string>();
+  for (const candidate of candidates) {
+    for (const propertyName of candidate?.required || []) {
+      required.add(propertyName);
+    }
+  }
   if (required.has('items') && required.has('pageInfo')) {
     return 'page';
   }
@@ -272,6 +282,39 @@ function unwrapKindForDataSchema(
     return 'command';
   }
   return 'data';
+}
+
+function resolveComposedSchemas(
+  schema: Record<string, any>,
+  components: Record<string, any>,
+  seen = new Set<string>(),
+): Record<string, any>[] {
+  if (!schema || typeof schema !== 'object') {
+    return [];
+  }
+
+  const ref = refName(schema.$ref);
+  if (ref) {
+    if (seen.has(ref)) {
+      return [schema];
+    }
+    const target = components[ref];
+    if (!target || typeof target !== 'object') {
+      return [schema];
+    }
+    const nextSeen = new Set(seen);
+    nextSeen.add(ref);
+    return resolveComposedSchemas(target as Record<string, any>, components, nextSeen);
+  }
+
+  if (!Array.isArray(schema.allOf)) {
+    return [schema];
+  }
+  return [
+    schema,
+    ...schema.allOf.flatMap((branch: Record<string, any>) =>
+      resolveComposedSchemas(branch, components, new Set(seen))),
+  ];
 }
 
 function extractJsonSchema(response: any): Record<string, any> | undefined {
