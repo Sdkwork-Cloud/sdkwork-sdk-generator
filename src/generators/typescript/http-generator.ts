@@ -21,6 +21,8 @@ export class HttpClientGenerator {
       .replace(/'/g, "\\'");
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveTypeScriptCommonPackage(config);
+    const requiresSdkworkAccessToken = config.options?.standardProfile === 'sdkwork-v3'
+      && ['app', 'backend', 'im'].includes(config.sdkType);
 
     return [
       this.generateHttpClient(
@@ -30,6 +32,7 @@ export class HttpClientGenerator {
         apiKeyUseBearer,
         commonPkg.importPath,
         config.options?.standardProfile === 'sdkwork-v3',
+        requiresSdkworkAccessToken,
       ),
       this.generateHttpIndex(),
       this.generateAuthIndex(commonPkg.importPath),
@@ -45,6 +48,7 @@ export class HttpClientGenerator {
     apiKeyUseBearer: boolean,
     commonImportPath: string,
     sdkworkV3Unwrap = false,
+    requiresSdkworkAccessToken = false,
   ): GeneratedFile {
     return {
       path: 'src/http/client.ts',
@@ -58,7 +62,7 @@ export type HttpRequestOptions = RequestOptions & {
   body?: unknown;
   headers?: Record<string, string>;
   contentType?: string;
-  credentialEntryBootstrap?: boolean;
+  accessTokenOnly?: boolean;
 };
 
 export type ApiRequestOptions = Pick<HttpRequestOptions, 'signal' | 'timeout'>;
@@ -68,6 +72,7 @@ export class HttpClient extends BaseHttpClient {
   private static readonly ACCESS_TOKEN_HEADER: string = '${accessTokenHeader}';
   private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
   private static readonly SDKWORK_V3_UNWRAP = ${sdkworkV3Unwrap ? 'true' : 'false'};
+  private static readonly REQUIRES_SDKWORK_ACCESS_TOKEN = ${requiresSdkworkAccessToken ? 'true' : 'false'};
 
   constructor(config: ${configType}) {
     super(config as any);
@@ -103,7 +108,7 @@ export class HttpClient extends BaseHttpClient {
 
   protected buildHeaders(config: any, skipAuth = false): Record<string, string> {
     const headers = super.buildHeaders(config, skipAuth);
-    if (config?.credentialEntryBootstrap) {
+    if (config?.accessTokenOnly) {
       this.stripCredentialHeaders(headers, true);
       return headers;
     }
@@ -310,7 +315,7 @@ export class HttpClient extends BaseHttpClient {
     this.getInternalAuthConfig().tokenManager = manager;
   }
 
-  private applyCredentialEntryBootstrapHeaders(
+  private applyAccessTokenOnlyHeaders(
     headers?: Record<string, string>,
   ): Record<string, string> {
     const authConfig = this.getInternalAuthConfig();
@@ -318,7 +323,7 @@ export class HttpClient extends BaseHttpClient {
     const accessToken = tokenManager?.getAccessToken?.();
     if (typeof accessToken !== 'string' || accessToken.trim().length === 0) {
       throw new Error(
-        'credential-entry-bootstrap requires a bootstrap Access-Token before request dispatch',
+        'access-token-only request requires Access-Token before request dispatch',
       );
     }
 
@@ -333,6 +338,10 @@ export class HttpClient extends BaseHttpClient {
     const tokenManager = authConfig.tokenManager;
     const accessToken = tokenManager?.getAccessToken?.();
     const authToken = tokenManager?.getAuthToken?.();
+    if (HttpClient.REQUIRES_SDKWORK_ACCESS_TOKEN
+      && (typeof accessToken !== 'string' || accessToken.trim().length === 0)) {
+      throw new Error('non-open-api request requires Access-Token before request dispatch');
+    }
     if (!accessToken && !authToken) {
       return headers;
     }
@@ -387,11 +396,11 @@ export class HttpClient extends BaseHttpClient {
       contentType,
       method = 'GET',
       skipAuth,
-      credentialEntryBootstrap,
+      accessTokenOnly,
       ...rest
     } = options;
-    const requestHeaders = credentialEntryBootstrap
-      ? this.applyCredentialEntryBootstrapHeaders(headers)
+    const requestHeaders = accessTokenOnly
+      ? this.applyAccessTokenOnlyHeaders(headers)
       : skipAuth
         ? headers
         : this.applySdkworkAuthHeaders(headers);
@@ -401,7 +410,7 @@ export class HttpClient extends BaseHttpClient {
         method,
         ...rest,
         skipAuth,
-        credentialEntryBootstrap,
+        accessTokenOnly,
         body: this.buildRequestBody(body, contentType),
         headers: this.buildRequestHeaders(requestHeaders, body == null ? undefined : contentType),
       }),
@@ -421,11 +430,11 @@ export class HttpClient extends BaseHttpClient {
       contentType,
       method = 'GET',
       skipAuth,
-      credentialEntryBootstrap,
+      accessTokenOnly,
       ...rest
     } = options;
-    const authHeaders = credentialEntryBootstrap
-      ? this.applyCredentialEntryBootstrapHeaders(headers)
+    const authHeaders = accessTokenOnly
+      ? this.applyAccessTokenOnlyHeaders(headers)
       : skipAuth
         ? headers
         : this.applySdkworkAuthHeaders(headers);
@@ -438,7 +447,7 @@ export class HttpClient extends BaseHttpClient {
       method,
       ...rest,
       skipAuth,
-      credentialEntryBootstrap,
+      accessTokenOnly,
       body: this.buildRequestBody(body, contentType),
       headers: requestHeaders,
     })) {

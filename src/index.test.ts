@@ -647,7 +647,8 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Create auth session',
         operationId: 'sessions.create',
         tags: ['auth'],
-        security: [],
+        security: [{ AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
         requestBody: {
           required: true,
           content: {
@@ -681,7 +682,8 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Get current auth session',
         operationId: 'sessions.current.retrieve',
         tags: ['auth'],
-        security: [{ AuthToken: [], AccessToken: [] }],
+        security: [{ AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'refresh-token',
         responses: {
           '200': {
             description: 'Success',
@@ -758,7 +760,8 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Create verification code',
         operationId: 'verificationCodes.create',
         tags: ['auth'],
-        security: [],
+        security: [{ AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
         requestBody: {
           required: true,
           content: {
@@ -792,7 +795,8 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Verify verification code',
         operationId: 'verificationCodes.verify',
         tags: ['auth'],
-        security: [],
+        security: [{ AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
         requestBody: {
           required: true,
           content: {
@@ -6363,7 +6367,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(httpClient!.content).not.toContain("HttpClient.ACCESS_TOKEN_HEADER === 'Access-Token'");
   });
 
-  it('should generate skipAuth for sdkwork v3 anonymous operations', async () => {
+  it('should generate credential suppression for sdkwork v3 anonymous app-api operations', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(
       {
@@ -6379,6 +6383,7 @@ describe('OpenAPI Security And Compliance', () => {
           '/app/v3/api/auth/sessions': {
             post: {
               ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
+              security: [],
               'x-sdkwork-auth-mode': 'anonymous',
               'x-sdkwork-forbid-credential-headers': true,
             },
@@ -6386,30 +6391,14 @@ describe('OpenAPI Security And Compliance', () => {
         },
       },
     );
-    const authApi = result.files.find((f) => f.path === 'src/api/auth.ts');
-    const httpClient = result.files.find((f) => f.path === 'src/http/client.ts');
-
+    const authApi = result.files.find((file) => file.path === 'src/api/auth.ts');
     expect(result.errors).toEqual([]);
-    expect(authApi).toBeDefined();
-    expect(authApi!.content).toContain(
+    expect(authApi?.content).toContain(
       "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
-    );
-    expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/current`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any })",
-    );
-    expect(authApi!.content).not.toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/current`), { method: 'GET' as any, skipAuth: true })",
-    );
-    expect(httpClient).toBeDefined();
-    expect(httpClient!.content).toMatch(
-      /const requestHeaders = credentialEntryBootstrap[\s\S]*this\.applyCredentialEntryBootstrapHeaders\(headers\)[\s\S]*skipAuth[\s\S]*this\.applySdkworkAuthHeaders\(headers\)/u,
-    );
-    expect(httpClient!.content).toMatch(
-      /const authHeaders = credentialEntryBootstrap[\s\S]*this\.applyCredentialEntryBootstrapHeaders\(headers\)[\s\S]*skipAuth[\s\S]*this\.applySdkworkAuthHeaders\(headers\)/u,
     );
   });
 
-  it('should generate skipAuth for sdkwork v3 refresh-token operations', async () => {
+  it('should generate Access-Token-only auth for sdkwork v3 refresh-token operations', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(
       {
@@ -6426,7 +6415,7 @@ describe('OpenAPI Security And Compliance', () => {
             post: {
               ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions/refresh'] as Record<string, any>).post,
               'x-sdkwork-auth-mode': 'refresh-token',
-              security: [],
+              security: [{ AccessToken: [] }],
             },
           },
         },
@@ -6437,7 +6426,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', accessTokenOnly: true })",
     );
   });
 
@@ -6471,29 +6460,30 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', credentialEntryBootstrap: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', accessTokenOnly: true })",
     );
     expect(httpClient).toBeDefined();
-    expect(httpClient!.content).toContain('credentialEntryBootstrap?: boolean;');
+    expect(httpClient!.content).toContain('accessTokenOnly?: boolean;');
     expect(httpClient!.content).toContain(
-      'credential-entry-bootstrap requires a bootstrap Access-Token before request dispatch',
+      'access-token-only request requires Access-Token before request dispatch',
     );
     expect(httpClient!.content).toContain("...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),");
     expect(httpClient!.content).toMatch(
-      /if \(config\?\.credentialEntryBootstrap\)[\s\S]*stripCredentialHeaders\(headers, true\)/u,
+      /if \(config\?\.accessTokenOnly\)[\s\S]*stripCredentialHeaders\(headers, true\)/u,
     );
   });
 
-  it('should generate sdkwork v3 credential suppression for anonymous and refresh operations across language SDKs', async () => {
+  it('should reject credential-free refresh operations across non-open language SDKs', async () => {
     const spec: ApiSpec = {
       ...sdkworkV3IamSpec,
       paths: {
         ...sdkworkV3IamSpec.paths,
         '/app/v3/api/auth/sessions': {
-          post: {
-            ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
-            'x-sdkwork-auth-mode': 'anonymous',
-            'x-sdkwork-forbid-credential-headers': true,
+            post: {
+              ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
+              security: [],
+              'x-sdkwork-auth-mode': 'anonymous',
+              'x-sdkwork-forbid-credential-headers': true,
           },
         },
         '/app/v3/api/auth/sessions/refresh': {
@@ -6647,18 +6637,9 @@ describe('OpenAPI Security And Compliance', () => {
         spec,
       );
 
-      expect(result.errors, item.language).toEqual([]);
-      const api = result.files.find((file) => file.path === item.apiPath);
-      const http = result.files.find((file) => file.path === item.httpPath);
-      expect(api, `${item.language} api`).toBeDefined();
-      expect(http, `${item.language} http`).toBeDefined();
-      if ('importAssertion' in item) {
-        expect(api!.content, `${item.language} import`).toMatch(item.importAssertion);
-      }
-      expect(api!.content, `${item.language} anonymous call`).toMatch(item.anonymousCall);
-      expect(api!.content, `${item.language} refresh call`).toMatch(item.refreshCall);
-      expect(api!.content, `${item.language} protected call`).toMatch(item.protectedCall);
-      expect(http!.content, `${item.language} transport skip`).toMatch(item.transportSkip);
+      expect(result.errors[0]?.message, item.language).toContain(
+        'POST /app/v3/api/auth/sessions/refresh refresh-token route must require only AccessToken.',
+      );
     }
   });
 
@@ -6722,7 +6703,8 @@ describe('OpenAPI Security And Compliance', () => {
               summary: 'Create OAuth authorization URL',
               operationId: 'oauth.authorizationUrls.create',
               tags: ['oauth'],
-              security: [],
+              security: [{ AccessToken: [] }],
+              'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
               requestBody: {
                 required: true,
                 content: {
@@ -6787,6 +6769,7 @@ describe('OpenAPI Security And Compliance', () => {
     );
     expect(oauthApi!.content).toContain("appApiPath(`/oauth/authorization_urls`)");
     expect(oauthApi!.content).toContain("contentType: 'application/json'");
+    expect(oauthApi!.content).toContain('accessTokenOnly: true');
     expect(oauthApi!.content).not.toContain('AuthOauthAuthorizationUrlsRetrieveParams');
     expect(oauthApi!.content).not.toContain('oauthAuthorizationUrls.retrieve');
   });

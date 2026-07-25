@@ -19,7 +19,7 @@ import {
 } from '../../framework/parameter-serialization.js';
 import {
   operationSkipsSdkworkAuth,
-  operationUsesCredentialEntryBootstrap,
+  operationUsesAccessTokenOnly,
 } from '../../framework/sdkwork-v3-auth.js';
 import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
 
@@ -354,7 +354,7 @@ ${methods ? `\n\n${methods}` : ''}
       ? `, '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
       : '';
     const skipAuth = operationSkipsSdkworkAuth(op);
-    const credentialEntryBootstrap = operationUsesCredentialEntryBootstrap(op);
+    const accessTokenOnly = operationUsesAccessTokenOnly(op);
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
     const rawResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
@@ -598,7 +598,7 @@ ${methods ? `\n\n${methods}` : ''}
       hasHeaders,
       requestBodyInfo?.mediaType,
       skipAuth,
-      credentialEntryBootstrap,
+      accessTokenOnly,
     );
 
     const docComment = op.summary ? `/** ${op.summary} */\n  ` : '';
@@ -626,7 +626,7 @@ ${this.renderNamedParameterRecord(cookieBindings, operationParametersType)}
         hasHeaders ? 'headers: requestHeaders' : '',
         hasBody && requestBodyInfo?.mediaType ? `contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '',
         skipAuth ? 'skipAuth: true' : '',
-        credentialEntryBootstrap ? 'credentialEntryBootstrap: true' : '',
+        accessTokenOnly ? 'accessTokenOnly: true' : '',
       ].filter(Boolean).join(', ');
 
       return {
@@ -656,7 +656,7 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
     hasHeaders: boolean,
     mediaType: string | undefined,
     skipAuth: boolean,
-    credentialEntryBootstrap: boolean,
+    accessTokenOnly: boolean,
   ): string {
     const options = [
       'signal: requestOptions?.signal',
@@ -667,7 +667,7 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
       hasHeaders ? 'headers: requestHeaders' : '',
       hasBody && mediaType ? `contentType: '${this.escapeSingleQuoted(mediaType)}'` : '',
       skipAuth ? 'skipAuth: true' : '',
-      credentialEntryBootstrap ? 'credentialEntryBootstrap: true' : '',
+      accessTokenOnly ? 'accessTokenOnly: true' : '',
     ].filter(Boolean).join(', ');
     return `this.client.request<${responseType}>(${requestPathExpression}, { ${options} })`;
   }

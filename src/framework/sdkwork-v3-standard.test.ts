@@ -91,7 +91,7 @@ describe('sdkwork-v3 backend agent-token validation', () => {
           summary: 'Report an agent heartbeat',
           operationId: 'agent.heartbeat',
           tags: ['agent'],
-          security: [{ AgentToken: [] }],
+          security: [{ AgentToken: [], AccessToken: [] }],
           'x-sdkwork-auth-mode': 'api-key',
           'x-sdkwork-route-auth': 'agent-token',
           responses: openApiKeySpec.paths['/image/v3/api/compat/openai/images/generations'].post.responses,
@@ -118,6 +118,61 @@ describe('sdkwork-v3 backend agent-token validation', () => {
     const anonymousSpec = structuredClone(backendAgentSpec);
     anonymousSpec.paths['/backend/v3/api/agent/heartbeat'].post.security = [];
     expect(validateSdkworkV3Standard(anonymousSpec, { sdkType: 'backend' }))
-      .toContain('POST /backend/v3/api/agent/heartbeat agent-token route must require AgentToken.');
+      .toContain('POST /backend/v3/api/agent/heartbeat agent-token route must require both AgentToken and AccessToken.');
+  });
+});
+
+describe('sdkwork-v3 non-open-api access-token validation', () => {
+  const appSpec: ApiSpec = {
+    ...openApiKeySpec,
+    info: { title: 'SDKWork App API', version: '1.0.0' },
+    paths: {
+      '/app/v3/api/auth/sessions': {
+        post: {
+          summary: 'Create an app session',
+          operationId: 'auth.sessions.create',
+          tags: ['auth'],
+          security: [{ AccessToken: [] }],
+          'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
+          responses: openApiKeySpec.paths['/image/v3/api/compat/openai/images/generations'].post.responses,
+        },
+      },
+    },
+    components: {
+      ...openApiKeySpec.components,
+      securitySchemes: {
+        AuthToken: { type: 'http', scheme: 'bearer' },
+        AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
+      },
+    },
+  };
+
+  it('accepts Access-Token-only credential-entry and refresh profiles', () => {
+    const authIssues = (spec: ApiSpec) => validateSdkworkV3Standard(spec, { sdkType: 'app' })
+      .filter((issue) => (
+        issue.includes('route must')
+        || issue.includes('AccessToken')
+        || issue.includes('security: []')
+      ));
+    expect(authIssues(appSpec)).toEqual([]);
+    const refreshSpec = structuredClone(appSpec);
+    refreshSpec.paths['/app/v3/api/auth/sessions'].post['x-sdkwork-auth-mode'] = 'refresh-token';
+    expect(authIssues(refreshSpec)).toEqual([]);
+  });
+
+  it('accepts explicitly anonymous app-api operations', () => {
+    const anonymousSpec = structuredClone(appSpec);
+    anonymousSpec.paths['/app/v3/api/auth/sessions'].post['x-sdkwork-auth-mode'] = 'anonymous';
+    anonymousSpec.paths['/app/v3/api/auth/sessions'].post.security = [];
+    const issues = validateSdkworkV3Standard(anonymousSpec, { sdkType: 'app' })
+      .filter((issue) => issue.includes('anonymous route'));
+    expect(issues).toEqual([]);
+  });
+
+  it('requires anonymous app-api operations to suppress stored credentials', () => {
+    const anonymousSpec = structuredClone(appSpec);
+    anonymousSpec.paths['/app/v3/api/auth/sessions'].post['x-sdkwork-auth-mode'] = 'anonymous';
+    expect(validateSdkworkV3Standard(anonymousSpec, { sdkType: 'app' }))
+      .toContain('POST /app/v3/api/auth/sessions anonymous route must explicitly set security: [].');
   });
 });

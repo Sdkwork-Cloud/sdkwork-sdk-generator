@@ -215,35 +215,38 @@ function validateSecurity(
   if (sdkType === 'backend' && routeAuth === 'agent-token') {
     const hasAgentTokenRequirement = (operation.security || []).some((requirement) => (
       Object.prototype.hasOwnProperty.call(requirement, AGENT_TOKEN_SCHEME)
-    ));
-    if (!hasAgentTokenRequirement) {
-      issues.push(`${operationLabel} agent-token route must require ${AGENT_TOKEN_SCHEME}.`);
-    }
-    return;
-  }
-
-  const security = operation.security || [];
-  if (authMode === 'anonymous' || authMode === 'refresh-token') {
-    if (!Array.isArray(operation.security) || operation.security.length !== 0) {
-      issues.push(`${operationLabel} ${authMode} route must explicitly set security: [].`);
-    }
-    return;
-  }
-
-  if (authMode === 'credential-entry-bootstrap') {
-    const hasBootstrapAccessTokenRequirement = security.some((requirement) => (
-      Object.keys(requirement).length === 1
       && Object.prototype.hasOwnProperty.call(requirement, ACCESS_TOKEN_SCHEME)
     ));
-    if (!hasBootstrapAccessTokenRequirement) {
+    if (!hasAgentTokenRequirement) {
       issues.push(
-        `${operationLabel} credential-entry-bootstrap route must require only ${ACCESS_TOKEN_SCHEME}.`,
+        `${operationLabel} agent-token route must require both ${AGENT_TOKEN_SCHEME} and ${ACCESS_TOKEN_SCHEME}.`,
       );
     }
     return;
   }
 
-  if (Array.isArray(operation.security) && operation.security.length === 0) {
+  const security = operation.security || [];
+  if (authMode === 'anonymous') {
+    if (!Array.isArray(operation.security) || operation.security.length !== 0) {
+      issues.push(`${operationLabel} anonymous route must explicitly set security: [].`);
+    }
+    return;
+  }
+
+  if (authMode === 'credential-entry-bootstrap' || authMode === 'refresh-token') {
+    if (isCustomOpenApi(sdkType)) {
+      issues.push(`${operationLabel} open-api route must not use ${authMode} authentication.`);
+      return;
+    }
+    const hasAccessTokenOnlyRequirement = security.some((requirement) => (
+      Object.keys(requirement).length === 1
+      && Object.prototype.hasOwnProperty.call(requirement, ACCESS_TOKEN_SCHEME)
+    ));
+    if (!hasAccessTokenOnlyRequirement) {
+      issues.push(
+        `${operationLabel} ${authMode} route must require only ${ACCESS_TOKEN_SCHEME}.`,
+      );
+    }
     return;
   }
 
@@ -262,7 +265,7 @@ function validateSecurity(
     && Object.prototype.hasOwnProperty.call(requirement, ACCESS_TOKEN_SCHEME)
   ));
   if (!hasDualTokenRequirement) {
-    issues.push(`${operationLabel} must require both ${AUTH_TOKEN_SCHEME} and ${ACCESS_TOKEN_SCHEME}, or explicitly set security: [].`);
+    issues.push(`${operationLabel} must require both ${AUTH_TOKEN_SCHEME} and ${ACCESS_TOKEN_SCHEME}.`);
   }
 }
 

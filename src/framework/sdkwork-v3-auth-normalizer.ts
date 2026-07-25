@@ -420,6 +420,7 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file: GeneratedFile): Generated
   let content = file.content;
   content = content.replace(/\nimport type \{ AuthTokenManager \} from '[^']+';/g, '');
   content = content.replace(/\n\s+private static readonly ACCESS_TOKEN_HEADER: string = '[^']+';/g, '');
+  content = content.replace(/\n\s+private static readonly REQUIRES_SDKWORK_ACCESS_TOKEN = (?:true|false);/g, '');
   content = content.replace(/\n\s+private getInternalHeaders\(\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestHeaders)/, '\n');
   content = content.replace(
     /\n\s+protected buildHeaders\(config: any, skipAuth = false\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestBody)/,
@@ -451,15 +452,15 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file: GeneratedFile): Generated
     ].join('\n'),
   );
   content = content.replace(
-    /\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applyCredentialEntryBootstrapAccessToken\(headers: Record<string, string>\): void \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+private unwrapSdkworkV3Payload)/,
+    /\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applyAccessTokenOnlyHeaders\(\n\s+headers\?: Record<string, string>,\n\s+\): Record<string, string> \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+private unwrapSdkworkV3Payload)/,
     '\n',
   );
   content = content.replace(
-    /const requestHeaders = skipAuth \? headers : this\.applySdkworkAuthHeaders\(headers\);/g,
+    /const requestHeaders = accessTokenOnly[\s\S]*?this\.applyAccessTokenOnlyHeaders\(headers\)[\s\S]*?skipAuth[\s\S]*?this\.applySdkworkAuthHeaders\(headers\);/g,
     'const requestHeaders = headers;',
   );
   content = content.replace(
-    /const authHeaders = skipAuth \? headers : this\.applySdkworkAuthHeaders\(headers\);\n\s+const requestHeaders = this\.buildRequestHeaders\(\n\s+\{ Accept: 'text\/event-stream', \.\.\.\(authHeaders \?\? \{\}\) \},/g,
+    /const authHeaders = accessTokenOnly[\s\S]*?this\.applyAccessTokenOnlyHeaders\(headers\)[\s\S]*?skipAuth[\s\S]*?this\.applySdkworkAuthHeaders\(headers\);\n\s+const requestHeaders = this\.buildRequestHeaders\(\n\s+\{ Accept: 'text\/event-stream', \.\.\.\(authHeaders \?\? \{\}\) \},/g,
     [
       'const requestHeaders = this.buildRequestHeaders(',
       "      { Accept: 'text/event-stream', ...(headers ?? {}) },",
