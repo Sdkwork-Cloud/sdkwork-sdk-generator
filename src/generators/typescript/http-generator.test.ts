@@ -95,4 +95,59 @@ describe('TypeScript HTTP generator', () => {
     expect(httpClient?.content).toContain("if ('item' in data)");
     expect(httpClient?.content).toContain('return data.item as T;');
   });
+
+  it('adds a body fingerprint to sdkwork-v3 idempotent requests', () => {
+    const generator = new HttpClientGenerator();
+    const files = generator.generate(
+      {
+        schemas: {},
+        schemaFileMap: new Map(),
+        apiGroups: {},
+        auth: {
+          hasApiKeyScheme: false,
+          hasBearerScheme: false,
+          hasSecurityRequirements: false,
+          apiKeyAsBearer: false,
+        },
+      } satisfies SchemaContext,
+      {
+        ...config,
+        sdkType: 'app',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+    );
+
+    const httpClient = files.find((file) => file.path === 'src/http/client.ts');
+
+    expect(httpClient?.content).toContain('SDKWORK_V3_REQUEST_FINGERPRINTS = true');
+    expect(httpClient?.content).toContain("this.hasNonEmptyHeader(headers, 'Idempotency-Key')");
+    expect(httpClient?.content).toContain("header: 'X-Content-SHA256'");
+    expect(httpClient?.content).toContain("header: 'X-Idempotency-Fingerprint'");
+    expect(httpClient?.content).toContain("subtle.digest('SHA-256', bytes)");
+    expect(httpClient?.content).toContain(
+      'const preparedHeaders = await this.applySdkworkRequestBodyFingerprint(',
+    );
+  });
+
+  it('keeps automatic request fingerprints disabled outside sdkwork-v3', () => {
+    const generator = new HttpClientGenerator();
+    const files = generator.generate(
+      {
+        schemas: {},
+        schemaFileMap: new Map(),
+        apiGroups: {},
+        auth: {
+          hasApiKeyScheme: false,
+          hasBearerScheme: false,
+          hasSecurityRequirements: false,
+          apiKeyAsBearer: false,
+        },
+      } satisfies SchemaContext,
+      config,
+    );
+
+    const httpClient = files.find((file) => file.path === 'src/http/client.ts');
+
+    expect(httpClient?.content).toContain('SDKWORK_V3_REQUEST_FINGERPRINTS = false');
+  });
 });
