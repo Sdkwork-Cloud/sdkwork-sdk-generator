@@ -213,7 +213,9 @@ export class HttpClient extends BaseHttpClient {
     if (!subtle) {
       throw new Error('Web Crypto SHA-256 is required for SDKWork idempotent requests with a body.');
     }
-    const digest = await subtle.digest('SHA-256', bytes);
+    const digestInput = new Uint8Array(bytes.byteLength);
+    digestInput.set(bytes);
+    const digest = await subtle.digest('SHA-256', digestInput);
     return Array.from(new Uint8Array(digest))
       .map((value) => value.toString(16).padStart(2, '0'))
       .join('');

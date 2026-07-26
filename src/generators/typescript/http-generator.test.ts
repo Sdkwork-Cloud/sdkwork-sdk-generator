@@ -123,7 +123,8 @@ describe('TypeScript HTTP generator', () => {
     expect(httpClient?.content).toContain("this.hasNonEmptyHeader(headers, 'Idempotency-Key')");
     expect(httpClient?.content).toContain("header: 'X-Content-SHA256'");
     expect(httpClient?.content).toContain("header: 'X-Idempotency-Fingerprint'");
-    expect(httpClient?.content).toContain("subtle.digest('SHA-256', bytes)");
+    expect(httpClient?.content).toContain('const digestInput = new Uint8Array(bytes.byteLength)');
+    expect(httpClient?.content).toContain("subtle.digest('SHA-256', digestInput)");
     expect(httpClient?.content).toContain(
       'const preparedHeaders = await this.applySdkworkRequestBodyFingerprint(',
     );
