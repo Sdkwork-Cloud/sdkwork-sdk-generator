@@ -470,6 +470,66 @@ describe('Flutter generator regressions', () => {
     expect(modelsFile!.content).not.toContain('final dynamic? data;');
   });
 
+  it('keeps required nullable session activity fields nullable while rejecting missing keys', async () => {
+    const generator = new FlutterGenerator();
+    const result = await generator.generate(flutterConfig, {
+      openapi: '3.1.2',
+      info: { title: 'Session Activity API', version: '1.0.0' },
+      paths: {
+        '/app/v3/api/ai/session_activity_summaries': {
+          get: {
+            operationId: 'agents.sessionActivitySummaries.list',
+            tags: ['ai'],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          AgentTurnRecord: {
+            type: 'object',
+            required: ['id'],
+            properties: { id: { type: 'string' } },
+          },
+          SessionActivityFreshness: {
+            type: 'object',
+            required: ['observedAt', 'freshUntil'],
+            properties: {
+              observedAt: { type: ['string', 'null'], format: 'date-time' },
+              freshUntil: { type: ['string', 'null'], format: 'date-time' },
+            },
+          },
+          SessionActivitySummary: {
+            type: 'object',
+            required: ['latestTurn', 'freshness'],
+            properties: {
+              latestTurn: {
+                oneOf: [
+                  { $ref: '#/components/schemas/AgentTurnRecord' },
+                  { type: 'null' },
+                ],
+              },
+              freshness: { $ref: '#/components/schemas/SessionActivityFreshness' },
+            },
+          },
+        },
+      },
+    });
+    const modelsFile = result.files.find((file) => file.path === 'lib/src/models.dart');
+
+    expect(result.errors).toEqual([]);
+    expect(modelsFile).toBeDefined();
+    expect(modelsFile!.content).toContain('final AgentTurnRecord? latestTurn;');
+    expect(modelsFile!.content).toContain('required this.latestTurn');
+    expect(modelsFile!.content).toContain("if (!json.containsKey('latestTurn')) {");
+    expect(modelsFile!.content).toContain("final _sdkworkRequiredValue = json['latestTurn'];\n        if (_sdkworkRequiredValue == null) {\n          return null;");
+    expect(modelsFile!.content).toContain("'latestTurn': latestTurn?.toJson(),");
+    expect(modelsFile!.content).toContain('final String? observedAt;');
+    expect(modelsFile!.content).toContain('final String? freshUntil;');
+    expect(modelsFile!.content).toContain("if (!json.containsKey('observedAt')) {");
+    expect(modelsFile!.content).not.toContain('final AgentTurnRecord latestTurn;');
+  });
+
   it('deserializes typed flutter api responses instead of returning raw maps', async () => {
     const generator = new FlutterGenerator();
     const result = await generator.generate(flutterConfig, flutterSpec);

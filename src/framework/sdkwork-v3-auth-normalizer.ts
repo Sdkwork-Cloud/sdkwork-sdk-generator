@@ -460,11 +460,8 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file: GeneratedFile): Generated
     'const requestHeaders = headers;',
   );
   content = content.replace(
-    /const authHeaders = accessTokenOnly[\s\S]*?this\.applyAccessTokenOnlyHeaders\(headers\)[\s\S]*?skipAuth[\s\S]*?this\.applySdkworkAuthHeaders\(headers\);\n\s+const requestHeaders = this\.buildRequestHeaders\(\n\s+\{ Accept: 'text\/event-stream', \.\.\.\(authHeaders \?\? \{\}\) \},/g,
-    [
-      'const requestHeaders = this.buildRequestHeaders(',
-      "      { Accept: 'text/event-stream', ...(headers ?? {}) },",
-    ].join('\n'),
+    /const authHeaders = accessTokenOnly[\s\S]*?this\.applyAccessTokenOnlyHeaders\(headers\)[\s\S]*?skipAuth[\s\S]*?this\.applySdkworkAuthHeaders\(headers\);/g,
+    'const authHeaders = headers;',
   );
 
   return {

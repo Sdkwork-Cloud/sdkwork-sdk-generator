@@ -10,6 +10,7 @@ import {
   resolveModelSchema,
   resolveSchemaReference,
   resolveSchemaType,
+  schemaAllowsNull,
 } from './schema.js';
 
 describe('framework schema helpers', () => {
@@ -75,6 +76,26 @@ describe('framework schema helpers', () => {
     expect(pickComposedSchema({ allOf: [{ type: 'null' }, { $ref: '#/components/schemas/User' }] })).toEqual({
       $ref: '#/components/schemas/User',
     });
+  });
+
+  it('distinguishes schemas that accept null from required property presence', () => {
+    expect(schemaAllowsNull({ type: ['string', 'null'], format: 'date-time' })).toBe(true);
+    expect(schemaAllowsNull({ nullable: true, $ref: '#/components/schemas/Record' })).toBe(true);
+    expect(schemaAllowsNull({ oneOf: [
+      { $ref: '#/components/schemas/Record' },
+      { type: 'null' },
+    ] })).toBe(true);
+    expect(schemaAllowsNull({ anyOf: [{ type: 'integer' }, { const: null }] })).toBe(true);
+    expect(schemaAllowsNull({ type: 'string', enum: ['ready', null] })).toBe(true);
+    expect(schemaAllowsNull({ allOf: [
+      { type: ['object', 'null'] },
+      { type: 'object', nullable: true },
+    ] })).toBe(true);
+    expect(schemaAllowsNull({ allOf: [
+      { type: ['object', 'null'] },
+      { type: 'object' },
+    ] })).toBe(false);
+    expect(schemaAllowsNull({ type: 'string', format: 'date-time' })).toBe(false);
   });
 
   it('merges allOf object branches and referenced component properties for model generation', () => {

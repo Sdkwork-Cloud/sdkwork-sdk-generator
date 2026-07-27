@@ -151,4 +151,37 @@ describe('TypeScript HTTP generator', () => {
 
     expect(httpClient?.content).toContain('SDKWORK_V3_REQUEST_FINGERPRINTS = false');
   });
+
+  it('generates mutually exclusive API-key-or-dual-token transport for IM', () => {
+    const generator = new HttpClientGenerator();
+    const files = generator.generate(
+      {
+        schemas: {},
+        schemaFileMap: new Map(),
+        apiGroups: {},
+        auth: {
+          hasApiKeyScheme: true,
+          hasBearerScheme: true,
+          hasSecurityRequirements: true,
+          apiKeyHeader: 'X-API-Key',
+          apiKeyAsBearer: false,
+        },
+      } satisfies SchemaContext,
+      {
+        ...config,
+        sdkType: 'im',
+        apiPrefix: '/im/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+    );
+
+    const httpClient = files.find((file) => file.path === 'src/http/client.ts');
+    expect(httpClient?.content).toContain('HttpClient.assertInitialCredentialMode(config as any);');
+    expect(httpClient?.content).toContain('this.setApiKey(initialApiKey);');
+    expect(httpClient?.content).toContain('delete headers[HttpClient.API_KEY_HEADER]');
+    expect(httpClient?.content).toContain('must not mix X-API-Key with auth/access tokens');
+    expect(httpClient?.content).toContain('requires either X-API-Key or both Authorization and Access-Token');
+    expect(httpClient?.content).toContain("buildAuthHeaders('dual-token', undefined, tokenManager)");
+    expect(httpClient?.content).toContain('REQUIRES_SDKWORK_ACCESS_TOKEN = false');
+  });
 });

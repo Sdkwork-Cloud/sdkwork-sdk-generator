@@ -81,6 +81,54 @@ describe('sdkwork-v3 standard open-api validation', () => {
   });
 });
 
+describe('sdkwork-v3 IM API-key-or-dual-token validation', () => {
+  const imSpec: ApiSpec = {
+    ...openApiKeySpec,
+    info: { title: 'SDKWork IM Open API', version: '1.0.0' },
+    paths: {
+      '/im/v3/api/social/contacts': {
+        get: {
+          summary: 'List contacts',
+          operationId: 'social.contacts.list',
+          tags: ['social'],
+          security: [{ ApiKey: [] }, { AuthToken: [], AccessToken: [] }],
+          'x-sdkwork-auth-mode': 'api-key-or-dual-token',
+          responses: openApiKeySpec.paths['/image/v3/api/compat/openai/images/generations'].post.responses,
+        },
+      },
+    },
+    components: {
+      ...openApiKeySpec.components,
+      securitySchemes: {
+        ApiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
+        AuthToken: { type: 'http', scheme: 'bearer' },
+        AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
+      },
+    },
+  };
+
+  it('accepts the exact API-key OR combined dual-token security alternatives', () => {
+    const authIssues = validateSdkworkV3Standard(imSpec, { sdkType: 'im' })
+      .filter((issue) => (
+        issue.includes('security')
+        || issue.includes('authentication')
+        || issue.includes('securitySchemes')
+      ));
+    expect(authIssues).toEqual([]);
+  });
+
+  it('rejects a mixed or incomplete IM security declaration', () => {
+    const invalidSpec = structuredClone(imSpec);
+    invalidSpec.paths['/im/v3/api/social/contacts'].get.security = [
+      { ApiKey: [], AuthToken: [] },
+      { AccessToken: [] },
+    ];
+    expect(validateSdkworkV3Standard(invalidSpec, { sdkType: 'im' })).toContain(
+      'GET /im/v3/api/social/contacts api-key-or-dual-token route must declare separate ApiKey and combined AuthToken plus AccessToken security alternatives.',
+    );
+  });
+});
+
 describe('sdkwork-v3 backend agent-token validation', () => {
   const backendAgentSpec: ApiSpec = {
     ...openApiKeySpec,

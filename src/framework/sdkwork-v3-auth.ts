@@ -4,7 +4,14 @@ export function usesSdkworkV3DualTokenOnly(
   config: Pick<GeneratorConfig, 'sdkType' | 'options'>,
 ): boolean {
   return config.options?.standardProfile === 'sdkwork-v3'
-    && ['app', 'backend', 'im'].includes(config.sdkType);
+    && ['app', 'backend'].includes(config.sdkType);
+}
+
+export function usesSdkworkV3ApiKeyOrDualToken(
+  config: Pick<GeneratorConfig, 'sdkType' | 'options'>,
+): boolean {
+  return config.options?.standardProfile === 'sdkwork-v3'
+    && config.sdkType === 'im';
 }
 
 export function usesSdkworkV3ApiKeyOnly(

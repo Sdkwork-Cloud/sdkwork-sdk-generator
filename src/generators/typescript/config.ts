@@ -142,11 +142,11 @@ export function getTypeScriptType(schema: any, config: LanguageConfig, knownMode
   
   if (type === 'string') {
     if (format === 'binary') return nullable ? 'Blob | null' : 'Blob';
-    if (format === 'date') return 'string';
-    if (format === 'date-time') return 'string';
-    if (format === 'uuid') return 'string';
-    if (format === 'email') return 'string';
-    if (format === 'uri') return 'string';
+    if (format === 'date') return nullable ? 'string | null' : 'string';
+    if (format === 'date-time') return nullable ? 'string | null' : 'string';
+    if (format === 'uuid') return nullable ? 'string | null' : 'string';
+    if (format === 'email') return nullable ? 'string | null' : 'string';
+    if (format === 'uri') return nullable ? 'string | null' : 'string';
     return nullable ? 'string | null' : 'string';
   }
   

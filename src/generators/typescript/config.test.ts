@@ -92,6 +92,15 @@ describe('TypeScript config', () => {
         expect(type).toBe('string | null');
     });
 
+    it('preserves nullability for formatted OpenAPI string types', () => {
+        for (const format of ['date', 'date-time', 'uuid', 'email', 'uri']) {
+            expect(getTypeScriptType(
+                { type: ['string', 'null'], format },
+                TYPESCRIPT_CONFIG,
+            )).toBe('string | null');
+        }
+    });
+
     it('maps OpenAPI binary string schemas to Blob for typed multipart request DTOs', () => {
         const type = getTypeScriptType(
             {

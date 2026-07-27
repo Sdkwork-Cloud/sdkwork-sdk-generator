@@ -7,6 +7,10 @@ import {
   resolveSdkClientName,
   resolveTypeScriptConfigTypeName,
 } from '../../framework/sdk-identity.js';
+import {
+  usesSdkworkV3ApiKeyOrDualToken,
+  usesSdkworkV3DualTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 
 export class HttpClientGenerator {
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
@@ -21,8 +25,9 @@ export class HttpClientGenerator {
       .replace(/'/g, "\\'");
     const apiKeyUseBearer = ctx.auth.apiKeyAsBearer;
     const commonPkg = resolveTypeScriptCommonPackage(config);
-    const requiresSdkworkAccessToken = config.options?.standardProfile === 'sdkwork-v3'
-      && ['app', 'backend', 'im'].includes(config.sdkType);
+    const requiresSdkworkAccessToken = usesSdkworkV3DualTokenOnly(config);
+    const apiKeyOrDualToken = usesSdkworkV3ApiKeyOrDualToken(config);
+    const supportsApiKey = ctx.auth.hasApiKeyScheme && !requiresSdkworkAccessToken;
 
     return [
       this.generateHttpClient(
@@ -33,6 +38,8 @@ export class HttpClientGenerator {
         commonPkg.importPath,
         config.options?.standardProfile === 'sdkwork-v3',
         requiresSdkworkAccessToken,
+        apiKeyOrDualToken,
+        supportsApiKey,
       ),
       this.generateHttpIndex(),
       this.generateAuthIndex(commonPkg.importPath),
@@ -49,13 +56,15 @@ export class HttpClientGenerator {
     commonImportPath: string,
     sdkworkV3Unwrap = false,
     requiresSdkworkAccessToken = false,
+    apiKeyOrDualToken = false,
+    supportsApiKey = false,
   ): GeneratedFile {
     return {
       path: 'src/http/client.ts',
       content: this.format(`import type { ${configType} } from '../types/common';
 import type { RequestOptions, QueryParams } from '${commonImportPath}';
 import type { AuthTokenManager } from '${commonImportPath}';
-import { BaseHttpClient, withRetry } from '${commonImportPath}';
+import { BaseHttpClient, buildAuthHeaders, withRetry } from '${commonImportPath}';
 
 export type HttpRequestOptions = RequestOptions & {
   method?: string;
@@ -76,7 +85,33 @@ export class HttpClient extends BaseHttpClient {
   private static readonly REQUIRES_SDKWORK_ACCESS_TOKEN = ${requiresSdkworkAccessToken ? 'true' : 'false'};
 
   constructor(config: ${configType}) {
-    super(config as any);
+${apiKeyOrDualToken ? '    HttpClient.assertInitialCredentialMode(config as any);\n' : ''}    super(config as any);
+${supportsApiKey ? `    const initialApiKey = HttpClient.normalizeCredential((config as any).apiKey);
+    if (initialApiKey) {
+      this.setApiKey(initialApiKey);
+    }
+` : ''}  }
+
+${apiKeyOrDualToken ? `  private static assertInitialCredentialMode(config: any): void {
+    const apiKey = HttpClient.normalizeCredential(config?.apiKey);
+    if (!apiKey) {
+      return;
+    }
+    const authToken = HttpClient.normalizeCredential(
+      config?.authToken ?? config?.tokenManager?.getAuthToken?.(),
+    );
+    const accessToken = HttpClient.normalizeCredential(
+      config?.accessToken ?? config?.tokenManager?.getAccessToken?.(),
+    );
+    if (authToken || accessToken) {
+      throw new Error(
+        'api-key-or-dual-token client configuration must not mix X-API-Key with auth/access tokens',
+      );
+    }
+  }
+
+` : ''}  private static normalizeCredential(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
   }
 
   private getInternalAuthConfig(): any {
@@ -389,8 +424,14 @@ export class HttpClient extends BaseHttpClient {
   setApiKey(apiKey: string): void {
     const authConfig = this.getInternalAuthConfig();
     const headers = this.getInternalHeaders();
-    authConfig.apiKey = apiKey;
+    const normalizedApiKey = HttpClient.normalizeCredential(apiKey);
+    if (!normalizedApiKey) {
+      throw new Error('X-API-Key must not be empty');
+    }
+    authConfig.apiKey = normalizedApiKey;
     authConfig.tokenManager?.clearTokens?.();
+    delete headers[HttpClient.ACCESS_TOKEN_HEADER];
+    delete headers['Access-Token'];
 
     if (HttpClient.API_KEY_HEADER === 'Authorization' && HttpClient.API_KEY_USE_BEARER) {
       authConfig.authMode = 'apikey';
@@ -399,8 +440,8 @@ export class HttpClient extends BaseHttpClient {
 
     authConfig.authMode = 'dual-token';
     headers[HttpClient.API_KEY_HEADER] = HttpClient.API_KEY_USE_BEARER
-      ? \`Bearer \${apiKey}\`
-      : apiKey;
+      ? \`Bearer \${normalizedApiKey}\`
+      : normalizedApiKey;
 
     if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
       delete headers['Authorization'];
@@ -412,17 +453,33 @@ export class HttpClient extends BaseHttpClient {
     if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
       delete headers[HttpClient.API_KEY_HEADER];
     }
-    super.setAuthToken(token);
+${apiKeyOrDualToken ? `    const authConfig = this.getInternalAuthConfig();
+    authConfig.apiKey = undefined;
+    authConfig.authMode = 'dual-token';
+` : ''}    super.setAuthToken(token);
   }
 
   setAccessToken(token: string): void {
     const headers = this.getInternalHeaders();
-    headers[HttpClient.ACCESS_TOKEN_HEADER] = token;
+${apiKeyOrDualToken ? `    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
+      delete headers[HttpClient.API_KEY_HEADER];
+    }
+    const authConfig = this.getInternalAuthConfig();
+    authConfig.apiKey = undefined;
+    authConfig.authMode = 'dual-token';
+` : ''}    headers[HttpClient.ACCESS_TOKEN_HEADER] = token;
     super.setAccessToken(token);
   }
 
   setTokenManager(manager: AuthTokenManager): void {
-    const baseProto = Object.getPrototypeOf(HttpClient.prototype) as { setTokenManager?: (this: HttpClient, m: AuthTokenManager) => void };
+${apiKeyOrDualToken ? `    const headers = this.getInternalHeaders();
+    if (HttpClient.API_KEY_HEADER.toLowerCase() !== 'authorization') {
+      delete headers[HttpClient.API_KEY_HEADER];
+    }
+    const authConfig = this.getInternalAuthConfig();
+    authConfig.apiKey = undefined;
+    authConfig.authMode = 'dual-token';
+` : ''}    const baseProto = Object.getPrototypeOf(HttpClient.prototype) as { setTokenManager?: (this: HttpClient, m: AuthTokenManager) => void };
     if (typeof baseProto.setTokenManager === 'function') {
       baseProto.setTokenManager.call(this, manager);
       return;
@@ -451,9 +508,23 @@ export class HttpClient extends BaseHttpClient {
   private applySdkworkAuthHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
     const authConfig = this.getInternalAuthConfig();
     const tokenManager = authConfig.tokenManager;
-    const accessToken = tokenManager?.getAccessToken?.();
-    const authToken = tokenManager?.getAuthToken?.();
-    if (HttpClient.REQUIRES_SDKWORK_ACCESS_TOKEN
+    const accessToken = HttpClient.normalizeCredential(tokenManager?.getAccessToken?.());
+    const authToken = HttpClient.normalizeCredential(tokenManager?.getAuthToken?.());
+${apiKeyOrDualToken ? `    const apiKey = HttpClient.normalizeCredential(authConfig.apiKey);
+    if (apiKey) {
+      if (authToken || accessToken) {
+        throw new Error(
+          'api-key-or-dual-token request must not mix X-API-Key with auth/access tokens',
+        );
+      }
+      return headers;
+    }
+    if (!authToken || !accessToken) {
+      throw new Error(
+        'api-key-or-dual-token request requires either X-API-Key or both Authorization and Access-Token before request dispatch',
+      );
+    }
+` : ''}    if (HttpClient.REQUIRES_SDKWORK_ACCESS_TOKEN
       && (typeof accessToken !== 'string' || accessToken.trim().length === 0)) {
       throw new Error('non-open-api request requires Access-Token before request dispatch');
     }
@@ -461,11 +532,10 @@ export class HttpClient extends BaseHttpClient {
       return headers;
     }
 
-    return {
-      ...(headers ?? {}),
-      ...(accessToken ? { [HttpClient.ACCESS_TOKEN_HEADER]: accessToken } : {}),
-      ...(authToken ? { Authorization: \`Bearer \${authToken}\` } : {}),
-    };
+    const authHeaders = buildAuthHeaders('dual-token', undefined, tokenManager);
+    return Object.keys(authHeaders).length > 0
+      ? { ...(headers ?? {}), ...authHeaders }
+      : headers;
   }
 
   private unwrapSdkworkV3Payload<T>(payload: unknown): T {

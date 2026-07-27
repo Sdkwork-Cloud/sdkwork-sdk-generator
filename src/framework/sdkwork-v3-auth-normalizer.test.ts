@@ -447,6 +447,9 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
     expect(combinedAuthSurface).not.toContain('setAuthToken');
     expect(combinedAuthSurface).not.toContain('setAccessToken');
     expect(combinedAuthSurface).not.toContain('setTokenManager');
+    expect(httpClient).not.toContain('applyAccessTokenOnlyHeaders');
+    expect(httpClient).not.toContain('applySdkworkAuthHeaders');
+    expect(httpClient).toContain('applySdkworkRequestBodyFingerprint');
     expect(combinedAuthSurface).not.toContain('AuthTokenManager');
     expect(combinedAuthSurface).not.toContain('DefaultAuthTokenManager');
     expect(combinedAuthSurface).not.toContain('createTokenManager');

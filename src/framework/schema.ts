@@ -136,6 +136,32 @@ export function isNullSchema(schema: ApiSchema | undefined): boolean {
   return normalized.nullable && normalized.types.length === 0;
 }
 
+export function schemaAllowsNull(schema: ApiSchema | undefined): boolean {
+  if (!schema || typeof schema !== 'object') {
+    return false;
+  }
+
+  if (resolveSchemaType(schema).nullable) {
+    return true;
+  }
+  if (Array.isArray(schema.enum) && schema.enum.includes(null)) {
+    return true;
+  }
+
+  for (const key of ['oneOf', 'anyOf'] as const) {
+    const branches = schema[key];
+    if (Array.isArray(branches) && branches.some((branch) => schemaAllowsNull(branch))) {
+      return true;
+    }
+  }
+
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    return schema.allOf.every((branch) => schemaAllowsNull(branch));
+  }
+
+  return false;
+}
+
 export function pickComposedSchema(schema: ApiSchema | undefined): ApiSchema | undefined {
   if (!schema || typeof schema !== 'object') {
     return undefined;

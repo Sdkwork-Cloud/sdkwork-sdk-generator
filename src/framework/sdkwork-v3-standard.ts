@@ -131,6 +131,19 @@ function validateSecuritySchemes(
     return;
   }
 
+  if (sdkType === 'im') {
+    const apiKeyScheme = securitySchemes[API_KEY_SCHEME];
+    if (
+      apiKeyScheme?.type !== 'apiKey'
+      || apiKeyScheme.in !== 'header'
+      || apiKeyScheme.name !== API_KEY_HEADER
+    ) {
+      issues.push(
+        `components.securitySchemes.${API_KEY_SCHEME} must be an apiKey header named "${API_KEY_HEADER}".`,
+      );
+    }
+  }
+
   const authScheme = securitySchemes[AUTH_TOKEN_SCHEME];
   if (authScheme?.type !== 'http' || authScheme.scheme?.toLowerCase() !== 'bearer') {
     issues.push(`components.securitySchemes.${AUTH_TOKEN_SCHEME} must be an HTTP bearer scheme.`);
@@ -286,6 +299,33 @@ function validateSecurity(
     ));
     if (!hasApiKeyRequirement) {
       issues.push(`${operationLabel} must require ${API_KEY_SCHEME}, or explicitly set security: [].`);
+    }
+    return;
+  }
+
+  if (sdkType === 'im') {
+    if (authMode !== 'api-key-or-dual-token') {
+      issues.push(`${operationLabel} protected IM open-api route must use api-key-or-dual-token authentication.`);
+    }
+    const isApiKeyRequirement = (requirement: Record<string, unknown>) => (
+      Object.keys(requirement).length === 1
+      && Object.prototype.hasOwnProperty.call(requirement, API_KEY_SCHEME)
+    );
+    const isDualTokenRequirement = (requirement: Record<string, unknown>) => (
+      Object.keys(requirement).length === 2
+      && Object.prototype.hasOwnProperty.call(requirement, AUTH_TOKEN_SCHEME)
+      && Object.prototype.hasOwnProperty.call(requirement, ACCESS_TOKEN_SCHEME)
+    );
+    const hasExactAlternatives = security.length === 2
+      && security.some(isApiKeyRequirement)
+      && security.some(isDualTokenRequirement)
+      && security.every((requirement) => (
+        isApiKeyRequirement(requirement) || isDualTokenRequirement(requirement)
+      ));
+    if (!hasExactAlternatives) {
+      issues.push(
+        `${operationLabel} api-key-or-dual-token route must declare separate ${API_KEY_SCHEME} and combined ${AUTH_TOKEN_SCHEME} plus ${ACCESS_TOKEN_SCHEME} security alternatives.`,
+      );
     }
     return;
   }

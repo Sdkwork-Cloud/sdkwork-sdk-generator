@@ -21,6 +21,43 @@ function getGeneratedFile(files: Array<{ path: string; content: string }>, path:
 }
 
 describe('TypeScript model generator', () => {
+  it('keeps required nullable formatted fields present and nullable', async () => {
+    const spec: ApiSpec = {
+      openapi: '3.1.2',
+      info: { title: 'Session Activity API', version: '1.0.0' },
+      paths: {
+        '/session_activity_summaries': {
+          get: {
+            operationId: 'sessionActivitySummaries.list',
+            tags: ['agents'],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          SessionActivityFreshness: {
+            type: 'object',
+            required: ['observedAt', 'freshUntil'],
+            properties: {
+              observedAt: { type: ['string', 'null'], format: 'date-time' },
+              freshUntil: { type: ['string', 'null'], format: 'date-time' },
+            },
+          },
+        },
+      },
+    };
+
+    const result = await new TypeScriptGenerator().generate(baseConfig, spec);
+    expect(result.errors).toEqual([]);
+
+    const freshnessFile = getGeneratedFile(result.files, 'src/types/session-activity-freshness.ts');
+    expect(freshnessFile.content).toContain('observedAt: string | null;');
+    expect(freshnessFile.content).toContain('freshUntil: string | null;');
+    expect(freshnessFile.content).not.toContain('observedAt?:');
+    expect(freshnessFile.content).not.toContain('freshUntil?:');
+  });
+
   it('generates named oneOf object schemas as discriminated unions instead of wide optional-field DTOs', async () => {
     const spec: ApiSpec = {
       openapi: '3.1.2',

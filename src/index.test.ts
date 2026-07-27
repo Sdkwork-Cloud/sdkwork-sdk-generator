@@ -896,7 +896,8 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
         summary: 'Resume the current device route',
         operationId: 'device.sessions.resume',
         tags: ['device'],
-        security: [{ AuthToken: [], AccessToken: [] }],
+        security: [{ ApiKey: [] }, { AuthToken: [], AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'api-key-or-dual-token',
         requestBody: {
           required: true,
           content: {
@@ -930,7 +931,8 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
         summary: 'Disconnect the current device route',
         operationId: 'device.sessions.disconnect',
         tags: ['device'],
-        security: [{ AuthToken: [], AccessToken: [] }],
+        security: [{ ApiKey: [] }, { AuthToken: [], AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'api-key-or-dual-token',
         requestBody: {
           required: true,
           content: {
@@ -964,7 +966,8 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
         summary: 'Register the current device',
         operationId: 'registrations.create',
         tags: ['device'],
-        security: [{ AuthToken: [], AccessToken: [] }],
+        security: [{ ApiKey: [] }, { AuthToken: [], AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'api-key-or-dual-token',
         requestBody: {
           required: true,
           content: {
@@ -998,7 +1001,8 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
         summary: 'Get device sync feed entries',
         operationId: 'syncFeed.retrieve',
         tags: ['device'],
-        security: [{ AuthToken: [], AccessToken: [] }],
+        security: [{ ApiKey: [] }, { AuthToken: [], AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'api-key-or-dual-token',
         parameters: [
           { name: 'deviceId', in: 'path', required: true, schema: { type: 'string' } },
           { name: 'afterSeq', in: 'query', required: false, schema: { type: 'integer', format: 'int64' } },
@@ -1026,6 +1030,7 @@ const sdkworkV3ImDeviceSpec: ApiSpec = {
   },
   components: {
     securitySchemes: {
+      ApiKey: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
       AuthToken: { type: 'http', scheme: 'bearer' },
       AccessToken: { type: 'apiKey', in: 'header', name: 'Access-Token' },
     },

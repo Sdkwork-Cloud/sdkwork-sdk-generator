@@ -1,6 +1,6 @@
 import type { GeneratedFile, SchemaContext } from '../../framework/base.js';
 import type { GeneratorConfig } from '../../framework/types.js';
-import { getConstSchemaInfo, getSchemaReferenceName, pickComposedSchema, resolveModelSchema } from '../../framework/schema.js';
+import { getConstSchemaInfo, getSchemaReferenceName, pickComposedSchema, resolveModelSchema, schemaAllowsNull } from '../../framework/schema.js';
 import { FLUTTER_CONFIG, getFlutterType } from './config.js';
 
 export class ModelGenerator {
@@ -67,7 +67,11 @@ export class ModelGenerator {
     const fields = propEntries.map(([propName, propSchema]) => {
       const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
       const fieldType = getFlutterType(propSchema, FLUTTER_CONFIG);
-      const nullableType = this.renderFlutterFieldType(fieldType, required.includes(propName));
+      const nullableType = this.renderFlutterFieldType(
+        fieldType,
+        required.includes(propName),
+        schemaAllowsNull(propSchema),
+      );
       return `  final ${nullableType} ${fieldName};`;
     }).join('\n');
 
@@ -91,6 +95,8 @@ ${propEntries.map(([propName, propSchema]) => {
   const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
   return `      ${fieldName}: ${this.deserializeExpression(propSchema, `json['${propName}']`, className, {
         required: required.includes(propName),
+        nullable: schemaAllowsNull(propSchema),
+        presenceExpr: `json.containsKey('${this.escapeSingleQuoted(propName)}')`,
         ownerName: className,
         jsonName: propName,
       })}`;
@@ -103,7 +109,8 @@ ${propEntries.map(([propName, propSchema]) => {
       : `    return <String, dynamic>{
 ${propEntries.map(([propName, propSchema]) => {
   const fieldName = FLUTTER_CONFIG.namingConventions.propertyName(propName);
-  return `      '${propName}': ${this.serializeExpression(propSchema, fieldName, className, required.includes(propName))},`;
+  const nonNullRequired = required.includes(propName) && !schemaAllowsNull(propSchema);
+  return `      '${propName}': ${this.serializeExpression(propSchema, fieldName, className, nonNullRequired)},`;
 }).join('\n')}
     };`;
 
@@ -124,10 +131,34 @@ ${toJsonBody}
     schema: any,
     valueExpr: string,
     currentModelName: string,
-    options: { required?: boolean; ownerName?: string; jsonName?: string } = {},
+    options: {
+      required?: boolean;
+      nullable?: boolean;
+      presenceExpr?: string;
+      ownerName?: string;
+      jsonName?: string;
+    } = {},
   ): string {
     if (!schema || typeof schema !== 'object') {
       return valueExpr;
+    }
+
+    if (options.required && options.nullable) {
+      const nonNullExpression = this.deserializeExpression(schema, '_sdkworkRequiredValue', currentModelName, {
+        ...options,
+        nullable: false,
+        presenceExpr: undefined,
+      });
+      return `(() {
+        if (!${options.presenceExpr || 'false'}) {
+          throw FormatException('${this.escapeSingleQuoted(this.requiredFieldLabel(options))} is required');
+        }
+        final _sdkworkRequiredValue = ${valueExpr};
+        if (_sdkworkRequiredValue == null) {
+          return null;
+        }
+        return ${nonNullExpression};
+      })()`;
     }
 
     const normalizedSchema = this.normalizeDeserializationSchema(schema);
@@ -555,11 +586,11 @@ class Unknown${className} implements ${className} {
     return undefined;
   }
 
-  private renderFlutterFieldType(fieldType: string, required: boolean): string {
+  private renderFlutterFieldType(fieldType: string, required: boolean, nullable: boolean): string {
     if (fieldType === 'dynamic') {
       return fieldType;
     }
-    return required ? fieldType : `${fieldType}?`;
+    return required && !nullable ? fieldType : `${fieldType}?`;
   }
 
   private requiredFieldLabel(options: { ownerName?: string; jsonName?: string }): string {
