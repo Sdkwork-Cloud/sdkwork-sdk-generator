@@ -15,7 +15,10 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
 import { RUST_CONFIG, getRustType } from './config.js';
 import { resolveRustApiNames, sanitizeRustRawIdentifier, type RustApiName } from './identifiers.js';
@@ -117,7 +120,7 @@ export class ApiGenerator {
     const needsMethodImport = needsCustomMethod
       || needsEventStream
       || needsBinaryResponse
-      || operations.some((op) => operationSkipsSdkworkAuth(op));
+      || operations.some((op) => operationSkipsSdkworkAuth(op) || operationUsesAccessTokenOnly(op));
     const modelImports = referencedModels.size > 0
       ? `use crate::models::{${Array.from(referencedModels).sort().join(', ')}};\n`
       : '';
@@ -290,36 +293,38 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
       ? `Some("${requestBodyInfo.mediaType.toLowerCase()}")`
       : 'None';
     const skipAuthArg = operationSkipsSdkworkAuth(op) ? 'true' : 'false';
+    const accessTokenOnlyArg = operationUsesAccessTokenOnly(op) ? 'true' : 'false';
+    const hasSpecialAuth = operationSkipsSdkworkAuth(op) || operationUsesAccessTokenOnly(op);
 
     let clientCall = '';
     switch (method) {
       case 'get':
-        clientCall = operationSkipsSdkworkAuth(op)
-          ? `self.client.request_method(Method::GET, &path, Option::<&serde_json::Value>::None, ${queryArg}, ${headersArg}, None, true).await`
+        clientCall = hasSpecialAuth
+          ? `self.client.request_method(Method::GET, &path, Option::<&serde_json::Value>::None, ${queryArg}, ${headersArg}, None, ${skipAuthArg}, ${accessTokenOnlyArg}).await`
           : `self.client.get(&path, ${queryArg}, ${headersArg}).await`;
         break;
       case 'post':
-        clientCall = operationSkipsSdkworkAuth(op)
-          ? `self.client.request_method(Method::POST, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, true).await`
+        clientCall = hasSpecialAuth
+          ? `self.client.request_method(Method::POST, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`
           : `self.client.post(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
         break;
       case 'put':
-        clientCall = operationSkipsSdkworkAuth(op)
-          ? `self.client.request_method(Method::PUT, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, true).await`
+        clientCall = hasSpecialAuth
+          ? `self.client.request_method(Method::PUT, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`
           : `self.client.put(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
         break;
       case 'patch':
-        clientCall = operationSkipsSdkworkAuth(op)
-          ? `self.client.request_method(Method::PATCH, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, true).await`
+        clientCall = hasSpecialAuth
+          ? `self.client.request_method(Method::PATCH, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`
           : `self.client.patch(&path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}).await`;
         break;
       case 'delete':
-        clientCall = operationSkipsSdkworkAuth(op)
-          ? `self.client.request_method(Method::DELETE, &path, Option::<&serde_json::Value>::None, ${queryArg}, ${headersArg}, None, true).await`
+        clientCall = hasSpecialAuth
+          ? `self.client.request_method(Method::DELETE, &path, Option::<&serde_json::Value>::None, ${queryArg}, ${headersArg}, None, ${skipAuthArg}, ${accessTokenOnlyArg}).await`
           : `self.client.delete(&path, ${queryArg}, ${headersArg}).await`;
         break;
       default:
-        clientCall = `self.client.request_method(Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await`;
+        clientCall = `self.client.request_method(Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`;
         break;
     }
 
@@ -327,7 +332,7 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
       const methodExpression = ['get', 'post', 'put', 'patch', 'delete'].includes(method)
         ? `Method::${toHttpMethodLiteral(httpMethod)}`
         : `Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?`;
-      clientCall = `self.client.request_bytes(${methodExpression}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await`;
+      clientCall = `self.client.request_bytes(${methodExpression}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`;
     }
 
     const docComment = op.summary
@@ -352,7 +357,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
       return {
         content: `${docComment}pub async fn ${normalizedMethodName}(&self${params}) -> Result<SseStream<${responseType}>, SdkworkError> {
 ${queryBlock}    let path = ${requestPathExpression};
-${requestHeaderBlock}    self.client.stream(Method::${toHttpMethodLiteral(httpMethod)}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}).await
+${requestHeaderBlock}    self.client.stream(Method::${toHttpMethodLiteral(httpMethod)}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await
 }`,
         referencedModels,
       };

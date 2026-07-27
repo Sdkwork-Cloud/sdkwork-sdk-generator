@@ -146,6 +146,7 @@ export interface ApiOperation {
   security?: Array<Record<string, string[]>>;
   'x-sdkwork-auth-mode'?:
     | 'anonymous'
+    | 'bootstrap-body'
     | 'credential-entry-bootstrap'
     | 'refresh-token'
     | 'dual-token'

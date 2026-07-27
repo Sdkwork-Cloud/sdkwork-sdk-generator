@@ -107,8 +107,9 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) {
-    return request('GET', path, params: params, headers: headers, skipAuth: skipAuth);
+    return request('GET', path, params: params, headers: headers, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
   }
 
   Future<dynamic> post(
@@ -118,8 +119,9 @@ class HttpClient {
     Map<String, String>? headers,
     String contentType = 'application/json',
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) {
-    return request('POST', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth);
+    return request('POST', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
   }
 
   Future<dynamic> put(
@@ -129,8 +131,9 @@ class HttpClient {
     Map<String, String>? headers,
     String contentType = 'application/json',
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) {
-    return request('PUT', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth);
+    return request('PUT', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
   }
 
   Future<dynamic> patch(
@@ -140,8 +143,9 @@ class HttpClient {
     Map<String, String>? headers,
     String contentType = 'application/json',
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) {
-    return request('PATCH', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth);
+    return request('PATCH', path, body: body, params: params, headers: headers, contentType: contentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
   }
 
   Future<dynamic> delete(
@@ -149,8 +153,9 @@ class HttpClient {
     Map<String, dynamic>? params,
     Map<String, String>? headers,
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) {
-    return request('DELETE', path, params: params, headers: headers, skipAuth: skipAuth);
+    return request('DELETE', path, params: params, headers: headers, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
   }
 
   Future<dynamic> request(
@@ -161,9 +166,10 @@ class HttpClient {
     Map<String, String>? headers,
     String contentType = 'application/json',
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) async {
     final uri = _buildUri(path, params);
-    final mergedHeaders = _buildHeaders(headers, contentType: body == null ? null : contentType, skipAuth: skipAuth);
+    final mergedHeaders = _buildHeaders(headers, contentType: body == null ? null : contentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
 
     http.StreamedResponse response;
     if (body != null && contentType.toLowerCase() == 'multipart/form-data') {
@@ -189,13 +195,14 @@ class HttpClient {
     Map<String, String>? headers,
     String contentType = 'application/json',
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) async* {
     final uri = _buildUri(path, params);
     final request = http.Request('POST', uri)
       ..headers.addAll(_buildHeaders({
         'Accept': 'text/event-stream',
         ...?headers,
-      }, contentType: body == null ? null : contentType, skipAuth: skipAuth));
+      }, contentType: body == null ? null : contentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly));
     final payload = _encodeBody(body, contentType);
     if (payload != null) {
       request.body = payload;
@@ -258,18 +265,30 @@ class HttpClient {
     Map<String, String>? headers, {
     String? contentType,
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) {
     final merged = <String, String>{
-      if (!skipAuth) ..._headers,
+      if (!skipAuth && !accessTokenOnly) ..._headers,
       ...?headers,
     };
+
+    if (skipAuth || accessTokenOnly) {
+      _stripCredentialHeaders(merged);
+    }
+    if (accessTokenOnly) {
+      final accessToken = _accessToken?.trim();
+      if (accessToken == null || accessToken.isEmpty) {
+        throw StateError('access-token-only request requires Access-Token before request dispatch');
+      }
+      merged['Access-Token'] = accessToken;
+    }
 
     if (contentType != null && contentType.toLowerCase() != 'multipart/form-data') {
       merged['Content-Type'] = contentType;
     }
     merged.putIfAbsent('Accept', () => 'application/json');
 
-    if (!skipAuth) {
+    if (!skipAuth && !accessTokenOnly) {
       if (_apiKey != null && _apiKey!.isNotEmpty) {
         merged[_apiKeyHeader] = _apiKeyAsBearer ? 'Bearer $_apiKey' : _apiKey!;
       }
@@ -282,6 +301,22 @@ class HttpClient {
     }
 
     return merged;
+  }
+
+  void _stripCredentialHeaders(Map<String, String> headers) {
+    const forbidden = {
+      'authorization',
+      'access-token',
+      'x-api-key',
+      'x-tenant-id',
+      'x-organization-id',
+      'x-platform',
+      'x-user-id',
+      'x-sdkwork-tenant-id',
+      'x-sdkwork-organization-id',
+      'x-sdkwork-user-id',
+    };
+    headers.removeWhere((key, _) => forbidden.contains(key.toLowerCase()));
   }
 
   String? _encodeBody(dynamic body, String contentType) {

@@ -682,8 +682,8 @@ const sdkworkV3IamSpec: ApiSpec = {
         summary: 'Get current auth session',
         operationId: 'sessions.current.retrieve',
         tags: ['auth'],
-        security: [{ AccessToken: [] }],
-        'x-sdkwork-auth-mode': 'refresh-token',
+        security: [{ AuthToken: [], AccessToken: [] }],
+        'x-sdkwork-auth-mode': 'dual-token',
         responses: {
           '200': {
             description: 'Success',
@@ -5717,7 +5717,7 @@ describe('OpenAPI Security And Compliance', () => {
         httpPath: 'http/client.go',
         expectedApi: [
           'func (a *ChatApi) Create(body sdktypes.CreateChatCompletionRequest) (*sdkhttp.SSEStream[sdktypes.ChatCompletionChunk], error)',
-          'sdkhttp.Stream[sdktypes.ChatCompletionChunk](a.client, "POST", AiApiPath("/chat/completions"), body, nil, nil, "application/json", false)',
+          'sdkhttp.Stream[sdktypes.ChatCompletionChunk](a.client, "POST", AiApiPath("/chat/completions"), body, nil, nil, "application/json", false, false)',
         ],
         expectedHttp: [
           'type SSEStream[T any] struct',
@@ -5832,7 +5832,7 @@ describe('OpenAPI Security And Compliance', () => {
         httpPath: 'src/http/client.rs',
         expectedApi: [
           'pub async fn create(&self, body: &CreateChatCompletionRequest) -> Result<SseStream<ChatCompletionChunk>, SdkworkError>',
-          'self.client.stream(Method::POST, &path, Some(body), None, None, Some("application/json"), false).await',
+          'self.client.stream(Method::POST, &path, Some(body), None, None, Some("application/json"), false, false).await',
         ],
         expectedHttp: [
           'pub struct SseStream<T>',
@@ -5871,7 +5871,7 @@ describe('OpenAPI Security And Compliance', () => {
           'Models::ChatCompletionChunk.from_hash(event)',
         ],
         expectedHttp: [
-          'def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false)',
+          'def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false, access_token_only: false)',
           "'Accept' => 'text/event-stream'",
           'split(/\\r?\\n\\r?\\n/)',
           'data = data_lines.join("\\n")',
@@ -6398,7 +6398,39 @@ describe('OpenAPI Security And Compliance', () => {
     );
   });
 
-  it('should generate Access-Token-only auth for sdkwork v3 refresh-token operations', async () => {
+  it('should suppress stored credentials for sdkwork v3 backend bootstrap-body operations', async () => {
+    const generator = new TypeScriptGenerator();
+    const sessionOperation = (sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post;
+    const result = await generator.generate(
+      {
+        ...baseConfig,
+        sdkType: 'backend',
+        apiPrefix: '/backend/v3/api',
+        options: { standardProfile: 'sdkwork-v3' },
+      },
+      {
+        ...sdkworkV3IamSpec,
+        paths: {
+          '/backend/v3/api/iam/access_credentials': {
+            post: {
+              ...sessionOperation,
+              operationId: 'accessCredentials.create',
+              security: [],
+              'x-sdkwork-auth-mode': 'bootstrap-body',
+              'x-sdkwork-forbid-credential-headers': true,
+            },
+          },
+        },
+      },
+    );
+    const authApi = result.files.find((file) => file.path === 'src/api/auth.ts');
+    expect(result.errors).toEqual([]);
+    expect(authApi?.content).toContain(
+      "this.client.request<AuthSession>(backendApiPath(`/iam/access_credentials`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+    );
+  });
+
+  it('should suppress stored credentials for sdkwork v3 refresh-token operations', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(
       {
@@ -6415,7 +6447,8 @@ describe('OpenAPI Security And Compliance', () => {
             post: {
               ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions/refresh'] as Record<string, any>).post,
               'x-sdkwork-auth-mode': 'refresh-token',
-              security: [{ AccessToken: [] }],
+              'x-sdkwork-forbid-credential-headers': true,
+              security: [],
             },
           },
         },
@@ -6426,7 +6459,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', accessTokenOnly: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
     );
   });
 
@@ -6473,7 +6506,7 @@ describe('OpenAPI Security And Compliance', () => {
     );
   });
 
-  it('should reject credential-free refresh operations across non-open language SDKs', async () => {
+  it('should suppress stored credentials for refresh operations across non-open language SDKs', async () => {
     const spec: ApiSpec = {
       ...sdkworkV3IamSpec,
       paths: {
@@ -6481,8 +6514,8 @@ describe('OpenAPI Security And Compliance', () => {
         '/app/v3/api/auth/sessions': {
             post: {
               ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions'] as Record<string, any>).post,
-              security: [],
-              'x-sdkwork-auth-mode': 'anonymous',
+              security: [{ AccessToken: [] }],
+              'x-sdkwork-auth-mode': 'credential-entry-bootstrap',
               'x-sdkwork-forbid-credential-headers': true,
           },
         },
@@ -6491,6 +6524,7 @@ describe('OpenAPI Security And Compliance', () => {
             ...(sdkworkV3IamSpec.paths['/app/v3/api/auth/sessions/refresh'] as Record<string, any>).post,
             security: [],
             'x-sdkwork-auth-mode': 'refresh-token',
+            'x-sdkwork-forbid-credential-headers': true,
           },
         },
       },
@@ -6501,90 +6535,90 @@ describe('OpenAPI Security And Compliance', () => {
         generator: new TypeScriptGenerator(),
         apiPath: 'src/api/auth.ts',
         httpPath: 'src/http/client.ts',
-          anonymousCall: /auth\/sessions`[\s\S]*skipAuth: true/u,
+          accessTokenOnlyCall: /auth\/sessions`[\s\S]*accessTokenOnly: true/u,
           refreshCall: /auth\/sessions\/refresh`[\s\S]*skipAuth: true/u,
           protectedCall: /auth\/sessions\/current`\), \{ signal: requestOptions\?\.signal, timeout: requestOptions\?\.timeout, method: 'GET' as any \}\)/u,
-          transportSkip: /protected buildHeaders\(config: any, skipAuth = false\)[\s\S]*config\?\.skipAuth[\s\S]*X-Sdkwork-Organization-Id[\s\S]*skipAuth,/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'dart' as const,
         generator: new DartGenerator(),
         apiPath: 'lib/src/api/auth.dart',
         httpPath: 'lib/src/http/client.dart',
-          anonymousCall: /auth\/sessions'[\s\S]*skipAuth: true/u,
+          accessTokenOnlyCall: /auth\/sessions'[\s\S]*accessTokenOnly: true/u,
           refreshCall: /auth\/sessions\/refresh'[\s\S]*skipAuth: true/u,
           protectedCall: /auth\/sessions\/current'\)\)/u,
-          transportSkip: /if \(!skipAuth\)[\s\S]*_authToken[\s\S]*Access-Token/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'flutter' as const,
         generator: new FlutterGenerator(),
         apiPath: 'lib/src/api/auth.dart',
         httpPath: 'lib/src/http/client.dart',
-          anonymousCall: /auth\/sessions'[\s\S]*skipAuth: true/u,
+          accessTokenOnlyCall: /auth\/sessions'[\s\S]*accessTokenOnly: true/u,
           refreshCall: /auth\/sessions\/refresh'[\s\S]*skipAuth: true/u,
           protectedCall: /auth\/sessions\/current'\)\)/u,
-          transportSkip: /if \(!skipAuth\) \.\.\.headers[\s\S]*if \(!skipAuth\) \.\.\.this\.headers/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'python' as const,
         generator: new PythonGenerator(),
         apiPath: 'test_sdk/api/auth.py',
         httpPath: 'test_sdk/http_client.py',
-          anonymousCall: /auth\/sessions"[\s\S]*skip_auth=True/u,
+          accessTokenOnlyCall: /auth\/sessions"[\s\S]*access_token_only=True/u,
           refreshCall: /auth\/sessions\/refresh"[\s\S]*skip_auth=True/u,
           protectedCall: /auth\/sessions\/current"\)/u,
-          transportSkip: /def _request_session\(self, skip_auth: bool = False\):[\s\S]*if not skip_auth:[\s\S]*return self\._get_session\(\)[\s\S]*session\.headers\.clear\(\)/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'go' as const,
         generator: new GoGenerator(),
         apiPath: 'api/auth.go',
           httpPath: 'http/client.go',
-          anonymousCall: /AppApiPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
-          refreshCall: /AppApiPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+          accessTokenOnlyCall: /AppApiPath\("\/auth\/sessions"\)[\s\S]*false, true\)/u,
+          refreshCall: /AppApiPath\("\/auth\/sessions\/refresh"\)[\s\S]*true, false\)/u,
           protectedCall: /client\.Get\(AppApiPath\("\/auth\/sessions\/current"\), nil, nil\)/u,
-          transportSkip: /func \(c \*Client\) mergeHeaders\(requestHeaders map\[string\]string, skipAuth bool\)[\s\S]*if !skipAuth/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'java' as const,
         generator: new JavaGenerator(),
         apiPath: 'src/main/java/com/sdkwork/test/app/api/generated/api/AuthApi.java',
         httpPath: 'src/main/java/com/sdkwork/test/app/api/generated/http/HttpClient.java',
-          anonymousCall: /appPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
-          refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+          accessTokenOnlyCall: /appPath\("\/auth\/sessions"\)[\s\S]*false, true\)/u,
+          refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*true, false\)/u,
           protectedCall: /appPath\("\/auth\/sessions\/current"\)\)/u,
-          transportSkip: /applyHeaders\(Request\.Builder builder, Map<String, String> requestHeaders, boolean skipAuth\)[\s\S]*skipAuth \? new HashMap<>\(\) : new HashMap<>\(headers\)/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'kotlin' as const,
         generator: new KotlinGenerator(),
         apiPath: 'src/main/kotlin/com/sdkwork/test/app/api/generated/api/AuthApi.kt',
         httpPath: 'src/main/kotlin/com/sdkwork/test/app/api/generated/http/HttpClient.kt',
-        anonymousCall: /appPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
-        refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+        accessTokenOnlyCall: /appPath\("\/auth\/sessions"\)[\s\S]*false, true\)/u,
+        refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*true, false\)/u,
         protectedCall: /appPath\("\/auth\/sessions\/current"\)\)/u,
-        transportSkip: /private fun mergeHeaders\(requestHeaders: Map<String, String>\? = null, skipAuth: Boolean = false\)[\s\S]*if \(!skipAuth\)/u,
+        transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
       },
         {
           language: 'csharp' as const,
           generator: new CSharpGenerator(),
           apiPath: 'Api/AuthApi.cs',
           httpPath: 'Http/HttpClient.cs',
-          anonymousCall: /AppPath\("\/auth\/sessions"\)[\s\S]*true\)/u,
-          refreshCall: /AppPath\("\/auth\/sessions\/refresh"\)[\s\S]*true\)/u,
+          accessTokenOnlyCall: /AppPath\("\/auth\/sessions"\)[\s\S]*false, true\)/u,
+          refreshCall: /AppPath\("\/auth\/sessions\/refresh"\)[\s\S]*true, false\)/u,
           protectedCall: /AppPath\("\/auth\/sessions\/current"\)\)/u,
-          transportSkip: /bool skipAuth = false[\s\S]*if \(!skipAuth\)[\s\S]*anonymousClient/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
         {
           language: 'swift' as const,
           generator: new SwiftGenerator(),
           apiPath: 'Sources/API/AuthApi.swift',
           httpPath: 'Sources/HTTP/HttpClient.swift',
-          anonymousCall: /appPath\("\/auth\/sessions"\)[\s\S]*skipAuth: true/u,
+          accessTokenOnlyCall: /appPath\("\/auth\/sessions"\)[\s\S]*accessTokenOnly: true/u,
           refreshCall: /appPath\("\/auth\/sessions\/refresh"\)[\s\S]*skipAuth: true/u,
           protectedCall: /appPath\("\/auth\/sessions\/current"\)\)/u,
-          transportSkip: /skipAuth: Bool = false[\s\S]*if !skipAuth[\s\S]*for \(key, value\) in headers/u,
+          transportAuthPolicy: /(?=[\s\S]*URLError\(\.userAuthenticationRequired\))(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {
         language: 'rust' as const,
@@ -6592,30 +6626,30 @@ describe('OpenAPI Security And Compliance', () => {
           apiPath: 'src/api/auth.rs',
           httpPath: 'src/http/client.rs',
           importAssertion: /use reqwest::Method;/u,
-          anonymousCall: /app_path\(&"\/auth\/sessions"\.to_string\(\)\)[\s\S]*true\)\.await/u,
-          refreshCall: /app_path\(&"\/auth\/sessions\/refresh"\.to_string\(\)\)[\s\S]*true\)\.await/u,
+          accessTokenOnlyCall: /app_path\(&"\/auth\/sessions"\.to_string\(\)\)[\s\S]*false, true\)\.await/u,
+          refreshCall: /app_path\(&"\/auth\/sessions\/refresh"\.to_string\(\)\)[\s\S]*true, false\)\.await/u,
           protectedCall: /app_path\(&"\/auth\/sessions\/current"\.to_string\(\)\)[\s\S]*client\.get\(&path, None, None\)\.await/u,
-          transportSkip: /fn merge_headers\(&self, headers: Option<&RequestHeaders>, skip_auth: bool\)[\s\S]*if !skip_auth/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
         {
           language: 'php' as const,
           generator: new PhpGenerator(),
           apiPath: 'src/Api/Auth.php',
           httpPath: 'src/Http/HttpClient.php',
-          anonymousCall: /auth\/sessions'[\s\S]*'skipAuth' => true/u,
+          accessTokenOnlyCall: /auth\/sessions'[\s\S]*'accessTokenOnly' => true/u,
           refreshCall: /auth\/sessions\/refresh'[\s\S]*'skipAuth' => true/u,
           protectedCall: /auth\/sessions\/current';[\s\S]*request\('GET', \$path, \[\]\)/u,
-          transportSkip: /empty\(\$options\['skipAuth'\]\)[\s\S]*array_merge\(\$this->buildAuthHeaders\(\), \$this->headers\)/u,
+          transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
         {
           language: 'ruby' as const,
           generator: new RubyGenerator(),
           apiPath: 'lib/sdkwork/app_sdk/api/auth.rb',
           httpPath: 'lib/sdkwork/app_sdk/http/client.rb',
-        anonymousCall: /auth\/sessions'[\s\S]*options\[:skip_auth\] = true/u,
+        accessTokenOnlyCall: /auth\/sessions'[\s\S]*options\[:access_token_only\] = true/u,
         refreshCall: /auth\/sessions\/refresh'[\s\S]*options\[:skip_auth\] = true/u,
         protectedCall: /auth\/sessions\/current'[\s\S]*@client\.request\('GET', path, \*\*options\)/u,
-        transportSkip: /skip_auth: false[\s\S]*skip_auth \? \{\} : auth_headers/u,
+        transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
       },
     ];
 
@@ -6637,9 +6671,18 @@ describe('OpenAPI Security And Compliance', () => {
         spec,
       );
 
-      expect(result.errors[0]?.message, item.language).toContain(
-        'POST /app/v3/api/auth/sessions/refresh refresh-token route must require only AccessToken.',
-      );
+      expect(result.errors, item.language).toEqual([]);
+      const api = result.files.find((file) => file.path === item.apiPath);
+      const http = result.files.find((file) => file.path === item.httpPath);
+      expect(api, item.language).toBeDefined();
+      expect(http, item.language).toBeDefined();
+      if (item.importAssertion) {
+        expect(api!.content, item.language).toMatch(item.importAssertion);
+      }
+      expect(api!.content, item.language).toMatch(item.accessTokenOnlyCall);
+      expect(api!.content, item.language).toMatch(item.refreshCall);
+      expect(api!.content, item.language).toMatch(item.protectedCall);
+      expect(http!.content, item.language).toMatch(item.transportAuthPolicy);
     }
   });
 

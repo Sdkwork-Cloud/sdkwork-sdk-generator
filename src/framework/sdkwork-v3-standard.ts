@@ -226,6 +226,20 @@ function validateSecurity(
   }
 
   const security = operation.security || [];
+  if (authMode === 'bootstrap-body') {
+    if (sdkType !== 'backend') {
+      issues.push(`${operationLabel} bootstrap-body authentication is valid only for backend SDKs.`);
+    }
+    if (!Array.isArray(operation.security) || operation.security.length !== 0) {
+      issues.push(`${operationLabel} bootstrap-body route must explicitly set security: [].`);
+    }
+    if (extensions['x-sdkwork-forbid-credential-headers'] !== true) {
+      issues.push(
+        `${operationLabel} bootstrap-body route must set x-sdkwork-forbid-credential-headers: true.`,
+      );
+    }
+    return;
+  }
   if (authMode === 'anonymous') {
     if (!Array.isArray(operation.security) || operation.security.length !== 0) {
       issues.push(`${operationLabel} anonymous route must explicitly set security: [].`);
@@ -233,7 +247,23 @@ function validateSecurity(
     return;
   }
 
-  if (authMode === 'credential-entry-bootstrap' || authMode === 'refresh-token') {
+  if (authMode === 'refresh-token') {
+    if (isCustomOpenApi(sdkType)) {
+      issues.push(`${operationLabel} open-api route must not use ${authMode} authentication.`);
+      return;
+    }
+    if (!Array.isArray(operation.security) || operation.security.length !== 0) {
+      issues.push(`${operationLabel} refresh-token route must explicitly set security: [].`);
+    }
+    if (extensions['x-sdkwork-forbid-credential-headers'] !== true) {
+      issues.push(
+        `${operationLabel} refresh-token route must set x-sdkwork-forbid-credential-headers: true.`,
+      );
+    }
+    return;
+  }
+
+  if (authMode === 'credential-entry-bootstrap') {
     if (isCustomOpenApi(sdkType)) {
       issues.push(`${operationLabel} open-api route must not use ${authMode} authentication.`);
       return;

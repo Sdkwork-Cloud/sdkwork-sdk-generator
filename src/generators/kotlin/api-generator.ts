@@ -17,7 +17,10 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -134,6 +137,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
       ? `, "${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
       : '';
     const skipAuth = operationSkipsSdkworkAuth(op);
+    const accessTokenOnly = operationUsesAccessTokenOnly(op);
     const requestType = requestBodySchema
       ? this.ensureKnownType(getKotlinType(requestBodySchema, KOTLIN_CONFIG), knownModels)
       : 'Any';
@@ -352,8 +356,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
     }
 
-    if (skipAuth) {
-      call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, true)`;
+    if (skipAuth || accessTokenOnly) {
+      call = `client.request("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'params' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, ${skipAuth ? 'true' : 'false'}, ${accessTokenOnly ? 'true' : 'false'})`;
     }
 
     const docComment = op.summary ? `    /** ${op.summary} */\n` : '';
@@ -380,7 +384,9 @@ ${this.renderQueryParameterSpecs(queryBindings, 12)}
         hasHeaders ? 'requestHeaders' : 'null',
         hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null',
         `object : TypeReference<${responseType}>() {}`,
-        ...(skipAuth ? ['true'] : []),
+        ...(skipAuth || accessTokenOnly
+          ? [skipAuth ? 'true' : 'false', accessTokenOnly ? 'true' : 'false']
+          : []),
       ].join(', ');
 
       return `${docComment}    suspend fun ${methodName}(${params.join(', ')}): Sequence<${responseType}> {

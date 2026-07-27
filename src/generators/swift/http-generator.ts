@@ -117,20 +117,42 @@ public class HttpClient {
         _ request: inout URLRequest,
         requestHeaders: [String: String]? = nil,
         contentType: String? = nil,
-        skipAuth: Bool = false
-    ) {
+        skipAuth: Bool = false,
+        accessTokenOnly: Bool = false
+    ) throws {
         if let contentType = contentType, !contentType.isEmpty {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
-        if !skipAuth {
+        if !skipAuth && !accessTokenOnly {
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
             }
         }
         if let requestHeaders = requestHeaders {
             for (key, value) in requestHeaders {
-                request.setValue(value, forHTTPHeaderField: key)
+                if (!skipAuth && !accessTokenOnly) || !Self.isCredentialHeader(key) {
+                    request.setValue(value, forHTTPHeaderField: key)
+                }
             }
+        }
+        if accessTokenOnly {
+            guard let accessToken = headers.first(where: {
+                $0.key.lowercased() == "access-token" && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })?.value.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                throw URLError(.userAuthenticationRequired)
+            }
+            request.setValue(accessToken, forHTTPHeaderField: "Access-Token")
+        }
+    }
+
+    private static func isCredentialHeader(_ key: String) -> Bool {
+        switch key.lowercased() {
+        case "authorization", "access-token", "x-api-key", "x-tenant-id",
+             "x-organization-id", "x-platform", "x-user-id", "x-sdkwork-tenant-id",
+             "x-sdkwork-organization-id", "x-sdkwork-user-id":
+            return true
+        default:
+            return false
         }
     }
 
@@ -251,7 +273,7 @@ public class HttpClient {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = "GET"
         request.timeoutInterval = timeout
-        applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response)
@@ -267,7 +289,7 @@ public class HttpClient {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = "GET"
         request.timeoutInterval = timeout
-        applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response, as: responseType)
@@ -280,13 +302,14 @@ public class HttpClient {
         params: [String: Any]? = nil,
         headers requestHeaders: [String: String]? = nil,
         contentType: String? = nil,
-        skipAuth: Bool = false
+        skipAuth: Bool = false,
+        accessTokenOnly: Bool = false
     ) async throws -> Any? {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = method
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -301,13 +324,14 @@ public class HttpClient {
         headers requestHeaders: [String: String]? = nil,
         contentType: String? = nil,
         skipAuth: Bool = false,
+        accessTokenOnly: Bool = false,
         responseType: T.Type
     ) async throws -> T? {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = method
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -326,7 +350,7 @@ public class HttpClient {
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -340,13 +364,14 @@ public class HttpClient {
         headers requestHeaders: [String: String]? = nil,
         contentType: String? = nil,
         skipAuth: Bool = false,
+        accessTokenOnly: Bool = false,
         responseType: T.Type
     ) async throws -> T? {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -361,13 +386,14 @@ public class HttpClient {
         headers requestHeaders: [String: String]? = nil,
         contentType: String? = nil,
         skipAuth: Bool = false,
+        accessTokenOnly: Bool = false,
         responseType: T.Type
     ) throws -> AsyncThrowingStream<T, Error> {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = method
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = requestBody.bodyData
 
@@ -411,7 +437,7 @@ public class HttpClient {
         request.httpMethod = "PUT"
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -431,7 +457,7 @@ public class HttpClient {
         request.httpMethod = "PUT"
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -447,7 +473,7 @@ public class HttpClient {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = "DELETE"
         request.timeoutInterval = timeout
-        applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response)
@@ -463,7 +489,7 @@ public class HttpClient {
         var request = URLRequest(url: try buildURL(path, params: params))
         request.httpMethod = "DELETE"
         request.timeoutInterval = timeout
-        applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, skipAuth: skipAuth)
 
         let (data, response) = try await session.data(for: request)
         return try parseResponse(data, response, as: responseType)
@@ -481,7 +507,7 @@ public class HttpClient {
         request.httpMethod = "PATCH"
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)
@@ -501,7 +527,7 @@ public class HttpClient {
         request.httpMethod = "PATCH"
         request.timeoutInterval = timeout
         let requestBody = try createRequestBody(body: body, contentType: contentType)
-        applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
+        try applyHeaders(&request, requestHeaders: requestHeaders, contentType: requestBody.resolvedContentType, skipAuth: skipAuth)
         request.httpBody = requestBody.bodyData
 
         let (data, response) = try await session.data(for: request)

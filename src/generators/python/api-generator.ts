@@ -17,7 +17,10 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -362,30 +365,32 @@ ${methods ? `\n\n${methods}` : ''}`;
         ? ', headers=request_headers'
         : '';
     const skipAuthArg = operationSkipsSdkworkAuth(op) ? ', skip_auth=True' : '';
+    const accessTokenOnlyArg = operationUsesAccessTokenOnly(op) ? ', access_token_only=True' : '';
+    const authArgs = `${skipAuthArg}${accessTokenOnlyArg}`;
     let call = '';
     
     switch (method) {
       case 'get':
-        call = `self._client.get(${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasHeaders ? ', headers=request_headers' : ''}${skipAuthArg})`;
+        call = `self._client.get(${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasHeaders ? ', headers=request_headers' : ''}${authArgs})`;
         break;
       case 'post':
-        call = `self._client.post(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg}${skipAuthArg})`;
+        call = `self._client.post(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg}${authArgs})`;
         break;
       case 'put':
-        call = `self._client.put(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg}${skipAuthArg})`;
+        call = `self._client.put(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg}${authArgs})`;
         break;
       case 'delete':
-        call = `self._client.delete(${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasHeaders ? ', headers=request_headers' : ''}${skipAuthArg})`;
+        call = `self._client.delete(${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasHeaders ? ', headers=request_headers' : ''}${authArgs})`;
         break;
       case 'patch':
-        call = `self._client.patch(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg}${skipAuthArg})`;
+        call = `self._client.patch(${pathExpression}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${headersArg}${authArgs})`;
         break;
       default:
-        call = `self._client.request('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg}${skipAuthArg})`;
+        call = `self._client.request('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg}${authArgs})`;
     }
 
     if (binaryResponseInfo) {
-      call = `self._client.request_bytes('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg}${skipAuthArg})`;
+      call = `self._client.request_bytes('${toHttpMethodLiteral(httpMethod)}', ${pathExpression}${hasQuery && !hasExplicitQuerySerialization ? ', params=params' : ''}${hasBody ? (useDataArgument ? ', data=body' : ', json=body') : ''}${headersArg}${authArgs})`;
     }
 
     const docComment = op.summary 
@@ -411,6 +416,7 @@ ${this.renderNamedParameterDict(cookieBindings, 12)}
         hasQuery && !hasExplicitQuerySerialization ? 'params=params' : '',
         isFormUrlencodedBody ? 'headers=form_headers' : hasHeaders ? 'headers=request_headers' : '',
         operationSkipsSdkworkAuth(op) ? 'skip_auth=True' : '',
+        operationUsesAccessTokenOnly(op) ? 'access_token_only=True' : '',
       ].filter(Boolean).join(', ');
 
       return {

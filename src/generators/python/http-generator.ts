@@ -96,27 +96,41 @@ class HttpClient(BaseHttpClient):
             self._session.headers[key] = value
         return self
 
-    def _request_headers(self, headers=None, skip_auth: bool = False):
-        if skip_auth:
-            request_headers = dict(headers or {})
+    @staticmethod
+    def _strip_credential_headers(headers):
+        forbidden = {
+            'authorization', 'access-token', 'x-api-key', 'x-tenant-id',
+            'x-organization-id', 'x-platform', 'x-user-id',
+            'x-sdkwork-tenant-id', 'x-sdkwork-organization-id', 'x-sdkwork-user-id',
+        }
+        return {key: value for key, value in (headers or {}).items() if key.lower() not in forbidden}
+
+    def _request_headers(self, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        if skip_auth or access_token_only:
+            request_headers = self._strip_credential_headers(headers)
+            if access_token_only:
+                access_token = (self._access_token or '').strip()
+                if not access_token:
+                    raise RuntimeError('access-token-only request requires Access-Token before request dispatch')
+                request_headers['Access-Token'] = access_token
             return request_headers
         return headers
 
-    def _request_session(self, skip_auth: bool = False):
-        if not skip_auth:
+    def _request_session(self, skip_auth: bool = False, access_token_only: bool = False):
+        if not skip_auth and not access_token_only:
             return self._get_session()
         session = requests.Session()
         session.headers.clear()
         return session
 
-    def request(self, method: str, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
-        response = self._request_session(skip_auth).request(
+    def request(self, method: str, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        response = self._request_session(skip_auth, access_token_only).request(
             method=method,
             url=f"{self.base_url}{path}",
             params=params,
             data=data,
             json=json,
-            headers=self._request_headers(headers, skip_auth),
+            headers=self._request_headers(headers, skip_auth, access_token_only),
             timeout=self.timeout / 1000,
         )
         response.raise_for_status()
@@ -124,42 +138,42 @@ class HttpClient(BaseHttpClient):
             return None
         return response.json()
 
-    def request_bytes(self, method: str, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False) -> bytes:
-        response = self._request_session(skip_auth).request(
+    def request_bytes(self, method: str, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False, access_token_only: bool = False) -> bytes:
+        response = self._request_session(skip_auth, access_token_only).request(
             method=method,
             url=f"{self.base_url}{path}",
             params=params,
             data=data,
             json=json,
-            headers=self._request_headers(headers, skip_auth),
+            headers=self._request_headers(headers, skip_auth, access_token_only),
             timeout=self.timeout / 1000,
         )
         response.raise_for_status()
         return response.content
 
-    def get(self, path: str, params=None, headers=None, skip_auth: bool = False):
-        return self.request('GET', path, params=params, headers=headers, skip_auth=skip_auth)
+    def get(self, path: str, params=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        return self.request('GET', path, params=params, headers=headers, skip_auth=skip_auth, access_token_only=access_token_only)
 
-    def post(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
-        return self.request('POST', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth)
+    def post(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        return self.request('POST', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth, access_token_only=access_token_only)
 
-    def put(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
-        return self.request('PUT', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth)
+    def put(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        return self.request('PUT', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth, access_token_only=access_token_only)
 
-    def patch(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False):
-        return self.request('PATCH', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth)
+    def patch(self, path: str, params=None, data=None, json=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        return self.request('PATCH', path, params=params, data=data, json=json, headers=headers, skip_auth=skip_auth, access_token_only=access_token_only)
 
-    def delete(self, path: str, params=None, headers=None, skip_auth: bool = False):
-        return self.request('DELETE', path, params=params, headers=headers, skip_auth=skip_auth)
+    def delete(self, path: str, params=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        return self.request('DELETE', path, params=params, headers=headers, skip_auth=skip_auth, access_token_only=access_token_only)
 
-    def stream_json(self, path: str, method: str = 'POST', params=None, data=None, json=None, headers=None, skip_auth: bool = False):
-        response = self._request_session(skip_auth).request(
+    def stream_json(self, path: str, method: str = 'POST', params=None, data=None, json=None, headers=None, skip_auth: bool = False, access_token_only: bool = False):
+        response = self._request_session(skip_auth, access_token_only).request(
             method=method,
             url=f"{self.base_url}{path}",
             params=params,
             data=data,
             json=json,
-            headers=self._request_headers({'Accept': 'text/event-stream', **(headers or {})}, skip_auth),
+            headers=self._request_headers({'Accept': 'text/event-stream', **(headers or {})}, skip_auth, access_token_only),
             timeout=self.timeout / 1000,
             stream=True,
         )

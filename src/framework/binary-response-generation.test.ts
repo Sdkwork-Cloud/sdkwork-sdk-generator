@@ -83,7 +83,7 @@ function generatedContent(files: Array<{ content: string }>): string {
 
 describe('binary response generation', () => {
   it.each([
-    ['typescript', 'Promise<Blob>', 'this.client.get<Blob>'],
+    ['typescript', 'Promise<Blob>', 'this.client.request<Blob>'],
     ['rust', 'Result<Vec<u8>, SdkworkError>', 'self.client.request_bytes('],
     ['java', 'public byte[] retrieve(', 'client.requestBytes('],
     ['python', 'def retrieve(self, file_id: str) -> bytes:', 'self._client.request_bytes('],

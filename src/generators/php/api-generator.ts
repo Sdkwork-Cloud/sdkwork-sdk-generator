@@ -15,7 +15,10 @@ import {
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 import { PHP_CONFIG, getPhpNamespace, getPhpType } from './config.js';
 
 interface NamedParameterBinding {
@@ -375,6 +378,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const skipAuth = operationSkipsSdkworkAuth(op);
+    const accessTokenOnly = operationUsesAccessTokenOnly(op);
     const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const returnType = eventStreamInfo ? '\\Generator' : this.resolveReturnType(op, responseSchema);
     const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
@@ -471,7 +475,14 @@ ${this.renderHeaderParameterArray(headerBindings, 12)},
 ${this.renderHeaderParameterArray(cookieBindings, 12)}
         );`
       : '';
-    const requestOptions = this.buildRequestOptions(hasQuery && !hasExplicitQuerySerialization, hasHeaders, hasBody, requestBodyMediaType, skipAuth);
+    const requestOptions = this.buildRequestOptions(
+      hasQuery && !hasExplicitQuerySerialization,
+      hasHeaders,
+      hasBody,
+      requestBodyMediaType,
+      skipAuth,
+      accessTokenOnly,
+    );
     const requestMethod = toHttpMethodLiteral(httpMethod);
     const requestLine = eventStreamInfo
       ? `        foreach ($this->client->stream('${requestMethod}', $path, ${requestOptions}) as $event) {`
@@ -773,11 +784,15 @@ ${returnLine}
     hasHeaders: boolean,
     hasBody: boolean,
     requestBodyMediaType: string,
-    skipAuth: boolean
+    skipAuth: boolean,
+    accessTokenOnly: boolean,
   ): string {
     const lines: string[] = [];
     if (skipAuth) {
       lines.push(`'skipAuth' => true,`);
+    }
+    if (accessTokenOnly) {
+      lines.push(`'accessTokenOnly' => true,`);
     }
     if (hasQuery) {
       lines.push(`'query' => $params,`);

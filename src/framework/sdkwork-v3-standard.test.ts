@@ -147,7 +147,7 @@ describe('sdkwork-v3 non-open-api access-token validation', () => {
     },
   };
 
-  it('accepts Access-Token-only credential-entry and refresh profiles', () => {
+  it('accepts Access-Token-only credential entry and body-proof refresh profiles', () => {
     const authIssues = (spec: ApiSpec) => validateSdkworkV3Standard(spec, { sdkType: 'app' })
       .filter((issue) => (
         issue.includes('route must')
@@ -157,7 +157,18 @@ describe('sdkwork-v3 non-open-api access-token validation', () => {
     expect(authIssues(appSpec)).toEqual([]);
     const refreshSpec = structuredClone(appSpec);
     refreshSpec.paths['/app/v3/api/auth/sessions'].post['x-sdkwork-auth-mode'] = 'refresh-token';
+    refreshSpec.paths['/app/v3/api/auth/sessions'].post['x-sdkwork-forbid-credential-headers'] = true;
+    refreshSpec.paths['/app/v3/api/auth/sessions'].post.security = [];
     expect(authIssues(refreshSpec)).toEqual([]);
+  });
+
+  it('rejects refresh-token operations that inherit credential headers', () => {
+    const refreshSpec = structuredClone(appSpec);
+    refreshSpec.paths['/app/v3/api/auth/sessions'].post['x-sdkwork-auth-mode'] = 'refresh-token';
+    expect(validateSdkworkV3Standard(refreshSpec, { sdkType: 'app' })).toEqual(expect.arrayContaining([
+      'POST /app/v3/api/auth/sessions refresh-token route must explicitly set security: [].',
+      'POST /app/v3/api/auth/sessions refresh-token route must set x-sdkwork-forbid-credential-headers: true.',
+    ]));
   });
 
   it('accepts explicitly anonymous app-api operations', () => {
@@ -167,6 +178,24 @@ describe('sdkwork-v3 non-open-api access-token validation', () => {
     const issues = validateSdkworkV3Standard(anonymousSpec, { sdkType: 'app' })
       .filter((issue) => issue.includes('anonymous route'));
     expect(issues).toEqual([]);
+  });
+
+  it('accepts backend bootstrap-body operations and rejects them on app SDKs', () => {
+    const bootstrapBodySpec = structuredClone(appSpec);
+    const operation = bootstrapBodySpec.paths['/app/v3/api/auth/sessions'].post;
+    operation['x-sdkwork-auth-mode'] = 'bootstrap-body';
+    operation['x-sdkwork-forbid-credential-headers'] = true;
+    operation.security = [];
+    bootstrapBodySpec.paths = {
+      '/backend/v3/api/iam/access_credentials': {
+        post: operation,
+      },
+    };
+
+    expect(validateSdkworkV3Standard(bootstrapBodySpec, { sdkType: 'backend' }))
+      .not.toContain('POST /backend/v3/api/iam/access_credentials bootstrap-body authentication is valid only for backend SDKs.');
+    expect(validateSdkworkV3Standard(bootstrapBodySpec, { sdkType: 'app' }))
+      .toContain('POST /backend/v3/api/iam/access_credentials bootstrap-body authentication is valid only for backend SDKs.');
   });
 
   it('requires anonymous app-api operations to suppress stored credentials', () => {

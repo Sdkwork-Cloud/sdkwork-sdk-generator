@@ -17,7 +17,10 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 
 const GO_RESERVED_WORDS = new Set([
   'break',
@@ -305,6 +308,7 @@ ${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsReques
         ? `AppendQueryString(${prefixedPath}, query)`
         : prefixedPath;
     const skipAuthArg = operationSkipsSdkworkAuth(op) ? 'true' : 'false';
+    const accessTokenOnlyArg = operationUsesAccessTokenOnly(op) ? 'true' : 'false';
 
     let call = '';
     switch (method) {
@@ -426,15 +430,15 @@ ${needsPathSerializationHelpers || needsQuerySerializationHelpers || needsReques
         }
         break;
       default:
-        call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg})`;
+        call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg}, ${accessTokenOnlyArg})`;
     }
 
-    if (operationSkipsSdkworkAuth(op)) {
-      call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, true)`;
+    if (operationSkipsSdkworkAuth(op) || operationUsesAccessTokenOnly(op)) {
+      call = `a.client.Request("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg}, ${accessTokenOnlyArg})`;
     }
 
     if (binaryResponseInfo) {
-      call = `a.client.RequestBytes("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg})`;
+      call = `a.client.RequestBytes("${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg}, ${accessTokenOnlyArg})`;
     }
 
     const docComment = op.summary ? `// ${op.summary}\n` : '';
@@ -453,7 +457,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 8)}
       : '';
 
     if (isEventStreamResponse) {
-      const streamCall = `sdkhttp.Stream[${responseType}](a.client, "${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg})`;
+      const streamCall = `sdkhttp.Stream[${responseType}](a.client, "${toHttpMethodLiteral(httpMethod)}", ${requestPath}, ${hasBody ? 'body' : 'nil'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'nil'}, ${hasHeaders ? 'headers' : 'nil'}, ${hasBody ? contentTypeArg : '""'}, ${skipAuthArg}, ${accessTokenOnlyArg})`;
       return {
         content: `${docComment}func (a *${structName}) ${methodName}(${params.join(', ')}) (*sdkhttp.SSEStream[${responseType}], error) {
 ${queryBlock}${requestHeaderBlock}    return ${streamCall}
@@ -1227,7 +1231,7 @@ func (b *BaseApi) Request(
     headers map[string]string,
     contentType string,
 ) (interface{}, error) {
-    return b.http.Request(method, b.basePath+path, body, query, headers, contentType)
+    return b.http.Request(method, b.basePath+path, body, query, headers, contentType, false, false)
 }
 `),
       language: 'go',

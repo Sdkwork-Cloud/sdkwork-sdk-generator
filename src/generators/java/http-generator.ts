@@ -125,22 +125,58 @@ public class HttpClient {
     }
 
     private Request.Builder applyHeaders(Request.Builder builder, Map<String, String> requestHeaders) {
-        return applyHeaders(builder, requestHeaders, false);
+        return applyHeaders(builder, requestHeaders, false, false);
     }
 
     private Request.Builder applyHeaders(Request.Builder builder, Map<String, String> requestHeaders, boolean skipAuth) {
-        Map<String, String> mergedHeaders = skipAuth ? new HashMap<>() : new HashMap<>(headers);
+        return applyHeaders(builder, requestHeaders, skipAuth, false);
+    }
+
+    private Request.Builder applyHeaders(
+        Request.Builder builder,
+        Map<String, String> requestHeaders,
+        boolean skipAuth,
+        boolean accessTokenOnly
+    ) {
+        Map<String, String> mergedHeaders = skipAuth || accessTokenOnly ? new HashMap<>() : new HashMap<>(headers);
         if (requestHeaders != null) {
             for (Map.Entry<String, String> entry : requestHeaders.entrySet()) {
-                if (entry.getKey() != null && entry.getValue() != null) {
+                if (entry.getKey() != null && entry.getValue() != null
+                    && ((!skipAuth && !accessTokenOnly) || !isCredentialHeader(entry.getKey()))) {
                     mergedHeaders.put(entry.getKey(), entry.getValue());
                 }
             }
+        }
+        if (accessTokenOnly) {
+            String accessToken = headers.entrySet().stream()
+                .filter(entry -> "Access-Token".equalsIgnoreCase(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .filter(value -> value != null && !value.trim().isEmpty())
+                .map(String::trim)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                    "access-token-only request requires Access-Token before request dispatch"
+                ));
+            mergedHeaders.put("Access-Token", accessToken);
         }
         if (mergedHeaders.isEmpty()) {
             return builder;
         }
         return builder.headers(Headers.of(mergedHeaders));
+    }
+
+    private boolean isCredentialHeader(String key) {
+        String normalized = key.toLowerCase(java.util.Locale.ROOT);
+        return normalized.equals("authorization")
+            || normalized.equals("access-token")
+            || normalized.equals("x-api-key")
+            || normalized.equals("x-tenant-id")
+            || normalized.equals("x-organization-id")
+            || normalized.equals("x-platform")
+            || normalized.equals("x-user-id")
+            || normalized.equals("x-sdkwork-tenant-id")
+            || normalized.equals("x-sdkwork-organization-id")
+            || normalized.equals("x-sdkwork-user-id");
     }
 
     private Object parseResponse(Response response) throws Exception {
@@ -306,7 +342,7 @@ public class HttpClient {
         Map<String, String> requestHeaders,
         String contentType
     ) throws Exception {
-        return request(method, path, body, params, requestHeaders, contentType, false);
+        return request(method, path, body, params, requestHeaders, contentType, false, false);
     }
 
     private byte[] executeBytes(Request request) throws Exception {
@@ -324,8 +360,21 @@ public class HttpClient {
         String contentType,
         boolean skipAuth
     ) throws Exception {
+        return request(method, path, body, params, requestHeaders, contentType, skipAuth, false);
+    }
+
+    public Object request(
+        String method,
+        String path,
+        Object body,
+        Map<String, Object> params,
+        Map<String, String> requestHeaders,
+        String contentType,
+        boolean skipAuth,
+        boolean accessTokenOnly
+    ) throws Exception {
         RequestBody requestBody = body == null ? null : createRequestBody(body, contentType);
-        Request request = applyHeaders(new Request.Builder(), requestHeaders, skipAuth)
+        Request request = applyHeaders(new Request.Builder(), requestHeaders, skipAuth, accessTokenOnly)
             .url(buildUrl(path, params))
             .method(method, requestBody)
             .build();
@@ -341,8 +390,21 @@ public class HttpClient {
         String contentType,
         boolean skipAuth
     ) throws Exception {
+        return requestBytes(method, path, body, params, requestHeaders, contentType, skipAuth, false);
+    }
+
+    public byte[] requestBytes(
+        String method,
+        String path,
+        Object body,
+        Map<String, Object> params,
+        Map<String, String> requestHeaders,
+        String contentType,
+        boolean skipAuth,
+        boolean accessTokenOnly
+    ) throws Exception {
         RequestBody requestBody = body == null ? null : createRequestBody(body, contentType);
-        Request request = applyHeaders(new Request.Builder(), requestHeaders, skipAuth)
+        Request request = applyHeaders(new Request.Builder(), requestHeaders, skipAuth, accessTokenOnly)
             .url(buildUrl(path, params))
             .method(method, requestBody)
             .build();
@@ -358,7 +420,7 @@ public class HttpClient {
         String contentType,
         TypeReference<T> typeReference
     ) throws Exception {
-        return stream(method, path, body, params, requestHeaders, contentType, typeReference, false);
+        return stream(method, path, body, params, requestHeaders, contentType, typeReference, false, false);
     }
 
     public <T> Iterable<T> stream(
@@ -371,8 +433,22 @@ public class HttpClient {
         TypeReference<T> typeReference,
         boolean skipAuth
     ) throws Exception {
+        return stream(method, path, body, params, requestHeaders, contentType, typeReference, skipAuth, false);
+    }
+
+    public <T> Iterable<T> stream(
+        String method,
+        String path,
+        Object body,
+        Map<String, Object> params,
+        Map<String, String> requestHeaders,
+        String contentType,
+        TypeReference<T> typeReference,
+        boolean skipAuth,
+        boolean accessTokenOnly
+    ) throws Exception {
         RequestBody requestBody = body == null ? null : createRequestBody(body, contentType);
-        Request request = applyHeaders(new Request.Builder(), requestHeaders, skipAuth)
+        Request request = applyHeaders(new Request.Builder(), requestHeaders, skipAuth, accessTokenOnly)
             .url(buildUrl(path, params))
             .addHeader("Accept", "text/event-stream")
             .method(method, requestBody)

@@ -114,8 +114,8 @@ end`)),
     self
   end
 
-  def request(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false)
-    response = @connection.run_request(method.to_sym, path, nil, build_headers(headers, skip_auth: skip_auth)) do |request|
+  def request(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false, access_token_only: false)
+    response = @connection.run_request(method.to_sym, path, nil, build_headers(headers, skip_auth: skip_auth, access_token_only: access_token_only)) do |request|
       request.params.update(query) unless query.nil? || query.empty?
 
       if multipart
@@ -135,8 +135,8 @@ end`)),
     raise RuntimeError, "SDK request failed: #{e.message}"
   end
 
-  def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false)
-    response = @connection.run_request(method.to_sym, path, nil, build_headers({ 'Accept' => 'text/event-stream' }.merge(headers || {}), skip_auth: skip_auth)) do |request|
+  def stream(method, path, query: {}, headers: {}, json: nil, form: nil, multipart: nil, skip_auth: false, access_token_only: false)
+    response = @connection.run_request(method.to_sym, path, nil, build_headers({ 'Accept' => 'text/event-stream' }.merge(headers || {}), skip_auth: skip_auth, access_token_only: access_token_only)) do |request|
       request.params.update(query) unless query.nil? || query.empty?
 
       if multipart
@@ -168,13 +168,29 @@ end`)),
 
   private
 
-  def build_headers(request_headers, skip_auth: false)
+  def build_headers(request_headers, skip_auth: false, access_token_only: false)
     auth_headers = {}
     auth_headers['${apiKeyHeader}'] = ${apiKeyUseBearer ? "format_bearer(@api_key)" : '@api_key'} if @api_key && !@api_key.empty?
     auth_headers['Authorization'] = format_bearer(@auth_token) if @auth_token && !@auth_token.empty?
     auth_headers['Access-Token'] = @access_token if @access_token && !@access_token.empty?
-    client_headers = skip_auth ? {} : auth_headers.merge(@headers)
-    client_headers.merge(request_headers || {})
+    return auth_headers.merge(@headers).merge(request_headers || {}) unless skip_auth || access_token_only
+
+    resolved_headers = strip_credential_headers(request_headers || {})
+    if access_token_only
+      access_token = @access_token.to_s.strip
+      raise RuntimeError, 'access-token-only request requires Access-Token before request dispatch' if access_token.empty?
+
+      resolved_headers['Access-Token'] = access_token
+    end
+    resolved_headers
+  end
+
+  def strip_credential_headers(headers)
+    forbidden = %w[
+      authorization access-token x-api-key x-tenant-id x-organization-id x-platform x-user-id
+      x-sdkwork-tenant-id x-sdkwork-organization-id x-sdkwork-user-id
+    ]
+    headers.reject { |key, _value| forbidden.include?(key.to_s.downcase) }
   end
 
   def parse_response(response)

@@ -364,7 +364,7 @@ components:
       const reportApiContent = execution.result.files.find((file) => file.path === 'src/api/report.ts')?.content;
       expect(reportApiContent).toContain('export interface ReportListReportsParams');
       expect(reportApiContent).toContain('page?: number;');
-      expect(reportApiContent).toContain('async listReports(params?: ReportListReportsParams): Promise<void>');
+      expect(reportApiContent).toContain('async listReports(params?: ReportListReportsParams, requestOptions?: ApiRequestOptions): Promise<void>');
       expect(existsSync(outputDir)).toBe(false);
     } finally {
       globalThis.fetch = originalFetch;

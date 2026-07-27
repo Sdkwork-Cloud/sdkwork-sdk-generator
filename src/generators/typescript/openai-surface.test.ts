@@ -794,19 +794,19 @@ describe('TypeScript OpenAI-style SDK surface', () => {
 
     const responsesApi = getGeneratedFile(result.files, 'src/api/responses.ts');
     expect(responsesApi.content).toContain('export class ResponsesApi');
-    expect(responsesApi.content).toContain('async create(body: CreateResponseRequest): Promise<ResponseObject>');
-    expect(responsesApi.content).toContain('async retrieve(responseId: string): Promise<ResponseObject>');
-    expect(responsesApi.content).toContain('async delete(responseId: string): Promise<void>');
-    expect(responsesApi.content).toContain('async cancel(responseId: string): Promise<ResponseObject>');
+    expect(responsesApi.content).toContain('async create(body: CreateResponseRequest, requestOptions?: ApiRequestOptions): Promise<ResponseObject>');
+    expect(responsesApi.content).toContain('async retrieve(responseId: string, requestOptions?: ApiRequestOptions): Promise<ResponseObject>');
+    expect(responsesApi.content).toContain('async delete(responseId: string, requestOptions?: ApiRequestOptions): Promise<void>');
+    expect(responsesApi.content).toContain('async cancel(responseId: string, requestOptions?: ApiRequestOptions): Promise<ResponseObject>');
     expect(responsesApi.content).not.toContain('async createResponse(');
     expect(responsesApi.content).not.toContain('async getResponse(');
     expect(responsesApi.content).not.toContain('async deleteResponse(');
 
     const filesApi = getGeneratedFile(result.files, 'src/api/files.ts');
-    expect(filesApi.content).toContain('async list(): Promise<ListFilesResponse>');
-    expect(filesApi.content).toContain('async create(body?: CreateFileRequest): Promise<FileObject>');
+    expect(filesApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<ListFilesResponse>');
+    expect(filesApi.content).toContain('async create(body?: CreateFileRequest, requestOptions?: ApiRequestOptions): Promise<FileObject>');
     expect(filesApi.content).not.toContain('body?: FormData');
-    expect(filesApi.content).toContain('async content(fileId: string): Promise<Blob>');
+    expect(filesApi.content).toContain('async content(fileId: string, requestOptions?: ApiRequestOptions): Promise<Blob>');
     expect(filesApi.content).not.toContain('listFiles');
     expect(filesApi.content).not.toContain('uploadFile');
     expect(filesApi.content).not.toContain('public readonly content:');
@@ -818,12 +818,12 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(chatApi.content).toContain('public readonly messages: ChatCompletionsMessagesApi;');
     expect(chatApi.content).toContain('this.messages = new ChatCompletionsMessagesApi(client);');
     expect(chatApi.content).toContain('export class ChatCompletionsMessagesApi');
-    expect(chatApi.content).toContain('async create(body: CreateChatCompletionRequest): Promise<ChatCompletionObject>');
-    expect(chatApi.content).toContain('async list(): Promise<ChatCompletionListObject>');
-    expect(chatApi.content).toContain('async retrieve(completionId: string): Promise<ChatCompletionObject>');
-    expect(chatApi.content).toContain('async update(completionId: string, body: UpdateChatCompletionRequest): Promise<ChatCompletionObject>');
-    expect(chatApi.content).toContain('async delete(completionId: string): Promise<void>');
-    expect(chatApi.content).toContain('async list(completionId: string): Promise<ChatCompletionMessagesListObject>');
+    expect(chatApi.content).toContain('async create(body: CreateChatCompletionRequest, requestOptions?: ApiRequestOptions): Promise<ChatCompletionObject>');
+    expect(chatApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<ChatCompletionListObject>');
+    expect(chatApi.content).toContain('async retrieve(completionId: string, requestOptions?: ApiRequestOptions): Promise<ChatCompletionObject>');
+    expect(chatApi.content).toContain('async update(completionId: string, body: UpdateChatCompletionRequest, requestOptions?: ApiRequestOptions): Promise<ChatCompletionObject>');
+    expect(chatApi.content).toContain('async delete(completionId: string, requestOptions?: ApiRequestOptions): Promise<void>');
+    expect(chatApi.content).toContain('async list(completionId: string, requestOptions?: ApiRequestOptions): Promise<ChatCompletionMessagesListObject>');
     expect(chatApi.content).not.toContain('createChatCompletion');
     expect(chatApi.content).not.toContain('retrieveCompletions');
     expect(chatApi.content).not.toContain('retrieveCompletionsMessages');
@@ -831,20 +831,20 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     const batchesApi = getGeneratedFile(result.files, 'src/api/batches.ts');
     expect(sdkFile.content).toContain('public readonly batches: BatchesApi;');
     expect(batchesApi.content).toContain('export class BatchesApi');
-    expect(batchesApi.content).toContain('async create(body: CreateBatchRequest): Promise<CreateBatchResponse>');
-    expect(batchesApi.content).toContain('async cancel(batchId: string): Promise<CancelBatchResponse>');
+    expect(batchesApi.content).toContain('async create(body: CreateBatchRequest, requestOptions?: ApiRequestOptions): Promise<CreateBatchResponse>');
+    expect(batchesApi.content).toContain('async cancel(batchId: string, requestOptions?: ApiRequestOptions): Promise<CancelBatchResponse>');
     expect(batchesApi.content).not.toContain('public readonly cancel:');
 
     const uploadsApi = getGeneratedFile(result.files, 'src/api/uploads.ts');
     expect(sdkFile.content).toContain('public readonly uploads: UploadsApi;');
-    expect(uploadsApi.content).toContain('async create(body: CreateUploadRequest): Promise<CreateUploadResponse>');
-    expect(uploadsApi.content).toContain('async complete(uploadId: string, body: CompleteUploadRequest): Promise<CompleteUploadResponse>');
+    expect(uploadsApi.content).toContain('async create(body: CreateUploadRequest, requestOptions?: ApiRequestOptions): Promise<CreateUploadResponse>');
+    expect(uploadsApi.content).toContain('async complete(uploadId: string, body: CompleteUploadRequest, requestOptions?: ApiRequestOptions): Promise<CompleteUploadResponse>');
     expect(uploadsApi.content).not.toContain('public readonly complete:');
 
     const threadsApi = getGeneratedFile(result.files, 'src/api/threads.ts');
     expect(sdkFile.content).toContain('public readonly threads: ThreadsApi;');
     expect(threadsApi.content).toContain('public readonly runs: ThreadsRunsApi;');
-    expect(threadsApi.content).toContain('async submitToolOutputs(threadId: string, runId: string, body: SubmitToolOutputsToRunRequest): Promise<SubmitToolOutputsToRunResponse>');
+    expect(threadsApi.content).toContain('async submitToolOutputs(threadId: string, runId: string, body: SubmitToolOutputsToRunRequest, requestOptions?: ApiRequestOptions): Promise<SubmitToolOutputsToRunResponse>');
     expect(threadsApi.content).not.toContain('public readonly submitToolOutputs:');
   });
 
@@ -900,15 +900,15 @@ describe('TypeScript OpenAI-style SDK surface', () => {
 
     const conversationApi = getGeneratedFile(result.files, 'src/api/conversation.ts');
     expect(conversationApi.content).toContain('export class ConversationApi');
-    expect(conversationApi.content).toContain('async list(): Promise<ConversationList>');
+    expect(conversationApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<ConversationList>');
 
     const evalApi = getGeneratedFile(result.files, 'src/api/eval.ts');
     expect(evalApi.content).toContain('export class EvalApi');
-    expect(evalApi.content).toContain('async list(): Promise<EvalList>');
+    expect(evalApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<EvalList>');
 
     const videoApi = getGeneratedFile(result.files, 'src/api/video.ts');
     expect(videoApi.content).toContain('export class VideoApi');
-    expect(videoApi.content).toContain('async create(): Promise<VideoObject>');
+    expect(videoApi.content).toContain('async create(requestOptions?: ApiRequestOptions): Promise<VideoObject>');
   });
 
   it('maps nested OpenAI resources and collection actions to standard client chains', async () => {
@@ -924,24 +924,24 @@ describe('TypeScript OpenAI-style SDK surface', () => {
 
     const uploadsApi = getGeneratedFile(result.files, 'src/api/uploads.ts');
     expect(uploadsApi.content).toContain('public readonly parts: UploadsPartsApi;');
-    expect(uploadsApi.content).toContain('async create(uploadId: string, body: CreateUploadPartRequest): Promise<UploadPartObject>');
+    expect(uploadsApi.content).toContain('async create(uploadId: string, body: CreateUploadPartRequest, requestOptions?: ApiRequestOptions): Promise<UploadPartObject>');
     expect(uploadsApi.content).not.toContain('body: FormData');
 
     const vectorStoresApi = getGeneratedFile(result.files, 'src/api/vector-stores.ts');
     expect(vectorStoresApi.content).toContain('export class VectorStoresApi');
     expect(vectorStoresApi.content).toContain('public readonly files: VectorStoresFilesApi;');
     expect(vectorStoresApi.content).toContain('public readonly fileBatches: VectorStoresFileBatchesApi;');
-    expect(vectorStoresApi.content).toContain('async create(body: CreateVectorStoreRequest): Promise<VectorStoreObject>');
-    expect(vectorStoresApi.content).toContain('async list(): Promise<ListVectorStoresResponse>');
-    expect(vectorStoresApi.content).toContain('async retrieve(vectorStoreId: string): Promise<VectorStoreObject>');
-    expect(vectorStoresApi.content).toContain('async update(vectorStoreId: string, body: UpdateVectorStoreRequest): Promise<VectorStoreObject>');
-    expect(vectorStoresApi.content).toContain('async delete(vectorStoreId: string): Promise<VectorStoreDeleteResponse>');
-    expect(vectorStoresApi.content).toContain('async search(vectorStoreId: string, body: SearchVectorStoreRequest): Promise<VectorStoreSearchResponse>');
-    expect(vectorStoresApi.content).toContain('async create(vectorStoreId: string, body: CreateVectorStoreFileRequest): Promise<VectorStoreFileObject>');
-    expect(vectorStoresApi.content).toContain('async retrieve(vectorStoreId: string, fileId: string): Promise<VectorStoreFileObject>');
-    expect(vectorStoresApi.content).toContain('async content(vectorStoreId: string, fileId: string): Promise<VectorStoreFileContentResponse>');
-    expect(vectorStoresApi.content).toContain('async cancel(vectorStoreId: string, batchId: string): Promise<VectorStoreFileBatchObject>');
-    expect(vectorStoresApi.content).toContain('async listFiles(vectorStoreId: string, batchId: string): Promise<ListVectorStoreFilesResponse>');
+    expect(vectorStoresApi.content).toContain('async create(body: CreateVectorStoreRequest, requestOptions?: ApiRequestOptions): Promise<VectorStoreObject>');
+    expect(vectorStoresApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<ListVectorStoresResponse>');
+    expect(vectorStoresApi.content).toContain('async retrieve(vectorStoreId: string, requestOptions?: ApiRequestOptions): Promise<VectorStoreObject>');
+    expect(vectorStoresApi.content).toContain('async update(vectorStoreId: string, body: UpdateVectorStoreRequest, requestOptions?: ApiRequestOptions): Promise<VectorStoreObject>');
+    expect(vectorStoresApi.content).toContain('async delete(vectorStoreId: string, requestOptions?: ApiRequestOptions): Promise<VectorStoreDeleteResponse>');
+    expect(vectorStoresApi.content).toContain('async search(vectorStoreId: string, body: SearchVectorStoreRequest, requestOptions?: ApiRequestOptions): Promise<VectorStoreSearchResponse>');
+    expect(vectorStoresApi.content).toContain('async create(vectorStoreId: string, body: CreateVectorStoreFileRequest, requestOptions?: ApiRequestOptions): Promise<VectorStoreFileObject>');
+    expect(vectorStoresApi.content).toContain('async retrieve(vectorStoreId: string, fileId: string, requestOptions?: ApiRequestOptions): Promise<VectorStoreFileObject>');
+    expect(vectorStoresApi.content).toContain('async content(vectorStoreId: string, fileId: string, requestOptions?: ApiRequestOptions): Promise<VectorStoreFileContentResponse>');
+    expect(vectorStoresApi.content).toContain('async cancel(vectorStoreId: string, batchId: string, requestOptions?: ApiRequestOptions): Promise<VectorStoreFileBatchObject>');
+    expect(vectorStoresApi.content).toContain('async listFiles(vectorStoreId: string, batchId: string, requestOptions?: ApiRequestOptions): Promise<ListVectorStoreFilesResponse>');
     expect(vectorStoresApi.content).not.toContain('public readonly content:');
     expect(vectorStoresApi.content).not.toContain('public readonly cancel:');
     expect(vectorStoresApi.content).not.toContain('public readonly files: VectorStoresFileBatchesFilesApi;');
@@ -952,17 +952,17 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(fineTuningApi.content).toContain('public readonly checkpoints: FineTuningCheckpointsApi;');
     expect(fineTuningApi.content).toContain('public readonly checkpoints: FineTuningJobsCheckpointsApi;');
     expect(fineTuningApi.content).toContain('public readonly permissions: FineTuningCheckpointsPermissionsApi;');
-    expect(fineTuningApi.content).toContain('async create(body: CreateFineTuningJobRequest): Promise<FineTuningJobObject>');
-    expect(fineTuningApi.content).toContain('async list(): Promise<ListFineTuningJobsResponse>');
-    expect(fineTuningApi.content).toContain('async retrieve(fineTuningJobId: string): Promise<FineTuningJobObject>');
-    expect(fineTuningApi.content).toContain('async cancel(fineTuningJobId: string): Promise<FineTuningJobObject>');
-    expect(fineTuningApi.content).toContain('async pause(fineTuningJobId: string): Promise<FineTuningJobObject>');
-    expect(fineTuningApi.content).toContain('async resume(fineTuningJobId: string): Promise<FineTuningJobObject>');
-    expect(fineTuningApi.content).toContain('async listEvents(fineTuningJobId: string): Promise<ListFineTuningEventsResponse>');
-    expect(fineTuningApi.content).toContain('async list(fineTuningJobId: string): Promise<ListFineTuningCheckpointsResponse>');
-    expect(fineTuningApi.content).toContain('async create(fineTunedModelCheckpoint: string, body: PermissionCreateRequest): Promise<PermissionCreateResponse>');
-    expect(fineTuningApi.content).toContain('async retrieve(fineTunedModelCheckpoint: string): Promise<PermissionRetrieveResponse>');
-    expect(fineTuningApi.content).toContain('async delete(fineTunedModelCheckpoint: string, permissionId: string): Promise<PermissionDeleteResponse>');
+    expect(fineTuningApi.content).toContain('async create(body: CreateFineTuningJobRequest, requestOptions?: ApiRequestOptions): Promise<FineTuningJobObject>');
+    expect(fineTuningApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<ListFineTuningJobsResponse>');
+    expect(fineTuningApi.content).toContain('async retrieve(fineTuningJobId: string, requestOptions?: ApiRequestOptions): Promise<FineTuningJobObject>');
+    expect(fineTuningApi.content).toContain('async cancel(fineTuningJobId: string, requestOptions?: ApiRequestOptions): Promise<FineTuningJobObject>');
+    expect(fineTuningApi.content).toContain('async pause(fineTuningJobId: string, requestOptions?: ApiRequestOptions): Promise<FineTuningJobObject>');
+    expect(fineTuningApi.content).toContain('async resume(fineTuningJobId: string, requestOptions?: ApiRequestOptions): Promise<FineTuningJobObject>');
+    expect(fineTuningApi.content).toContain('async listEvents(fineTuningJobId: string, requestOptions?: ApiRequestOptions): Promise<ListFineTuningEventsResponse>');
+    expect(fineTuningApi.content).toContain('async list(fineTuningJobId: string, requestOptions?: ApiRequestOptions): Promise<ListFineTuningCheckpointsResponse>');
+    expect(fineTuningApi.content).toContain('async create(fineTunedModelCheckpoint: string, body: PermissionCreateRequest, requestOptions?: ApiRequestOptions): Promise<PermissionCreateResponse>');
+    expect(fineTuningApi.content).toContain('async retrieve(fineTunedModelCheckpoint: string, requestOptions?: ApiRequestOptions): Promise<PermissionRetrieveResponse>');
+    expect(fineTuningApi.content).toContain('async delete(fineTunedModelCheckpoint: string, permissionId: string, requestOptions?: ApiRequestOptions): Promise<PermissionDeleteResponse>');
     expect(fineTuningApi.content).not.toContain('public readonly events:');
   });
 
@@ -1033,9 +1033,9 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(result.errors).toEqual([]);
 
     const chatApi = getGeneratedFile(result.files, 'src/api/chat.ts');
-    expect(chatApi.content).toContain('async retrieve(completionId: string): Promise<ChatCompletionObject>');
-    expect(chatApi.content).toContain('async list(): Promise<ChatCompletionListObject>');
-    expect(chatApi.content).toContain('async create(body: CreateChatCompletionRequest): Promise<ChatCompletionObject>');
+    expect(chatApi.content).toContain('async retrieve(completionId: string, requestOptions?: ApiRequestOptions): Promise<ChatCompletionObject>');
+    expect(chatApi.content).toContain('async list(requestOptions?: ApiRequestOptions): Promise<ChatCompletionListObject>');
+    expect(chatApi.content).toContain('async create(body: CreateChatCompletionRequest, requestOptions?: ApiRequestOptions): Promise<ChatCompletionObject>');
     expect(chatApi.content).not.toContain('async getRetrieve(');
     expect(chatApi.content).not.toContain('async getList(');
     expect(chatApi.content).not.toContain('async createCreateChatCompletion(');
@@ -1122,14 +1122,14 @@ describe('TypeScript OpenAI-style SDK surface', () => {
     expect(billingApi.content).toContain('public readonly points: BillingAccountPointsApi;');
     expect(billingApi.content).toContain('public readonly recharges: BillingAccountPointsRechargesApi;');
     expect(billingApi.content).toContain('public readonly purchase: BillingVipPurchaseApi;');
-    expect(billingApi.content).toContain('async retrieve(): Promise<AccountSummaryResult>');
-    expect(billingApi.content).toContain('async create(body: PointsRechargeRequest): Promise<PointsRechargeResult>');
-    expect(billingApi.content).toContain('async renew(body: VipPurchaseRequest): Promise<VipPurchaseResult>');
+    expect(billingApi.content).toContain('async retrieve(requestOptions?: ApiRequestOptions): Promise<AccountSummaryResult>');
+    expect(billingApi.content).toContain('async create(body: PointsRechargeRequest, requestOptions?: ApiRequestOptions): Promise<PointsRechargeResult>');
+    expect(billingApi.content).toContain('async renew(body: VipPurchaseRequest, requestOptions?: ApiRequestOptions): Promise<VipPurchaseResult>');
     expect(billingApi.content).not.toContain('async accountSummaryRetrieve');
     expect(billingApi.content).not.toContain('async vipPurchaseRenew');
 
     const profileApi = getGeneratedFile(result.files, 'src/api/profile.ts');
-    expect(profileApi.content).toContain('async current(): Promise<ProfileResult>');
+    expect(profileApi.content).toContain('async current(requestOptions?: ApiRequestOptions): Promise<ProfileResult>');
     expect(profileApi.content).not.toContain('public readonly current:');
   });
 });

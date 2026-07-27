@@ -15,7 +15,10 @@ import {
   requiresExplicitOpenApiQuerySerialization,
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 import { CSHARP_CONFIG, getCSharpNamespace, getCSharpType } from './config.js';
 
 const CSHARP_RESERVED_WORDS = new Set([
@@ -350,6 +353,7 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         ? `ApiPaths.AppendQueryString(${pathCall}, queryString)`
         : pathCall;
     const skipAuth = operationSkipsSdkworkAuth(op);
+    const accessTokenOnly = operationUsesAccessTokenOnly(op);
     let call = '';
     
     switch (method) {
@@ -474,8 +478,8 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
         call = `await _client.RequestAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'})`;
     }
 
-    if (skipAuth) {
-      call = `await _client.RequestAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, true)`;
+    if (skipAuth || accessTokenOnly) {
+      call = `await _client.RequestAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}, ${skipAuth ? 'true' : 'false'}, ${accessTokenOnly ? 'true' : 'false'})`;
     }
 
     const docComment = op.summary ? `        /// <summary>\n        /// ${op.summary}\n        /// </summary>\n` : '';
@@ -498,7 +502,7 @@ ${this.renderQueryParameterSpecs(queryBindings, 16)}
       : '';
 
     if (isEventStreamResponse) {
-      const streamCall = `_client.StreamAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}${skipAuth ? ', true' : ''})`;
+      const streamCall = `_client.StreamAsync<${responseType}>("${toHttpMethodLiteral(httpMethod)}", ${requestPathCall}, ${hasBody ? 'body' : 'null'}, ${hasQuery && !hasExplicitQuerySerialization ? 'query' : 'null'}, ${hasHeaders ? 'requestHeaders' : 'null'}, ${hasBody && requestBodyInfo?.mediaType ? `"${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'}${skipAuth || accessTokenOnly ? `, ${skipAuth ? 'true' : 'false'}, ${accessTokenOnly ? 'true' : 'false'}` : ''})`;
       return `${docComment}        public IAsyncEnumerable<${responseType}> ${methodName}Async(${params.join(', ')})
         {
 ${queryBlock}${requestHeaderBlock}            return ${streamCall};

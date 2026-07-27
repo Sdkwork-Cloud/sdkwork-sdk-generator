@@ -48,12 +48,14 @@ class HttpClient extends BaseHttpClient {
     Map<String, String>? requestHeaders,
     String? contentType,
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) async {
     final uri = _buildUri(path, params);
     final mergedHeaders = <String, String>{
-      if (!skipAuth) ...headers,
+      if (!skipAuth && !accessTokenOnly) ...headers,
       ...?requestHeaders,
     };
+    _applyCredentialPolicy(mergedHeaders, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
 
     if (body != null && _normalizeContentType(contentType).toLowerCase().startsWith('multipart/form-data')) {
       final response = await _sendMultipart(method, uri, body, mergedHeaders)
@@ -85,13 +87,15 @@ class HttpClient extends BaseHttpClient {
     Map<String, String>? headers,
     String contentType = 'application/json',
     bool skipAuth = false,
+    bool accessTokenOnly = false,
   }) async* {
     final uri = _buildUri(path, params);
     final mergedHeaders = <String, String>{
-      if (!skipAuth) ...this.headers,
+      if (!skipAuth && !accessTokenOnly) ...this.headers,
       'Accept': 'text/event-stream',
       ...?headers,
     };
+    _applyCredentialPolicy(mergedHeaders, skipAuth: skipAuth, accessTokenOnly: accessTokenOnly);
     final request = http.Request('POST', uri)
       ..headers.addAll(_buildHeaders(mergedHeaders, contentType, body));
     final encodedBody = _encodeBody(body, contentType);
@@ -161,6 +165,43 @@ class HttpClient extends BaseHttpClient {
       return 'application/json';
     }
     return contentType.trim();
+  }
+
+  void _applyCredentialPolicy(
+    Map<String, String> requestHeaders, {
+    required bool skipAuth,
+    required bool accessTokenOnly,
+  }) {
+    if (!skipAuth && !accessTokenOnly) {
+      return;
+    }
+    const forbidden = {
+      'authorization',
+      'access-token',
+      'x-api-key',
+      'x-tenant-id',
+      'x-organization-id',
+      'x-platform',
+      'x-user-id',
+      'x-sdkwork-tenant-id',
+      'x-sdkwork-organization-id',
+      'x-sdkwork-user-id',
+    };
+    requestHeaders.removeWhere((key, _) => forbidden.contains(key.toLowerCase()));
+    if (!accessTokenOnly) {
+      return;
+    }
+    String? accessToken;
+    for (final entry in this.headers.entries) {
+      if (entry.key.toLowerCase() == 'access-token' && entry.value.trim().isNotEmpty) {
+        accessToken = entry.value.trim();
+        break;
+      }
+    }
+    if (accessToken == null) {
+      throw StateError('access-token-only request requires Access-Token before request dispatch');
+    }
+    requestHeaders['Access-Token'] = accessToken;
   }
 
   Map<String, String> _buildHeaders(

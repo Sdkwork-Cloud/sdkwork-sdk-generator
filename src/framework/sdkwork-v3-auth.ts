@@ -18,12 +18,12 @@ export function operationSkipsSdkworkAuth(
   operation: Pick<ApiOperation, 'x-sdkwork-auth-mode'> | Record<string, unknown> | undefined,
 ): boolean {
   const authMode = String(operation?.['x-sdkwork-auth-mode'] ?? '').trim().toLowerCase();
-  return authMode === 'anonymous';
+  return authMode === 'anonymous' || authMode === 'bootstrap-body' || authMode === 'refresh-token';
 }
 
 export function operationUsesAccessTokenOnly(
   operation: Pick<ApiOperation, 'x-sdkwork-auth-mode'> | Record<string, unknown> | undefined,
 ): boolean {
   const authMode = String(operation?.['x-sdkwork-auth-mode'] ?? '').trim().toLowerCase();
-  return authMode === 'credential-entry-bootstrap' || authMode === 'refresh-token';
+  return authMode === 'credential-entry-bootstrap';
 }

@@ -14,7 +14,10 @@ import {
   resolveOpenApiParameterSerialization,
 } from '../../framework/parameter-serialization.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
-import { operationSkipsSdkworkAuth } from '../../framework/sdkwork-v3-auth.js';
+import {
+  operationSkipsSdkworkAuth,
+  operationUsesAccessTokenOnly,
+} from '../../framework/sdkwork-v3-auth.js';
 import { RUBY_CONFIG, getRubyModuleSegments } from './config.js';
 
 interface NamedParameterBinding {
@@ -278,6 +281,7 @@ end`, requires)),
     const requestBodyMediaType = (requestBodyInfo?.mediaType || '').toLowerCase();
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const skipAuth = operationSkipsSdkworkAuth(op);
+    const accessTokenOnly = operationUsesAccessTokenOnly(op);
     const responseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
     const hasExplicitQuerySerialization = queryParams.some((param: any) => requiresExplicitOpenApiQuerySerialization(param));
     const pathParamNames = createUniqueIdentifierMap(
@@ -368,6 +372,9 @@ ${this.renderHeaderParameterHash(cookieBindings, 8)}
     const optionLines: string[] = [];
     if (skipAuth) {
       optionLines.push('      options[:skip_auth] = true');
+    }
+    if (accessTokenOnly) {
+      optionLines.push('      options[:access_token_only] = true');
     }
     if (hasQuery && !hasExplicitQuerySerialization) {
       optionLines.push('      options[:query] = params unless params.nil? || params.empty?');
