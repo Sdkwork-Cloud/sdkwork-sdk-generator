@@ -4553,7 +4553,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(apiFile).toBeDefined();
     expect(apiFile!.content).toContain('idempotencyKey: string;');
     expect(apiFile!.content).toContain(
-      'async create(params: SiteCreateParams, requestOptions?: ApiRequestOptions)',
+      'async sitesCreate(body: CreateSiteRequest, params: SiteSitesCreateParams, requestOptions?: ApiRequestOptions)',
     );
     expect(apiFile!.content).toContain(
       "'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false }",
