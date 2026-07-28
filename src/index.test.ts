@@ -6564,7 +6564,11 @@ describe('OpenAPI Security And Compliance', () => {
     expect(httpClient!.content).toContain(
       'access-token-only request requires Access-Token before request dispatch',
     );
-    expect(httpClient!.content).toContain("...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),");
+    expect(httpClient!.content).toContain(
+      "buildAuthHeaders('dual-token', undefined, tokenManager)",
+    );
+    expect(httpClient!.content).not.toContain('authToken ? { Authorization:');
+    expect(httpClient!.content).not.toContain("accessToken ? { 'Access-Token':");
     expect(httpClient!.content).toMatch(
       /if \(config\?\.accessTokenOnly\)[\s\S]*stripCredentialHeaders\(headers, true\)/u,
     );

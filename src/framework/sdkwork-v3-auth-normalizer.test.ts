@@ -44,11 +44,13 @@ const spec: ApiSpec = {
         operationId: 'conversations.list',
         tags: ['chat'],
         security: [
+          { ApiKey: [] },
           {
             AuthToken: [],
             AccessToken: [],
           },
         ],
+        'x-sdkwork-auth-mode': 'api-key-or-dual-token',
         responses: {
           '200': {
             description: 'OK',
@@ -64,6 +66,11 @@ const spec: ApiSpec = {
   },
   components: {
     securitySchemes: {
+      ApiKey: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-API-Key',
+      },
       AuthToken: {
         type: 'http',
         scheme: 'bearer',
@@ -114,8 +121,8 @@ function isSdkAuthSurfaceFile(path: string): boolean {
   return true;
 }
 
-describe('sdkwork-v3 dual-token auth surface normalization', () => {
-  it.each(languages)('generates %s IM SDK output without API key auth surface', async (language) => {
+describe('sdkwork-v3 auth surface normalization', () => {
+  it.each(languages)('generates %s IM SDK output with mutually exclusive API key and dual-token auth', async (language) => {
     const result = await generateSdk(createConfig(language), spec);
     expect(result.errors).toEqual([]);
 
@@ -125,17 +132,10 @@ describe('sdkwork-v3 dual-token auth surface normalization', () => {
       .map(([path, content]) => `--- ${path} ---\n${content}`)
       .join('\n');
 
-    expect(combined).not.toContain('setApiKey');
-    expect(combined).not.toContain('set_api_key');
-    expect(combined).not.toContain('SetApiKey');
-    expect(combined).not.toContain('apiKey?:');
-    expect(combined).not.toContain('apiKeyHeader');
-    expect(combined).not.toContain('apiKeyAsBearer');
-    expect(combined).not.toContain('API_KEY');
-    expect(combined).not.toContain('your-api-key');
-    expect(combined).not.toContain('Mode A: API Key');
-    expect(combined).not.toContain('Authentication Modes');
-    expect(combined).not.toContain(`Professional ${languageLabels[language]} SDK for SDKWork API`);
+    expect(combined).toContain('X-API-Key');
+    expect(combined).toContain('your-api-key');
+    expect(combined).toContain('Authentication Modes');
+    expect(combined).toContain(`Professional ${languageLabels[language]} SDK for SDKWork API`);
     expect(combined).toContain('Authorization: Bearer <authToken>');
     expect(combined).toContain('Access-Token: <accessToken>');
   });

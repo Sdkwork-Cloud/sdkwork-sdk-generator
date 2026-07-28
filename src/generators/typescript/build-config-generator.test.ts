@@ -13,11 +13,13 @@ const spec: ApiSpec = {
         operationId: 'conversations.list',
         tags: ['chat'],
         security: [
+          { ApiKey: [] },
           {
             AuthToken: [],
             AccessToken: [],
           },
         ],
+        'x-sdkwork-auth-mode': 'api-key-or-dual-token',
         responses: {
           '200': {
             description: 'OK',
@@ -33,6 +35,11 @@ const spec: ApiSpec = {
   },
   components: {
     securitySchemes: {
+      ApiKey: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'X-API-Key',
+      },
       AuthToken: {
         type: 'http',
         scheme: 'bearer',
