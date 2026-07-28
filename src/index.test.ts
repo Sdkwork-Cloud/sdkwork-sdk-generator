@@ -1751,6 +1751,48 @@ const headerCookieParameterSpec: ApiSpec = {
   },
 };
 
+const idempotencyHeaderParameterSpec = {
+  openapi: '3.1.2',
+  info: { title: 'Idempotency Header API', version: '1.0.0' },
+  paths: {
+    '/sites': {
+      post: {
+        summary: 'Create site idempotently',
+        operationId: 'sites.create',
+        tags: ['Site'],
+        'x-sdkwork-idempotent': true,
+        parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/CreateSiteRequest' },
+            },
+          },
+        },
+        responses: { '201': { description: 'Created' } },
+      },
+    },
+  },
+  components: {
+    parameters: {
+      IdempotencyKey: {
+        name: 'Idempotency-Key',
+        in: 'header',
+        required: true,
+        schema: { type: 'string', minLength: 1, maxLength: 128 },
+      },
+    },
+    schemas: {
+      CreateSiteRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: { name: { type: 'string' } },
+      },
+    },
+  },
+} as unknown as ApiSpec;
+
 const scalarHeaderCookieParameterSpec: ApiSpec = {
   openapi: '3.2.0',
   info: { title: 'Scalar Header Cookie Parameter API', version: '1.0.0' },
@@ -4500,6 +4542,23 @@ describe('OpenAPI Security And Compliance', () => {
       "this.client.request<void>(backendApiPath(`/resources`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, headers: requestHeaders })",
     );
     expect(apiFile!.content).not.toContain('headers?: Record<string, string>');
+  });
+
+  it('should preserve a required shared Idempotency-Key parameter in TypeScript methods', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, idempotencyHeaderParameterSpec);
+    const apiFile = result.files.find((file) => file.path === 'src/api/site.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile).toBeDefined();
+    expect(apiFile!.content).toContain('idempotencyKey: string;');
+    expect(apiFile!.content).toContain(
+      'async create(params: SiteCreateParams, requestOptions?: ApiRequestOptions)',
+    );
+    expect(apiFile!.content).toContain(
+      "'Idempotency-Key': { value: params.idempotencyKey, style: 'simple', explode: false }",
+    );
+    expect(apiFile!.content).not.toContain('idempotencyKey?: string;');
   });
 
   it('should generate TypeScript OpenAPI parameter serialization for query style explode content and allowReserved', async () => {
