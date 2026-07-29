@@ -21,7 +21,10 @@ import {
   operationSkipsSdkworkAuth,
   operationUsesAccessTokenOnly,
 } from '../../framework/sdkwork-v3-auth.js';
-import { resolveSdkworkV3ConsumerSchema } from '../../framework/sdkwork-v3-envelope.js';
+import {
+  resolveSdkworkV3ConsumerSchema,
+  type SdkworkV3UnwrapKind,
+} from '../../framework/sdkwork-v3-envelope.js';
 
 interface NamedParameterBinding {
   parameter: any;
@@ -358,9 +361,10 @@ ${methods ? `\n\n${methods}` : ''}
     const eventStreamInfo = extractEventStreamResponseInfo(op);
     const isEventStreamResponse = Boolean(eventStreamInfo);
     const rawResponseSchema = eventStreamInfo?.schema ?? this.extractResponseSchema(op);
-    const responseSchema = config.options?.standardProfile === 'sdkwork-v3' && rawResponseSchema
-      ? resolveSdkworkV3ConsumerSchema(rawResponseSchema, schemas).consumerSchema
-      : rawResponseSchema;
+    const sdkworkV3Response = config.options?.standardProfile === 'sdkwork-v3' && rawResponseSchema
+      ? resolveSdkworkV3ConsumerSchema(rawResponseSchema, schemas)
+      : undefined;
+    const responseSchema = sdkworkV3Response?.consumerSchema ?? rawResponseSchema;
     const responseType = responseSchema
       ? getTypeScriptType(responseSchema, TYPESCRIPT_CONFIG, knownModels)
       : this.inferFallbackResponseType(op);
@@ -599,6 +603,7 @@ ${methods ? `\n\n${methods}` : ''}
       requestBodyInfo?.mediaType,
       skipAuth,
       accessTokenOnly,
+      sdkworkV3Response?.plan.unwrapKind,
     );
 
     const docComment = op.summary ? `/** ${op.summary} */\n  ` : '';
@@ -657,6 +662,7 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
     mediaType: string | undefined,
     skipAuth: boolean,
     accessTokenOnly: boolean,
+    sdkworkUnwrapKind: SdkworkV3UnwrapKind | undefined,
   ): string {
     const options = [
       'signal: requestOptions?.signal',
@@ -668,6 +674,7 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
       hasBody && mediaType ? `contentType: '${this.escapeSingleQuoted(mediaType)}'` : '',
       skipAuth ? 'skipAuth: true' : '',
       accessTokenOnly ? 'accessTokenOnly: true' : '',
+      sdkworkUnwrapKind ? `sdkworkUnwrapKind: '${sdkworkUnwrapKind}'` : '',
     ].filter(Boolean).join(', ');
     return `this.client.request<${responseType}>(${requestPathExpression}, { ${options} })`;
   }

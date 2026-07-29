@@ -87,13 +87,14 @@ describe('TypeScript HTTP generator', () => {
     const httpClient = files.find((file) => file.path === 'src/http/client.ts');
 
     expect(httpClient?.content).toContain(
-      "return this.unwrapSdkworkV3Data<T>(record);",
+      "return this.unwrapSdkworkV3Data<T>(record, unwrapKind);",
     );
     expect(httpClient?.content).toContain(
-      "return this.unwrapSdkworkV3Data<T>(data as Record<string, unknown>);",
+      "return this.unwrapSdkworkV3Data<T>(data as Record<string, unknown>, unwrapKind);",
     );
-    expect(httpClient?.content).toContain("if ('item' in data)");
+    expect(httpClient?.content).toContain("if (unwrapKind === 'item' && 'item' in data)");
     expect(httpClient?.content).toContain('return data.item as T;');
+    expect(httpClient?.content).toContain("sdkworkUnwrapKind?: SdkworkV3UnwrapKind;");
   });
 
   it('adds a body fingerprint to sdkwork-v3 idempotent requests', () => {

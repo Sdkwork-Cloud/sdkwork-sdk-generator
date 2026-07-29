@@ -267,15 +267,19 @@ function unwrapKindForDataSchema(
 
   const candidates = resolveComposedSchemas(dataSchema || {}, components);
   const required = new Set<string>();
+  const propertyNames = new Set<string>();
   for (const candidate of candidates) {
     for (const propertyName of candidate?.required || []) {
       required.add(propertyName);
+    }
+    for (const propertyName of Object.keys(candidate?.properties || {})) {
+      propertyNames.add(propertyName);
     }
   }
   if (required.has('items') && required.has('pageInfo')) {
     return 'page';
   }
-  if (required.has('item')) {
+  if (required.has('item') && propertyNames.size === 1 && propertyNames.has('item')) {
     return 'item';
   }
   if (required.has('accepted')) {
