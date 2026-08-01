@@ -6165,7 +6165,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors.length).toBe(0);
     const packageJsonFile = result.files.find((f) => f.path === 'package.json');
     expect(packageJsonFile).toBeDefined();
-    expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.2"');
+    expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.4"');
   });
 
   it('should hoist inline request and response schemas into explicit operation types across languages', async () => {
