@@ -258,14 +258,14 @@ describe('sdkwork-v3 auth surface normalization', () => {
         ...createConfig('java'),
         sdkType: 'backend',
         apiPrefix: '/backend/v3/api',
-        packageName: 'com.sdkwork.clawrouter:clawrouter-backend-sdk',
+        packageName: 'com.sdkwork.cloudrouter:cloudrouter-backend-sdk',
       },
       backendSpec,
     );
 
     expect(result.errors).toEqual([]);
     const files = allGeneratedContentByPath(result.files);
-    const modelFile = files.get('src/main/java/com/sdkwork/clawrouter/backend/model/AdminChannelCredentialInput.java') ?? '';
+    const modelFile = files.get('src/main/java/com/sdkwork/cloudrouter/backend/model/AdminChannelCredentialInput.java') ?? '';
     const combinedAuthSurface = [...files.entries()]
       .filter(([path]) => isSdkAuthSurfaceFile(path) && !path.includes('/model/'))
       .map(([path, content]) => `--- ${path} ---\n${content}`)
