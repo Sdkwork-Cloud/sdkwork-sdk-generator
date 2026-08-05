@@ -9,8 +9,12 @@
     "outDir": "./.tmp-tests",
     "rootDir": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "vitest": ["./test-support/vitest-shim.ts"]
+      "@/*": [
+        "./src/*"
+      ],
+      "vitest": [
+        "./test-support/vitest-shim.ts"
+      ]
     }
   },
   "include": [
