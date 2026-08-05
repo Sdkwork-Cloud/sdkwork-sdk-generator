@@ -131,7 +131,7 @@ export class ApiGenerator {
       content: this.format(`use std::sync::Arc;
 
 ${needsMethodImport ? 'use reqwest::Method;\n\n' : ''}${typeImports.size > 0 ? `use crate::api::base::{${Array.from(typeImports).sort().join(', ')}};\n` : ''}use crate::api::paths::${pathFunction};
-${needsAppendQueryString ? 'use crate::api::paths::append_query_string;\n' : ''}use crate::http::{SdkworkError, SdkworkHttpClient${needsEventStream ? ', SseStream' : ''}};
+${needsAppendQueryString ? 'use crate::api::paths::append_query_string;\n' : ''}use crate::http::{SdkworkError, SdkworkHttpClient${needsEventStream ? ', SseStream' : ''}${needsBinaryResponse ? ', BinaryResponseStream' : ''}};
 ${modelImports}
 #[derive(Clone)]
 pub struct ${apiName.structName} {
@@ -333,6 +333,38 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
         ? `Method::${toHttpMethodLiteral(httpMethod)}`
         : `Method::from_bytes(b"${toHttpMethodLiteral(httpMethod)}").map_err(SdkworkError::InvalidHttpMethod)?`;
       clientCall = `self.client.request_bytes(${methodExpression}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`;
+      const streamClientCall = `self.client.request_bytes_stream(${methodExpression}, &path, ${hasBody ? 'Some(body)' : 'Option::<&serde_json::Value>::None'}, ${queryArg}, ${headersArg}, ${contentTypeArg}, ${skipAuthArg}, ${accessTokenOnlyArg}).await`;
+      const docComment = op.summary
+        ? `/// ${String(op.summary).trim()}\n`
+        : '';
+      const params = signatureParams.length > 0 ? `, ${signatureParams.join(', ')}` : '';
+      const requestHeaderBlock = hasHeaders
+        ? `    let headers = build_request_headers(
+${this.renderHeaderPairs(headerBindings, false, 8)},
+${this.renderHeaderPairs(cookieBindings, true, 8)},
+    );
+`
+        : '';
+      const queryBlock = hasExplicitQuerySerialization
+        ? `    let query = build_query_string(&[
+${this.renderQueryParameterSpecs(queryBindings, 8)}
+    ]);
+`
+        : '';
+      return {
+        content: `${docComment}pub async fn ${normalizedMethodName}(&self${params}) -> Result<Vec<u8>, SdkworkError> {
+${queryBlock}    let path = ${requestPathExpression};
+${requestHeaderBlock}    ${clientCall}
+}
+
+/// Streaming variant of the same operation: yields the binary body in
+/// bounded chunks without materializing the whole payload in memory.
+pub async fn ${normalizedMethodName}_stream(&self${params}) -> Result<BinaryResponseStream, SdkworkError> {
+${queryBlock}    let path = ${requestPathExpression};
+${requestHeaderBlock}    ${streamClientCall}
+}`,
+        referencedModels,
+      };
     }
 
     const docComment = op.summary

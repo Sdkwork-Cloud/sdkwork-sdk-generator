@@ -28,7 +28,7 @@ name = "${crateName}"
 path = "src/lib.rs"
 
 [dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "multipart", "query", "rustls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
