@@ -65,7 +65,7 @@ export class HttpClientGenerator {
 import type { RequestOptions, QueryParams } from '${commonImportPath}';
 import type { AuthTokenManager } from '${commonImportPath}';
 import { BaseHttpClient, buildAuthHeaders, withRetry } from '${commonImportPath}';
-
+${sdkworkV3Unwrap ? "import { sha256Hash } from '@sdkwork/utils';\n" : ''}
 type SdkworkV3UnwrapKind = 'item' | 'page' | 'command' | 'data' | 'void';
 
 export type HttpRequestOptions = RequestOptions & {
@@ -145,7 +145,7 @@ ${apiKeyOrDualToken ? `  private static assertInitialCredentialMode(config: any)
     return Object.keys(mergedHeaders).length > 0 ? mergedHeaders : undefined;
   }
 
-  private async applySdkworkRequestBodyFingerprint(
+${sdkworkV3Unwrap ? `  private async applySdkworkRequestBodyFingerprint(
     headers: Record<string, string> | undefined,
     body: unknown,
   ): Promise<Record<string, string> | undefined> {
@@ -247,18 +247,9 @@ ${apiKeyOrDualToken ? `  private static assertInitialCredentialMode(config: any)
   }
 
   private async sha256Hex(bytes: Uint8Array): Promise<string> {
-    const subtle = globalThis.crypto?.subtle;
-    if (!subtle) {
-      throw new Error('Web Crypto SHA-256 is required for SDKWork idempotent requests with a body.');
-    }
-    const digestInput = new Uint8Array(bytes.byteLength);
-    digestInput.set(bytes);
-    const digest = await subtle.digest('SHA-256', digestInput);
-    return Array.from(new Uint8Array(digest))
-      .map((value) => value.toString(16).padStart(2, '0'))
-      .join('');
+    return sha256Hash(bytes);
   }
-
+` : ''}
   protected buildHeaders(config: any, skipAuth = false): Record<string, string> {
     const headers = super.buildHeaders(config, skipAuth);
     if (config?.accessTokenOnly) {
@@ -591,10 +582,10 @@ ${apiKeyOrDualToken ? `    const apiKey = HttpClient.normalizeCredential(authCon
         ? headers
         : this.applySdkworkAuthHeaders(headers);
     const requestBody = this.buildRequestBody(body, contentType);
-    const preparedHeaders = await this.applySdkworkRequestBodyFingerprint(
+${sdkworkV3Unwrap ? `    const preparedHeaders = await this.applySdkworkRequestBodyFingerprint(
       this.buildRequestHeaders(requestHeaders, body == null ? undefined : contentType),
       requestBody,
-    );
+    );` : `    const preparedHeaders = this.buildRequestHeaders(requestHeaders, body == null ? undefined : contentType);`}
     const payload = await withRetry(
       () => execute.call(this, {
         url: path,
@@ -630,13 +621,16 @@ ${apiKeyOrDualToken ? `    const apiKey = HttpClient.normalizeCredential(authCon
         ? headers
         : this.applySdkworkAuthHeaders(headers);
     const requestBody = this.buildRequestBody(body, contentType);
-    const requestHeaders = await this.applySdkworkRequestBodyFingerprint(
+${sdkworkV3Unwrap ? `    const requestHeaders = await this.applySdkworkRequestBodyFingerprint(
       this.buildRequestHeaders(
         { Accept: 'text/event-stream', ...(authHeaders ?? {}) },
         body == null ? undefined : contentType,
       ),
       requestBody,
-    );
+    );` : `    const requestHeaders = this.buildRequestHeaders(
+      { Accept: 'text/event-stream', ...(authHeaders ?? {}) },
+      body == null ? undefined : contentType,
+    );`}
 
     for await (const data of stream.call(this, path, {
       method,

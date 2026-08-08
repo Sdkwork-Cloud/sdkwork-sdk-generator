@@ -62,6 +62,9 @@ export class BuildConfigGenerator {
       scripts,
       dependencies: {
         [commonPkg.dependencyName]: commonPkg.dependencyVersion,
+        ...(isSdkworkV3TransportPackage
+          ? { '@sdkwork/utils': '^0.11.0' }
+          : {}),
       },
       devDependencies: {
         '@types/node': '^20.0.0',
