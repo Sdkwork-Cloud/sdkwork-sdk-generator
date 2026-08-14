@@ -561,8 +561,8 @@ describe('Flutter generator regressions', () => {
     expect(smokeTestFile).toBeDefined();
     expect(readmeFile).toBeDefined();
     expect(pubspecFile).toBeDefined();
-    expect(pubspecFile!.content).toContain('homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
-    expect(pubspecFile!.content).toContain('repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
+    expect(pubspecFile!.content).toContain('homepage: https://github.com/sdkwork-ai/sdkwork-sdk-generator');
+    expect(pubspecFile!.content).toContain('repository: https://github.com/sdkwork-ai/sdkwork-sdk-generator');
     expect(pubspecFile!.content).toContain('http: ^1.2.0');
     expect(smokeTestFile!.content).toContain("import 'package:notes_app_sdk/notes_app_sdk.dart';");
     expect(smokeTestFile!.content).toContain("final client = SdkworkAppClient.withBaseUrl(baseUrl: 'http://127.0.0.1:${server.port}');");

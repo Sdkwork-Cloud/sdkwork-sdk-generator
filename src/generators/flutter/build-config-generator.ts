@@ -36,8 +36,8 @@ export class BuildConfigGenerator {
       content: this.format(`name: ${pkgName}
 description: ${config.description || config.name + ' SDK'}
 version: ${config.version}
-homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator
-repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator
+homepage: https://github.com/sdkwork-ai/sdkwork-sdk-generator
+repository: https://github.com/sdkwork-ai/sdkwork-sdk-generator
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

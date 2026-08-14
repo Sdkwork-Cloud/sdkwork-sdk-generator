@@ -345,8 +345,8 @@ describe('Dart generator', () => {
     expect(result.errors).toEqual([]);
     expect(pubspec).toBeDefined();
     expect(pubspec!.content).toContain('name: sdkwork_notes_app_sdk_dart');
-    expect(pubspec!.content).toContain('homepage: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
-    expect(pubspec!.content).toContain('repository: https://github.com/Sdkwork-Cloud/sdkwork-sdk-generator');
+    expect(pubspec!.content).toContain('homepage: https://github.com/sdkwork-ai/sdkwork-sdk-generator');
+    expect(pubspec!.content).toContain('repository: https://github.com/sdkwork-ai/sdkwork-sdk-generator');
     expect(pubspec!.content).toContain('http:');
     expect(licenseFile).toBeDefined();
     expect(licenseFile!.content).toContain('MIT License');
