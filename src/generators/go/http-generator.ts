@@ -141,7 +141,10 @@ func (c *Client) SetAuthToken(token string) {
 }
 
 func (c *Client) SetAccessToken(token string) {
-    if defaultApiKeyHeader != "Access-Token" {
+    // Dual-token mode keeps the `Authorization` bearer set by SetAuthToken;
+    // only a stale API key header (when the API key header is not
+    // `Authorization`) is cleared here.
+    if defaultApiKeyHeader != "Authorization" {
         delete(c.headers, defaultApiKeyHeader)
     }
     c.headers["Access-Token"] = token

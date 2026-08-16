@@ -1,0 +1,3 @@
+packages:
+  - "../sdkwork-sdk-commons/sdkwork-sdk-common-typescript"
+  - "../sdkwork-utils/packages/sdkwork-utils-typescript"

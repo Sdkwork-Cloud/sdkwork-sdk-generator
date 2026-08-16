@@ -88,7 +88,10 @@ public class HttpClient {
     }
 
     public func setAccessToken(_ token: String) {
-        if Self.apiKeyHeader.lowercased() != "access-token" {
+        // Dual-token mode keeps the `Authorization` bearer set by
+        // setAuthToken; only a stale API key header (when the API key header
+        // is not `Authorization`) is cleared here.
+        if Self.apiKeyHeader.lowercased() != "authorization" {
             headers.removeValue(forKey: Self.apiKeyHeader)
         }
         headers["Access-Token"] = token

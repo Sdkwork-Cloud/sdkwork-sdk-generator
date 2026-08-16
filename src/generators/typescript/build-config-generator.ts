@@ -63,7 +63,7 @@ export class BuildConfigGenerator {
       dependencies: {
         [commonPkg.dependencyName]: commonPkg.dependencyVersion,
         ...(isSdkworkV3TransportPackage
-          ? { '@sdkwork/utils': '^0.11.0' }
+          ? { '@sdkwork/utils': 'workspace:*' }
           : {}),
       },
       devDependencies: {

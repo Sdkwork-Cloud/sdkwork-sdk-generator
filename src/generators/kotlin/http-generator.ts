@@ -100,7 +100,10 @@ class HttpClient(
     }
 
     fun setAccessToken(token: String) {
-        if (!API_KEY_HEADER.equals("Access-Token", ignoreCase = true)) {
+        // Dual-token mode keeps the `Authorization` bearer set by setAuthToken;
+        // only a stale API key header (when the API key header is not
+        // `Authorization`) is cleared here.
+        if (!API_KEY_HEADER.equals("Authorization", ignoreCase = true)) {
             headers.remove(API_KEY_HEADER)
         }
         headers["Access-Token"] = token
