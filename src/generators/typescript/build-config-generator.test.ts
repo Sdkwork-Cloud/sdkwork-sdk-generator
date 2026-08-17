@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
 import { SDKWORK_V3_TEST_ENVELOPE_SCHEMAS } from '../../framework/sdkwork-v3-envelope-fixtures.js';
@@ -84,6 +88,53 @@ function generatedFileContent(
   return file!.content;
 }
 
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  while (tempDirs.length > 0) {
+    rmSync(tempDirs.pop()!, { recursive: true, force: true });
+  }
+});
+
+function writeJson(filePath: string, value: unknown): void {
+  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf-8');
+}
+
+async function generatedPublishCore(): Promise<string> {
+  const result = await new TypeScriptGenerator().generate(baseConfig, spec);
+  expect(result.errors).toEqual([]);
+  return generatedFileContent(result.files, 'bin/publish-core.mjs');
+}
+
+function runPublishCheck(publishCore: string, dependencyVersion: string) {
+  const root = mkdtempSync(join(tmpdir(), 'sdkwork-publish-check-'));
+  tempDirs.push(root);
+  const dependencyDir = join(root, 'dependency');
+  const consumerDir = join(root, 'consumer');
+  mkdirSync(dependencyDir);
+  mkdirSync(consumerDir);
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'dependency'\n  - 'consumer'\n", 'utf-8');
+  writeJson(join(dependencyDir, 'package.json'), {
+    name: '@sdkwork/test-dependency',
+    version: '1.2.3',
+  });
+  writeJson(join(consumerDir, 'package.json'), {
+    name: '@sdkwork/test-consumer',
+    version: '1.0.0',
+    dependencies: {
+      '@sdkwork/test-dependency': dependencyVersion,
+    },
+  });
+  const scriptFile = join(root, 'publish-core.mjs');
+  writeFileSync(scriptFile, publishCore, 'utf-8');
+  const result = spawnSync(
+    process.execPath,
+    [scriptFile, '--language', 'typescript', '--project-dir', consumerDir, '--action', 'check'],
+    { encoding: 'utf-8' },
+  );
+  return { ...result, consumerDir };
+}
+
 describe('TypeScript build config generator', () => {
   it('marks sdkwork-v3 generated transport packages private with a generator-owned description', async () => {
     const result = await new TypeScriptGenerator().generate(baseConfig, spec);
@@ -96,7 +147,7 @@ describe('TypeScript build config generator', () => {
     expect(packageJson.description).toBe('Generator-owned TypeScript transport SDK for sdkwork-im-sdk.');
   });
 
-  it('builds TypeScript packages before check-mode npm pack validation', async () => {
+  it('builds TypeScript packages before check-mode pnpm pack validation', async () => {
     const result = await new TypeScriptGenerator().generate(baseConfig, spec);
     expect(result.errors).toEqual([]);
 
@@ -107,13 +158,46 @@ describe('TypeScript build config generator', () => {
     expect(runDartStart).toBeGreaterThan(runTypeScriptStart);
 
     const runTypeScriptBody = publishCore.slice(runTypeScriptStart, runDartStart);
-    const installIndex = runTypeScriptBody.indexOf("run('npm', ['install'], { cwd: ctx.projectDir });");
+    const installIndex = runTypeScriptBody.indexOf("run('pnpm', ['install'], { cwd: ctx.projectDir });");
     const buildIndex = runTypeScriptBody.indexOf("run('npm', ['run', 'build'], { cwd: ctx.projectDir });");
-    const packIndex = runTypeScriptBody.indexOf("run('npm', ['pack', '--dry-run'], { cwd: ctx.projectDir });");
+    const packIndex = runTypeScriptBody.indexOf('const packed = packTypeScriptProject(ctx.projectDir);');
 
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(buildIndex).toBeGreaterThan(installIndex);
     expect(packIndex).toBeGreaterThan(buildIndex);
+    expect(runTypeScriptBody).toContain("const args = ['publish', packed.tarball");
+  });
+
+  it('materializes workspace dependencies without changing the source manifest', async () => {
+    const result = runPublishCheck(await generatedPublishCore(), 'workspace:*');
+
+    expect(result.status, result.stderr).toBe(0);
+    const sourceManifest = JSON.parse(
+      await import('node:fs').then(({ readFileSync }) =>
+        readFileSync(join(result.consumerDir, 'package.json'), 'utf-8'),
+      ),
+    ) as { dependencies: Record<string, string> };
+    expect(sourceManifest.dependencies['@sdkwork/test-dependency']).toBe('workspace:*');
+  });
+
+  it('rejects local-only dependencies left in the packed manifest', async () => {
+    const result = runPublishCheck(await generatedPublishCore(), 'file:../dependency');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      '@sdkwork/test-consumer: packed dependencies contains a local-only dependency: @sdkwork/test-dependency@file:../dependency',
+    );
+  });
+
+  it('documents tarball materialization in generated TypeScript READMEs', async () => {
+    const result = await new TypeScriptGenerator().generate(baseConfig, spec);
+    expect(result.errors).toEqual([]);
+
+    const readme = generatedFileContent(result.files, 'README.md');
+    expect(readme).toContain(
+      'TypeScript check and publish commands use pnpm to materialize workspace dependency versions',
+    );
+    expect(readme).toContain('do not rewrite the source `package.json`');
   });
 
   it('keeps non-sdkwork-v3 generated TypeScript package manifests publishable by default', async () => {

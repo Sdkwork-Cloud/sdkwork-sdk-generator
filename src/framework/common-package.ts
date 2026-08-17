@@ -179,7 +179,7 @@ export function resolveTypeScriptCommonPackage(config: GeneratorConfig): TypeScr
   const { name, version } = splitPackageAndVersion(
     dependencySpec || '@sdkwork/sdk-common',
     '@sdkwork/sdk-common',
-    '^1.0.4',
+    '^1.0.5',
   );
   const importPath = normalizeTypeScriptImportPath(codeImport, name);
   return {

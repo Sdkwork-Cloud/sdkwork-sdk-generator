@@ -62,8 +62,14 @@ export class BuildConfigGenerator {
       scripts,
       dependencies: {
         [commonPkg.dependencyName]: commonPkg.dependencyVersion,
+        // Transport packages reference `@sdkwork/utils` for shared runtime
+        // helpers. Use a concrete semver spec — never `workspace:*` — so the
+        // generated package.json is self-contained and survives being copied
+        // outside this monorepo (the generator is published as
+        // `@sdkwork/sdk-generator` and may be invoked from any directory).
+        // `^0.11.0` matches the currently published `@sdkwork/utils` release.
         ...(isSdkworkV3TransportPackage
-          ? { '@sdkwork/utils': 'workspace:*' }
+          ? { '@sdkwork/utils': '^0.11.0' }
           : {}),
       },
       devDependencies: {

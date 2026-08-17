@@ -1,6 +1,6 @@
 {
   "name": "@sdkwork/sdk-generator",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "SDKWork SDK Generator - Professional SDK code generator for TypeScript, Dart, Python, Go, Java, Kotlin, Swift, C#, Flutter, Rust, PHP, and Ruby",
   "author": "SDKWork Team",
   "license": "AGPL-3.0-or-later",
@@ -89,7 +89,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@sdkwork/sdk-common": "workspace:*",
+    "@sdkwork/sdk-common": "^1.0.5",
     "commander": "^12.0.0",
     "fs-extra": "^11.2.0",
     "js-yaml": "^4.1.0",
@@ -111,10 +111,5 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  },
-  "pnpm": {
-    "overrides": {
-      "@sdkwork/sdk-common": "workspace:*"
-    }
   }
 }

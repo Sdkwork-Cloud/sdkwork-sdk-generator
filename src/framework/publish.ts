@@ -9,9 +9,11 @@ function formatFile(content: string): string {
 
 function createPublishCoreScript(): string {
   return formatFile(`#!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { gunzipSync } from 'node:zlib';
 
 const SUPPORTED_LANGUAGES = new Set([
   'typescript',
@@ -183,6 +185,56 @@ function loadJson(filePath) {
   }
 }
 
+function readTarEntry(tarball, entryName) {
+  const archive = gunzipSync(readFileSync(tarball));
+  let offset = 0;
+  while (offset + 512 <= archive.length) {
+    const header = archive.subarray(offset, offset + 512);
+    if (header.every((byte) => byte === 0)) {
+      break;
+    }
+    const name = header.subarray(0, 100).toString('utf-8').replace(/\0.*$/, '');
+    const sizeText = header.subarray(124, 136).toString('ascii').replace(/\0.*$/, '').trim();
+    const size = Number.parseInt(sizeText || '0', 8);
+    const contentStart = offset + 512;
+    if (name === entryName) {
+      return archive.subarray(contentStart, contentStart + size).toString('utf-8');
+    }
+    offset = contentStart + Math.ceil(size / 512) * 512;
+  }
+  fail('Packed tarball does not contain ' + entryName + ': ' + tarball);
+}
+
+function validatePackedNpmManifest(packageJson) {
+  const localProtocol = /^(?:workspace|catalog|file|link):/;
+  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
+    for (const [name, version] of Object.entries(packageJson[field] || {})) {
+      if (typeof version === 'string' && localProtocol.test(version)) {
+        fail(packageJson.name + ': packed ' + field + ' contains a local-only dependency: ' + name + '@' + version);
+      }
+    }
+  }
+}
+
+function packTypeScriptProject(projectDir) {
+  const packDir = mkdtempSync(path.join(tmpdir(), 'sdkwork-npm-pack-'));
+  try {
+    const output = capture('pnpm', ['pack', '--json', '--pack-destination', packDir], projectDir);
+    const result = JSON.parse(output);
+    const record = Array.isArray(result) ? result[0] : result;
+    const tarball = record?.filename;
+    if (typeof tarball !== 'string' || !existsSync(tarball)) {
+      fail('pnpm pack did not produce a readable tarball filename.');
+    }
+    const manifestText = readTarEntry(tarball, 'package/package.json');
+    validatePackedNpmManifest(JSON.parse(manifestText));
+    return { packDir, tarball };
+  } catch (error) {
+    rmSync(packDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 function resolvePythonCommand() {
   const preferred = process.env.PYTHON_BIN || '';
   const candidates = preferred ? [preferred] : ['python3', 'python'];
@@ -239,31 +291,36 @@ function runTypeScript(ctx) {
   const packageJson = loadJson(packageFile);
   const hasBuildScript = Boolean(packageJson?.scripts?.build);
 
-  run('npm', ['install'], { cwd: ctx.projectDir });
+  run('pnpm', ['install'], { cwd: ctx.projectDir });
   if (hasBuildScript) {
     run('npm', ['run', 'build'], { cwd: ctx.projectDir });
   } else {
     log('No build script found in package.json, skipping build.');
   }
 
-  if (ctx.action === 'check') {
-    run('npm', ['pack', '--dry-run'], { cwd: ctx.projectDir });
-    return;
-  }
-
   if (ctx.action === 'build') {
     return;
   }
 
+  const packed = packTypeScriptProject(ctx.projectDir);
+  if (ctx.action === 'check') {
+    rmSync(packed.packDir, { recursive: true, force: true });
+    return;
+  }
+
   const registry = process.env.NPM_REGISTRY_URL || 'https://registry.npmjs.org/';
-  const args = ['publish', '--access', 'public', '--registry', registry];
+  const args = ['publish', packed.tarball, '--access', 'public', '--registry', registry];
   if (ctx.channel === 'test') {
     args.push('--tag', 'next');
   }
   if (ctx.dryRun) {
     args.push('--dry-run');
   }
-  run('npm', args, { cwd: ctx.projectDir });
+  try {
+    run('npm', args, { cwd: ctx.projectDir });
+  } finally {
+    rmSync(packed.packDir, { recursive: true, force: true });
+  }
 }
 
 function runDart(ctx) {

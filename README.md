@@ -821,6 +821,8 @@ Every generated language package includes:
 - `bin/publish.sh`
 - `bin/publish.ps1`
 
+For TypeScript packages, check and publish use pnpm to materialize workspace dependency versions in a temporary tarball. The scripts validate that runtime dependency fields contain no `workspace:`, `catalog:`, `file:`, or `link:` protocols before npm publication, without modifying the source `package.json`.
+
 Use from package root:
 
 ```bash
