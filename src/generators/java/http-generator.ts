@@ -104,9 +104,9 @@ public class HttpClient {
     }
 
     public void setAccessToken(String token) {
-        // Dual-token mode keeps the `Authorization` bearer set by setAuthToken;
+        // Dual-token mode keeps the 'Authorization' bearer set by setAuthToken;
         // only a stale API key header (when the API key header is not
-        // `Authorization`) is cleared here.
+        // 'Authorization') is cleared here.
         if (!"Authorization".equalsIgnoreCase(API_KEY_HEADER)) {
             headers.remove(API_KEY_HEADER);
         }
