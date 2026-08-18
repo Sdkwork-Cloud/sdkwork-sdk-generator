@@ -3098,6 +3098,63 @@ describe('OpenAPI Security And Compliance', () => {
     expect(modelAFile!.content).toContain('modelB?: ModelB;');
   });
 
+  it('should import only models referenced by emitted TypeScript API types', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, {
+      openapi: '3.1.0',
+      info: { title: 'API Import API', version: '1.0.0' },
+      paths: {
+        '/resources': {
+          get: {
+            operationId: 'resources.list',
+            tags: ['Resource'],
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/EmittedFilter' },
+                  },
+                },
+                schema: { $ref: '#/components/schemas/UnusedFallbackFilter' },
+              },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          EmittedFilter: { type: 'object', properties: { state: { type: 'string' } } },
+          UnusedFallbackFilter: { type: 'object', properties: { legacy: { type: 'string' } } },
+        },
+      },
+    });
+    const apiFile = getGeneratedFile(result.files, 'src/api/resource.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile.content).toContain("import type { EmittedFilter } from '../types';");
+    expect(apiFile.content).toContain('filter?: EmittedFilter;');
+    expect(apiFile.content).not.toContain('UnusedFallbackFilter');
+  });
+
+  it('should omit optional TypeScript request properties when their values are undefined', async () => {
+    const generator = new TypeScriptGenerator();
+    const result = await generator.generate(baseConfig, mockSpec);
+    const apiFile = getGeneratedFile(result.files, 'src/api/user.ts');
+    const baseApiFile = getGeneratedFile(result.files, 'src/api/base.ts');
+
+    expect(result.errors).toEqual([]);
+    expect(apiFile.content).toContain(
+      "this.client.request<void>(backendApiPath(`/users`), { ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}), ...(requestOptions?.timeout !== undefined ? { timeout: requestOptions.timeout } : {}), method: 'POST' as any, ...(body !== undefined ? { body, contentType: 'application/json' } : {}) })",
+    );
+    expect(baseApiFile.content).toContain('...(body !== undefined ? { body } : {}),');
+    expect(baseApiFile.content).toContain('...(params !== undefined ? { params } : {}),');
+    expect(baseApiFile.content).toContain('...(headers !== undefined ? { headers } : {}),');
+    expect(baseApiFile.content).toContain('...(contentType !== undefined ? { contentType } : {}),');
+  });
+
   it('should map int64 browser json contracts to TypeScript strings while preserving int32 numbers', async () => {
     const generator = new TypeScriptGenerator();
     const result = await generator.generate(baseConfig, {
@@ -4539,7 +4596,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(apiFile!.content).toContain("'X-Trace-Id': { value: params.xTraceId, style: 'simple', explode: false }");
     expect(apiFile!.content).toContain("session_id: { value: params.sessionId, style: 'form', explode: true }");
     expect(apiFile!.content).toContain(
-      "this.client.request<void>(backendApiPath(`/resources`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'GET' as any, headers: requestHeaders })",
+      "this.client.request<void>(backendApiPath(`/resources`), { ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}), ...(requestOptions?.timeout !== undefined ? { timeout: requestOptions.timeout } : {}), method: 'GET' as any, ...(requestHeaders !== undefined ? { headers: requestHeaders } : {}) })",
     );
     expect(apiFile!.content).not.toContain('headers?: Record<string, string>');
   });
@@ -6165,7 +6222,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors.length).toBe(0);
     const packageJsonFile = result.files.find((f) => f.path === 'package.json');
     expect(packageJsonFile).toBeDefined();
-    expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.4"');
+    expect(packageJsonFile!.content).toContain('"@sdkwork/sdk-common": "^1.0.5"');
   });
 
   it('should hoist inline request and response schemas into explicit operation types across languages', async () => {
@@ -6458,7 +6515,7 @@ describe('OpenAPI Security And Compliance', () => {
     const authApi = result.files.find((file) => file.path === 'src/api/auth.ts');
     expect(result.errors).toEqual([]);
     expect(authApi?.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}), ...(requestOptions?.timeout !== undefined ? { timeout: requestOptions.timeout } : {}), method: 'POST' as any, body, contentType: 'application/json', skipAuth: true, sdkworkUnwrapKind: 'item' })",
     );
   });
 
@@ -6490,7 +6547,7 @@ describe('OpenAPI Security And Compliance', () => {
     const authApi = result.files.find((file) => file.path === 'src/api/auth.ts');
     expect(result.errors).toEqual([]);
     expect(authApi?.content).toContain(
-      "this.client.request<AuthSession>(backendApiPath(`/iam/access_credentials`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(backendApiPath(`/iam/access_credentials`), { ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}), ...(requestOptions?.timeout !== undefined ? { timeout: requestOptions.timeout } : {}), method: 'POST' as any, body, contentType: 'application/json', skipAuth: true, sdkworkUnwrapKind: 'item' })",
     );
   });
 
@@ -6523,7 +6580,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', skipAuth: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions/refresh`), { ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}), ...(requestOptions?.timeout !== undefined ? { timeout: requestOptions.timeout } : {}), method: 'POST' as any, body, contentType: 'application/json', skipAuth: true, sdkworkUnwrapKind: 'item' })",
     );
   });
 
@@ -6557,7 +6614,7 @@ describe('OpenAPI Security And Compliance', () => {
     expect(result.errors).toEqual([]);
     expect(authApi).toBeDefined();
     expect(authApi!.content).toContain(
-      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { signal: requestOptions?.signal, timeout: requestOptions?.timeout, method: 'POST' as any, body, contentType: 'application/json', accessTokenOnly: true })",
+      "this.client.request<AuthSession>(appApiPath(`/auth/sessions`), { ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}), ...(requestOptions?.timeout !== undefined ? { timeout: requestOptions.timeout } : {}), method: 'POST' as any, body, contentType: 'application/json', accessTokenOnly: true, sdkworkUnwrapKind: 'item' })",
     );
     expect(httpClient).toBeDefined();
     expect(httpClient!.content).toContain('accessTokenOnly?: boolean;');
@@ -6605,7 +6662,7 @@ describe('OpenAPI Security And Compliance', () => {
         httpPath: 'src/http/client.ts',
           accessTokenOnlyCall: /auth\/sessions`[\s\S]*accessTokenOnly: true/u,
           refreshCall: /auth\/sessions\/refresh`[\s\S]*skipAuth: true/u,
-          protectedCall: /auth\/sessions\/current`\), \{ signal: requestOptions\?\.signal, timeout: requestOptions\?\.timeout, method: 'GET' as any \}\)/u,
+          protectedCall: /auth\/sessions\/current`\), \{ \.\.\.\(requestOptions\?\.signal !== undefined \? \{ signal: requestOptions\.signal \} : \{\}\), \.\.\.\(requestOptions\?\.timeout !== undefined \? \{ timeout: requestOptions\.timeout \} : \{\}\), method: 'GET' as any, sdkworkUnwrapKind: 'item' \}\)/u,
           transportAuthPolicy: /(?=[\s\S]*access-token-only request requires Access-Token before request dispatch)(?=[\s\S]*x-sdkwork-organization-id)[\s\S]*/iu,
         },
       {

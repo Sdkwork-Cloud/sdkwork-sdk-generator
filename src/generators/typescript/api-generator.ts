@@ -10,7 +10,7 @@ import {
   type TypeScriptResourceNode,
 } from './usage-planner.js';
 import { supportsRequestBodyByDefault, toHttpMethodLiteral } from '../../framework/http-methods.js';
-import { collectSchemaReferences, resolveMediaTypeSchema } from '../../framework/schema.js';
+import { resolveMediaTypeSchema } from '../../framework/schema.js';
 import { extractEventStreamResponseInfo } from '../../framework/responses.js';
 import {
   extractOpenApiParameterContentSchema,
@@ -191,6 +191,11 @@ export class ApiGenerator {
       return allParameters.some((param: any) => param?.in === 'header' || param?.in === 'cookie');
     });
     const needsPathSerializationHelpers = operations.some((op) => this.extractPathParams(op.path).length > 0);
+    const needsAppendQueryStringHelper = operations.some((op) => {
+      const allParameters = op.allParameters || op.parameters || [];
+      return allParameters.some((param: any) => param?.in === 'querystring')
+        || allParameters.some((param: any) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
+    });
     const needsQuerySerializationHelpers = operations.some((op) => {
       const allParameters = op.allParameters || op.parameters || [];
       return allParameters.some((param: any) => param?.in === 'query' && requiresExplicitOpenApiQuerySerialization(param));
@@ -214,13 +219,13 @@ ${typeImports}
 
 ${methods}
 
-function appendQueryString(path: string, rawQueryString: string): string {
+${needsAppendQueryStringHelper ? `function appendQueryString(path: string, rawQueryString: string): string {
   const query = rawQueryString.replace(/^\\?+/, '');
   if (!query) {
     return path;
   }
   return path.includes('?') ? \`\${path}&\${query}\` : \`\${path}?\${query}\`;
-}
+}` : ''}
 
 ${needsPathSerializationHelpers ? this.generatePathSerializationHelpers() : ''}
 ${needsQuerySerializationHelpers ? this.generateQuerySerializationHelpers() : ''}
@@ -306,11 +311,9 @@ export function create${root.className}(client: HttpClient): ${root.className} {
     const typeDefinitions = generatedMethods.flatMap((generated) => generated.typeDefinitions).join('\n\n');
     const methods = generatedMethods.map((generated) => generated.content).join('\n\n');
 
-    return `${typeDefinitions ? `${typeDefinitions}\n\n` : ''}export class ${node.className} {
-  private client: HttpClient;${childProperties ? `\n${childProperties}` : ''}
+    return `${typeDefinitions ? `${typeDefinitions}\n\n` : ''}export class ${node.className} {${node.operations.length > 0 ? '\n  private client: HttpClient;' : ''}${childProperties ? `\n${childProperties}` : ''}
   
-  constructor(client: HttpClient) { 
-    this.client = client;${childInitializers ? `\n${childInitializers}` : ''} 
+  constructor(client: HttpClient) {${node.operations.length > 0 ? '\n    this.client = client;' : ''}${childInitializers ? `\n${childInitializers}` : ''}
   }
 ${methods ? `\n\n${methods}` : ''}
 }`;
@@ -369,15 +372,6 @@ ${methods ? `\n\n${methods}` : ''}
       ? getTypeScriptType(responseSchema, TYPESCRIPT_CONFIG, knownModels)
       : this.inferFallbackResponseType(op);
     const referencedModels = new Set<string>();
-    if (hasBody && requestBodySchema) {
-      this.collectReferencedModels(requestBodySchema, knownModels, referencedModels);
-    }
-    if (responseSchema) {
-      this.collectReferencedModels(responseSchema, knownModels, referencedModels);
-    }
-    for (const parameter of [...pathOpenApiParams, ...queryParams, ...headerParams, ...cookieParams]) {
-      this.collectParameterReferencedModels(parameter, knownModels, referencedModels);
-    }
 
     const pathParamNames = createUniqueIdentifierMap(
       rawPathParams,
@@ -428,6 +422,16 @@ ${methods ? `\n\n${methods}` : ''}
       headerBindings,
       cookieBindings,
     );
+    for (const type of [
+      requestType,
+      responseType,
+      ...pathParams.map((parameter) => parameter.type),
+      ...queryBindings.map((binding) => binding.type),
+      ...headerBindings.map((binding) => binding.type),
+      ...cookieBindings.map((binding) => binding.type),
+    ]) {
+      this.collectTypeReferencedModels(type, knownModels, referencedModels);
+    }
 
     const params: string[] = [];
     if (pathParams.length) {
@@ -598,6 +602,7 @@ ${methods ? `\n\n${methods}` : ''}
       requestPathExpression,
       httpMethod,
       hasBody,
+      requestBodyRequired,
       hasQuery && !hasExplicitQuerySerialization,
       hasHeaders,
       requestBodyInfo?.mediaType,
@@ -623,13 +628,16 @@ ${this.renderNamedParameterRecord(cookieBindings, operationParametersType)}
 
     if (isEventStreamResponse) {
       const streamOptions = [
-        'signal: requestOptions?.signal',
-        'timeout: requestOptions?.timeout',
+        this.renderOptionalObjectProperty('signal', 'requestOptions.signal', 'requestOptions?.signal'),
+        this.renderOptionalObjectProperty('timeout', 'requestOptions.timeout', 'requestOptions?.timeout'),
         `method: '${toHttpMethodLiteral(httpMethod)}' as any`,
-        hasBody ? 'body' : '',
-        hasQuery && !hasExplicitQuerySerialization ? 'params' : '',
-        hasHeaders ? 'headers: requestHeaders' : '',
-        hasBody && requestBodyInfo?.mediaType ? `contentType: '${requestBodyInfo.mediaType.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : '',
+        ...this.renderRequestBodyOptions(hasBody, requestBodyRequired, requestBodyInfo?.mediaType),
+        hasQuery && !hasExplicitQuerySerialization
+          ? this.renderOptionalObjectProperty('params', 'params')
+          : '',
+        hasHeaders
+          ? this.renderOptionalObjectProperty('headers', 'requestHeaders')
+          : '',
         skipAuth ? 'skipAuth: true' : '',
         accessTokenOnly ? 'accessTokenOnly: true' : '',
       ].filter(Boolean).join(', ');
@@ -657,6 +665,7 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
     requestPathExpression: string,
     httpMethod: string,
     hasBody: boolean,
+    requestBodyRequired: boolean,
     hasQueryParams: boolean,
     hasHeaders: boolean,
     mediaType: string | undefined,
@@ -665,18 +674,45 @@ ${queryBlock}${requestHeaderBlock}    return ${call};
     sdkworkUnwrapKind: SdkworkV3UnwrapKind | undefined,
   ): string {
     const options = [
-      'signal: requestOptions?.signal',
-      'timeout: requestOptions?.timeout',
+      this.renderOptionalObjectProperty('signal', 'requestOptions.signal', 'requestOptions?.signal'),
+      this.renderOptionalObjectProperty('timeout', 'requestOptions.timeout', 'requestOptions?.timeout'),
       `method: '${toHttpMethodLiteral(httpMethod)}' as any`,
-      hasBody ? 'body' : '',
-      hasQueryParams ? 'params' : '',
-      hasHeaders ? 'headers: requestHeaders' : '',
-      hasBody && mediaType ? `contentType: '${this.escapeSingleQuoted(mediaType)}'` : '',
+      ...this.renderRequestBodyOptions(hasBody, requestBodyRequired, mediaType),
+      hasQueryParams ? this.renderOptionalObjectProperty('params', 'params') : '',
+      hasHeaders ? this.renderOptionalObjectProperty('headers', 'requestHeaders') : '',
       skipAuth ? 'skipAuth: true' : '',
       accessTokenOnly ? 'accessTokenOnly: true' : '',
       sdkworkUnwrapKind ? `sdkworkUnwrapKind: '${sdkworkUnwrapKind}'` : '',
     ].filter(Boolean).join(', ');
     return `this.client.request<${responseType}>(${requestPathExpression}, { ${options} })`;
+  }
+
+  private renderRequestBodyOptions(
+    hasBody: boolean,
+    requestBodyRequired: boolean,
+    mediaType: string | undefined,
+  ): string[] {
+    if (!hasBody) {
+      return [];
+    }
+
+    const contentType = mediaType
+      ? `contentType: '${this.escapeSingleQuoted(mediaType)}'`
+      : undefined;
+    if (requestBodyRequired) {
+      return ['body', ...(contentType ? [contentType] : [])];
+    }
+
+    const bodyProperties = ['body', ...(contentType ? [contentType] : [])].join(', ');
+    return [`...(body !== undefined ? { ${bodyProperties} } : {})`];
+  }
+
+  private renderOptionalObjectProperty(
+    propertyName: string,
+    valueExpression: string,
+    definedExpression = valueExpression,
+  ): string {
+    return `...(${definedExpression} !== undefined ? { ${propertyName}: ${valueExpression} } : {})`;
   }
 
   private createOperationParametersType(
@@ -1243,26 +1279,20 @@ function serializeHeaderPrimitive(value: unknown): string {
     return 'unknown';
   }
 
-  private collectReferencedModels(
-    schema: any,
-    knownModels: Set<string>,
-    refs: Set<string>
-  ): void {
-    collectSchemaReferences(schema, TYPESCRIPT_CONFIG.namingConventions.modelName, knownModels, refs);
-  }
-
-  private collectParameterReferencedModels(
-    parameter: any,
+  private collectTypeReferencedModels(
+    type: string | undefined,
     knownModels: Set<string>,
     refs: Set<string>,
   ): void {
-    const contentSchema = extractOpenApiParameterContentSchema(parameter);
-    if (contentSchema) {
-      this.collectReferencedModels(contentSchema, knownModels, refs);
+    if (!type) {
       return;
     }
-    if (parameter?.schema) {
-      this.collectReferencedModels(parameter.schema, knownModels, refs);
+
+    const identifiers = new Set(type.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []);
+    for (const modelName of knownModels) {
+      if (identifiers.has(modelName)) {
+        refs.add(modelName);
+      }
     }
   }
 
@@ -1361,7 +1391,13 @@ export abstract class BaseApi {
     headers?: Record<string, string>,
     contentType?: string,
   ): Promise<T> {
-    return this.http.request<T>(\`\${this.basePath}\${path}\`, { method: method as any, body, params, headers, contentType });
+    return this.http.request<T>(\`\${this.basePath}\${path}\`, {
+      method: method as any,
+      ...(body !== undefined ? { body } : {}),
+      ...(params !== undefined ? { params } : {}),
+      ...(headers !== undefined ? { headers } : {}),
+      ...(contentType !== undefined ? { contentType } : {}),
+    });
   }
 }
 `),

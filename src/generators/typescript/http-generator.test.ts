@@ -63,6 +63,23 @@ describe('TypeScript HTTP generator', () => {
     expect(httpClient?.content).not.toMatch(/[ \t]+$/m);
   });
 
+  it('emits inherited overrides and omits undefined request options', async () => {
+    const result = await new TypeScriptGenerator().generate(config, spec);
+
+    expect(result.errors).toEqual([]);
+    const httpClient = result.files.find((file) => file.path === 'src/http/client.ts');
+
+    expect(httpClient?.content).toContain('protected override buildHeaders(config: any, skipAuth = false)');
+    expect(httpClient?.content).toContain('override setAuthToken(token: string): void');
+    expect(httpClient?.content).toContain('override setAccessToken(token: string): void');
+    expect(httpClient?.content).toContain('override setTokenManager(manager: AuthTokenManager): void');
+    expect(httpClient?.content).toContain('override async request<T>(path: string, options: HttpRequestOptions = {})');
+    expect(httpClient?.content).toContain('...(requestBody !== undefined ? { body: requestBody } : {}),');
+    expect(httpClient?.content).toContain('...(preparedHeaders !== undefined ? { headers: preparedHeaders } : {}),');
+    expect(httpClient?.content).toContain('...(params !== undefined ? { params } : {}),');
+    expect(httpClient?.content).toContain('...(contentType !== undefined ? { contentType } : {}),');
+  });
+
   it('normalizes sdkwork-v3 data whether the common transport preserved or removed the envelope', async () => {
     const generator = new HttpClientGenerator();
     const files = generator.generate(

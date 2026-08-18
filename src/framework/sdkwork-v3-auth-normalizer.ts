@@ -383,31 +383,31 @@ function normalizeTypeScriptHttpClient(file: GeneratedFile): GeneratedFile {
   content = content.replace(/\n\s+private static readonly API_KEY_HEADER: string = '[^']+';/g, '');
   content = content.replace(/\n\s+private static readonly API_KEY_USE_BEARER = (?:true|false);/g, '');
   content = content.replace(
-    /\n\s+setApiKey\(apiKey: string\): void \{[\s\S]*?\n\s+}\n\n(?=\s+setAuthToken\()/,
+    /\n\s+override setApiKey\(apiKey: string\): void \{[\s\S]*?\n\s+}\n\n(?=\s+override setAuthToken\()/,
     '\n',
   );
   content = content.replace(
-    /\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken/,
+    /\n\s+override setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+override setAccessToken/,
     [
       '',
-      '  setAuthToken(token: string): void {',
+      '  override setAuthToken(token: string): void {',
       '    super.setAuthToken(token);',
       '  }',
       '',
-      '  setAccessToken',
+      '  override setAccessToken',
     ].join('\n'),
   );
   content = content.replace(
-    /\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager/,
+    /\n\s+override setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+override setTokenManager/,
     [
       '',
-      '  setAccessToken(token: string): void {',
+      '  override setAccessToken(token: string): void {',
       '    const headers = this.getInternalHeaders();',
       "    headers[HttpClient.ACCESS_TOKEN_HEADER] = token;",
       '    super.setAccessToken(token);',
       '  }',
       '',
-      '  setTokenManager',
+      '  override setTokenManager',
     ].join('\n'),
   );
   return {
@@ -423,10 +423,10 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file: GeneratedFile): Generated
   content = content.replace(/\n\s+private static readonly REQUIRES_SDKWORK_ACCESS_TOKEN = (?:true|false);/g, '');
   content = content.replace(/\n\s+private getInternalHeaders\(\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestHeaders)/, '\n');
   content = content.replace(
-    /\n\s+protected buildHeaders\(config: any, skipAuth = false\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestBody)/,
+    /\n\s+protected override buildHeaders\(config: any, skipAuth = false\): Record<string, string> \{[\s\S]*?\n\s+}\n\n(?=\s+private buildRequestBody)/,
     [
       '',
-      '  protected buildHeaders(config: any, skipAuth = false): Record<string, string> {',
+      '  protected override buildHeaders(config: any, skipAuth = false): Record<string, string> {',
       '    const headers = super.buildHeaders(config, true);',
       '    if (!skipAuth && !config?.skipAuth) {',
       '      const apiKey = this.getInternalAuthConfig().apiKey;',
@@ -442,17 +442,17 @@ function normalizeTypeScriptApiKeyOnlyHttpClient(file: GeneratedFile): Generated
     ].join('\n'),
   );
   content = content.replace(
-    /\n\s+setApiKey\(apiKey: string\): void \{[\s\S]*?\n\s+}\n\n(?=\s+setAuthToken\()/,
+    /\n\s+override setApiKey\(apiKey: string\): void \{[\s\S]*?\n\s+}\n\n(?=\s+override setAuthToken\()/,
     [
       '',
-      '  setApiKey(apiKey: string): void {',
+      '  override setApiKey(apiKey: string): void {',
       '    this.getInternalAuthConfig().apiKey = apiKey;',
       '  }',
       '',
     ].join('\n'),
   );
   content = content.replace(
-    /\n\s+setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applyAccessTokenOnlyHeaders\(\n\s+headers\?: Record<string, string>,\n\s+\): Record<string, string> \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+private unwrapSdkworkV3Payload)/,
+    /\n\s+override setAuthToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+override setAccessToken\(token: string\): void \{[\s\S]*?\n\s+}\n\n\s+override setTokenManager\(manager: AuthTokenManager\): void \{[\s\S]*?\n\s+}\n\n\s+private applyAccessTokenOnlyHeaders\(\n\s+headers\?: Record<string, string>,\n\s+\): Record<string, string> \{[\s\S]*?\n\s+}\n\n\s+private applySdkworkAuthHeaders\(headers\?: Record<string, string>\): Record<string, string> \| undefined \{[\s\S]*?\n\s+}\n\n(?=\s+private unwrapSdkworkV3Payload)/,
     '\n',
   );
   content = content.replace(

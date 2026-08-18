@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ApiSpec, GeneratorConfig } from '../../framework/types.js';
@@ -145,6 +145,47 @@ describe('TypeScript build config generator', () => {
     expect(packageJson.name).toBe('sdkwork-im-sdk-generated-typescript');
     expect(packageJson.private).toBe(true);
     expect(packageJson.description).toBe('Generator-owned TypeScript transport SDK for sdkwork-im-sdk.');
+  });
+
+  it('typechecks generated source with strict optional override and unused checks', async () => {
+    const result = await new TypeScriptGenerator().generate(baseConfig, spec);
+    expect(result.errors).toEqual([]);
+
+    const projectDir = mkdtempSync(join(process.cwd(), '.strict-generated-'));
+    tempDirs.push(projectDir);
+    for (const file of result.files.filter((candidate) => candidate.path.startsWith('src/'))) {
+      const filePath = join(projectDir, file.path);
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, file.content, 'utf-8');
+    }
+    writeFileSync(
+      join(projectDir, 'sdkwork-utils.d.ts'),
+      "declare module '@sdkwork/utils' { export function sha256Hash(bytes: Uint8Array): Promise<string>; }\n",
+      'utf-8',
+    );
+    writeJson(join(projectDir, 'tsconfig.json'), {
+      compilerOptions: {
+        target: 'ES2020',
+        module: 'ESNext',
+        lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+        strict: true,
+        exactOptionalPropertyTypes: true,
+        noImplicitOverride: true,
+        noUnusedLocals: true,
+        noEmit: true,
+        moduleResolution: 'bundler',
+        skipLibCheck: true,
+      },
+      include: ['src/**/*', 'sdkwork-utils.d.ts'],
+    });
+
+    const typecheck = spawnSync(
+      process.execPath,
+      [join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc'), '-p', projectDir],
+      { cwd: projectDir, encoding: 'utf-8' },
+    );
+
+    expect(typecheck.status, `${typecheck.stdout}\n${typecheck.stderr}`).toBe(0);
   });
 
   it('builds TypeScript packages before check-mode pnpm pack validation', async () => {
