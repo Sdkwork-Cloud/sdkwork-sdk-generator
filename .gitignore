@@ -103,3 +103,5 @@ config/*.local.toml
 *.log
 .DS_Store
 Thumbs.db
+# Runtime-generated environment configuration
+**/public/runtime-env.json

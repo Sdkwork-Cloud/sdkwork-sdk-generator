@@ -96,10 +96,12 @@ export class BuildConfigGenerator {
   private generateTsConfig(): GeneratedFile {
     const tsconfig = {
       compilerOptions: {
-        target: 'ES2020',
+        target: 'ES2022',
         module: 'ESNext',
-        // Include DOM types so multipart FormData APIs are typed in generated SDKs.
-        lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+        // ES2022 lib is required because generated transports compile the
+        // `@sdkwork/utils` sources in their dependency graph, and utils uses
+        // ES2022 APIs (Array.prototype.at, String.prototype.replaceAll).
+        lib: ['ES2022', 'DOM', 'DOM.Iterable'],
         strict: true,
         esModuleInterop: true,
         skipLibCheck: true,
