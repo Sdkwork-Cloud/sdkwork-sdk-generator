@@ -58,6 +58,7 @@
       "./node/control-plane",
       "./node/init"
     ],
+    "sdkDependencies": [],
     "runtimeEntrypoints": [
       "package.json#scripts.test",
       "package.json#scripts.build",

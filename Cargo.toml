@@ -1,0 +1,13 @@
+# SDKWork build-composition workspace root for sdkwork-sdk-generator.
+# Generated API assembly crates under crates/* are workspace members; sibling
+# and cross-repo SDKWork path dependencies are declared once in this table.
+# Note: rust/ is an independent published client package and is intentionally
+# not a member of this workspace.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.dependencies]
+sdkwork-web-bootstrap = { path = "../sdkwork-web-framework/crates/sdkwork-web-bootstrap" }
+sdkwork-web-core = { path = "../sdkwork-web-framework/crates/sdkwork-web-core" }
+sdkwork-api-sdk-generator-assembly = { path = "crates/sdkwork-api-sdk-generator-assembly" }
