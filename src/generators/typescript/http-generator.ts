@@ -84,8 +84,7 @@ export class HttpClient extends BaseHttpClient {
   private static readonly ACCESS_TOKEN_HEADER: string = '${accessTokenHeader}';
   private static readonly API_KEY_USE_BEARER = ${apiKeyUseBearer ? 'true' : 'false'};
   private static readonly SDKWORK_V3_UNWRAP = ${sdkworkV3Unwrap ? 'true' : 'false'};
-  private static readonly SDKWORK_V3_REQUEST_FINGERPRINTS = ${sdkworkV3Unwrap ? 'true' : 'false'};
-  private static readonly REQUIRES_SDKWORK_ACCESS_TOKEN = ${requiresSdkworkAccessToken ? 'true' : 'false'};
+${sdkworkV3Unwrap ? `  private static readonly SDKWORK_V3_REQUEST_FINGERPRINTS = true;\n` : ''}  private static readonly REQUIRES_SDKWORK_ACCESS_TOKEN = ${requiresSdkworkAccessToken ? 'true' : 'false'};
 
   constructor(config: ${configType}) {
 ${apiKeyOrDualToken ? '    HttpClient.assertInitialCredentialMode(config as any);\n' : ''}    super(config as any);

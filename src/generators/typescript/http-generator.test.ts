@@ -167,7 +167,9 @@ describe('TypeScript HTTP generator', () => {
 
     const httpClient = files.find((file) => file.path === 'src/http/client.ts');
 
-    expect(httpClient?.content).toContain('SDKWORK_V3_REQUEST_FINGERPRINTS = false');
+    expect(httpClient?.content).not.toContain('SDKWORK_V3_REQUEST_FINGERPRINTS');
+    expect(httpClient?.content).not.toContain('applySdkworkRequestBodyFingerprint');
+    expect(httpClient?.content).not.toContain("import { sha256Hash } from '@sdkwork/utils';");
   });
 
   it('generates mutually exclusive API-key-or-dual-token transport for IM', () => {
