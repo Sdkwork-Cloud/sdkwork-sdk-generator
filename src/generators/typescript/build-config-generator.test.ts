@@ -236,7 +236,7 @@ describe('TypeScript build config generator', () => {
 
     const readme = generatedFileContent(result.files, 'README.md');
     expect(readme).toContain(
-      'TypeScript check and publish commands use pnpm to materialize workspace dependency versions',
+      'TypeScript check and publish commands use pnpm for materializing workspace dependency versions',
     );
     expect(readme).toContain('do not rewrite the source `package.json`');
   });
