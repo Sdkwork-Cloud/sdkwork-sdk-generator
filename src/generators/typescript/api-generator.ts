@@ -145,7 +145,10 @@ const TYPESCRIPT_RESERVED_WORDS = new Set([
 ]);
 
 export class ApiGenerator {
+  private vendorPathPrefixes: string[] = [];
+
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
+    this.vendorPathPrefixes = ctx.vendorPathPrefixes;
     const files: GeneratedFile[] = [];
     const tags = Object.keys(ctx.apiGroups);
     const tagMetadataList = buildTypeScriptTagMetadata(tags, config);
@@ -454,6 +457,11 @@ ${methods ? `\n\n${methods}` : ''}
     params.push('requestOptions?: ApiRequestOptions');
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
+    // Paths whose first segment is a declared vendor prefix (e.g.
+    // `/anthropic/v1/messages`) are registered verbatim on the gateway,
+    // so the path helper must never prepend the API prefix.
+    const firstPathSegment = op.path.split('/').filter(Boolean)[0] ?? '';
+    const pathUsesPrefixHelper = !this.vendorPathPrefixes.includes(firstPathSegment);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
       const binding = pathParams.find((param) => param.rawName === paramName);
       const safeName = binding?.safeName || pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, TYPESCRIPT_RESERVED_WORDS);
@@ -461,7 +469,9 @@ ${methods ? `\n\n${methods}` : ''}
       const explode = binding?.explode ? 'true' : 'false';
       return `\${serializePathParameter(${safeName}, { name: '${this.escapeSingleQuoted(paramName)}', style: '${this.escapeSingleQuoted(style)}', explode: ${explode} })}`;
     });
-    const pathExpression = `${config.sdkType}ApiPath(\`${pathTemplate}\`)`;
+    const pathExpression = pathUsesPrefixHelper
+      ? `${config.sdkType}ApiPath(\`${pathTemplate}\`)`
+      : `\`${pathTemplate}\``;
     const requestPathExpression = hasRawQueryString
       ? `appendQueryString(${pathExpression}, rawQueryString)`
       : hasExplicitQuerySerialization

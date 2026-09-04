@@ -45,9 +45,11 @@ interface HeaderParameterBinding extends NamedParameterBinding {
 
 export class ApiGenerator {
   private schemas: Record<string, any> = {};
+  private vendorPathPrefixes: string[] = [];
 
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     this.schemas = ctx.schemas;
+    this.vendorPathPrefixes = ctx.vendorPathPrefixes;
     const files: GeneratedFile[] = [];
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
@@ -281,7 +283,14 @@ ${needsPercentEncodeHelper ? `\n${this.generatePercentEncodeHelper()}` : ''}`),
     const pathExpression = pathParams.length > 0
       ? `format!("${normalizedPath.replace(/\{([^}]+)\}/g, '{}')}", ${formatArgs.join(', ')})`
       : `"${normalizedPath}".to_string()`;
-    const resolvedPathExpression = `${this.resolvePathFunctionName(config)}(&${pathExpression})`;
+    // Paths whose first segment is a declared vendor prefix (e.g.
+    // `/anthropic/v1/messages`) are registered verbatim on the gateway,
+    // so the path helper must never prepend the API prefix.
+    const firstPathSegment = op.path.split('/').filter(Boolean)[0] ?? '';
+    const pathUsesPrefixHelper = !this.vendorPathPrefixes.includes(firstPathSegment);
+    const resolvedPathExpression = pathUsesPrefixHelper
+      ? `${this.resolvePathFunctionName(config)}(&${pathExpression})`
+      : pathExpression;
     const requestPathExpression = hasRawQueryString
       ? `append_query_string(${resolvedPathExpression}, raw_query_string)`
       : hasExplicitQuerySerialization

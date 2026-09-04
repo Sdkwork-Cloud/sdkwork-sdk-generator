@@ -57,9 +57,11 @@ type GeneratedMethod = {
 
 export class ApiGenerator {
   private schemas: Record<string, any> = {};
+  private vendorPathPrefixes: string[] = [];
 
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     this.schemas = ctx.schemas;
+    this.vendorPathPrefixes = ctx.vendorPathPrefixes;
     const files: GeneratedFile[] = [];
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
@@ -343,7 +345,14 @@ ${methods ? `\n\n${methods}` : ''}`;
     params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
-    const rawPath = this.withApiPrefix(config.apiPrefix, normalizedOperationPath);
+    // Paths whose first segment is a declared vendor prefix (e.g.
+    // `/anthropic/v1/messages`) are registered verbatim on the gateway,
+    // so the API prefix must never be prepended to them.
+    const firstPathSegment = op.path.split('/').filter(Boolean)[0] ?? '';
+    const pathUsesPrefixHelper = !this.vendorPathPrefixes.includes(firstPathSegment);
+    const rawPath = pathUsesPrefixHelper
+      ? this.withApiPrefix(config.apiPrefix, normalizedOperationPath)
+      : normalizedOperationPath;
     const pathTemplate = rawPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
       const binding = pathParams.find((param) => param.rawName === paramName);
       const safeName = binding?.safeName || pathParamNames.get(paramName) || PYTHON_CONFIG.namingConventions.propertyName(paramName);

@@ -246,11 +246,26 @@ export abstract class BaseGenerator {
     };
   }
 
+  /**
+   * Resolves the vendor namespace first path segments declared by the spec
+   * (`x-sdkwork-vendor-path-prefixes`). Paths under a vendor prefix are
+   * registered verbatim on the gateway, so generated clients must not
+   * prepend the API prefix to them.
+   */
+  protected resolveVendorPathPrefixes(spec: ApiSpec): string[] {
+    const declared = spec['x-sdkwork-vendor-path-prefixes'];
+    if (!Array.isArray(declared)) {
+      return [];
+    }
+    return declared
+      .map((prefix) => String(prefix ?? '').trim().replace(/^\/+|\/+$/g, ''))
+      .filter((prefix) => prefix.length > 0);
+  }
+
   protected createSchemaContext(spec: ApiSpec): SchemaContext {
     const schemas: Record<string, any> = Object.fromEntries(
       Object.entries(spec.components?.schemas || {}).map(([name, schema]) => [name, this.cloneSchema(schema)])
-    );
-    this.hoistJsonSchemaDefinitions(spec, schemas);
+    );    this.hoistJsonSchemaDefinitions(spec, schemas);
     const schemaFileMap = new Map<string, string>();
     const auth = this.deriveAuthContext(spec);
     const inlineSchemaNameByObject = new WeakMap<object, string>();
@@ -346,7 +361,7 @@ export abstract class BaseGenerator {
       schemaFileMap.set(this.toPascalCase(name), this.toFileName(name));
     }
 
-    return { schemas, schemaFileMap, apiGroups, auth };
+    return { schemas, schemaFileMap, apiGroups, auth, vendorPathPrefixes: this.resolveVendorPathPrefixes(spec) };
   }
 
   protected preservesNamedNonObjectSchemas(): boolean {

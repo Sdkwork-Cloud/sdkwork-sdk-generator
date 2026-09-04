@@ -42,7 +42,10 @@ interface HeaderParameterBinding extends NamedParameterBinding {
 }
 
 export class ApiGenerator {
+  private vendorPathPrefixes: string[] = [];
+
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
+    this.vendorPathPrefixes = ctx.vendorPathPrefixes;
     const files: GeneratedFile[] = [];
     const tags = Object.keys(ctx.apiGroups);
     const resolvedTagNames = resolveSdkTagNames(tags, config);
@@ -235,6 +238,11 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
       : requiredParams;
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
+    // Paths whose first segment is a declared vendor prefix (e.g.
+    // `/anthropic/v1/messages`) are registered verbatim on the gateway,
+    // so the path helper must never prepend the API prefix.
+    const firstPathSegment = op.path.split('/').filter(Boolean)[0] ?? '';
+    const pathUsesPrefixHelper = !this.vendorPathPrefixes.includes(firstPathSegment);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match: string, paramName: string) => {
       const param = pathParams.find((candidate) => candidate.rawName === paramName);
       const safeName = param?.safeName || pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, FLUTTER_RESERVED_WORDS);
@@ -242,7 +250,9 @@ ${needsRequestHeaderHelpers ? this.generateRequestHeaderHelpers() : ''}
       const explode = param?.explode ?? false;
       return `\${serializePathParameter(${safeName}, const PathParameterSpec(${this.formatDartString(paramName)}, ${this.formatDartString(style)}, ${explode ? 'true' : 'false'}))}`;
     });
-    const pathCall = `ApiPaths.${FLUTTER_CONFIG.namingConventions.methodName(config.sdkType)}Path('${pathTemplate}')`;
+    const pathCall = pathUsesPrefixHelper
+      ? `ApiPaths.${FLUTTER_CONFIG.namingConventions.methodName(config.sdkType)}Path('${pathTemplate}')`
+      : `'${pathTemplate}'`;
     const requestPathCall = hasRawQueryString
       ? `ApiPaths.appendQueryString(${pathCall}, rawQueryString)`
       : hasExplicitQuerySerialization

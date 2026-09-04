@@ -104,6 +104,13 @@ export interface ApiSpec {
   paths: Record<string, ApiPathItem>;
   components?: ApiComponents;
   tags?: ApiTag[];
+  /**
+   * Vendor namespace first path segments whose operations are registered
+   * verbatim on the gateway (e.g. `["anthropic", "google", "openai"]` for
+   * `/anthropic/v1/messages`). Generated clients never prepend the API
+   * prefix to these vendor-prefixed paths.
+   */
+  'x-sdkwork-vendor-path-prefixes'?: string[];
 }
 
 export interface ApiPathItem {
@@ -337,6 +344,13 @@ export interface SchemaContext {
   schemaFileMap: Map<string, string>;
   apiGroups: Record<string, ApiOperationGroup>;
   auth: AuthContext;
+  /**
+   * Vendor namespace first path segments declared by the spec
+   * (`x-sdkwork-vendor-path-prefixes`). Operations under a vendor prefix are
+   * registered verbatim on the gateway, so generated clients must never
+   * prepend the API prefix to them.
+   */
+  vendorPathPrefixes: string[];
 }
 
 export interface AuthContext {

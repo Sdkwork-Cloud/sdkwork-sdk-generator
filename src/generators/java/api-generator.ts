@@ -45,9 +45,11 @@ interface HeaderParameterBinding extends NamedParameterBinding {
 
 export class ApiGenerator {
   private schemas: Record<string, any> = {};
+  private vendorPathPrefixes: string[] = [];
 
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
     this.schemas = ctx.schemas;
+    this.vendorPathPrefixes = ctx.vendorPathPrefixes;
     const files: GeneratedFile[] = [];
     const identity = resolveJvmSdkIdentity(config);
     const tags = Object.keys(ctx.apiGroups);
@@ -230,6 +232,11 @@ ${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
     params.push(...optionalHeaderBindings.map((binding) => `${binding.type} ${binding.safeName}`));
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
+    // Paths whose first segment is a declared vendor prefix (e.g.
+    // `/anthropic/v1/messages`) are registered verbatim on the gateway,
+    // so the path helper must never prepend the API prefix.
+    const firstPathSegment = op.path.split('/').filter(Boolean)[0] ?? '';
+    const pathUsesPrefixHelper = !this.vendorPathPrefixes.includes(firstPathSegment);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
       const param = pathParams.find((candidate) => candidate.rawName === paramName);
       const safeName = param?.safeName || pathParamNames.get(paramName) || JAVA_CONFIG.namingConventions.propertyName(paramName);
@@ -237,7 +244,9 @@ ${needsUrlEncodeHelper ? `\n${this.generateUrlEncodeHelper()}` : ''}
       const explode = param?.explode ?? false;
       return `" + serializePathParameter(${safeName}, new PathParameterSpec(${this.formatJavaString(paramName)}, ${this.formatJavaString(style)}, ${explode ? 'true' : 'false'})) + "`;
     });
-    const pathCall = `ApiPaths.${JAVA_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`;
+    const pathCall = pathUsesPrefixHelper
+      ? `ApiPaths.${JAVA_CONFIG.namingConventions.methodName(config.sdkType)}Path("${pathTemplate}")`
+      : `"${pathTemplate}"`;
     const requestPathCall = hasRawQueryString
       ? `ApiPaths.appendQueryString(${pathCall}, rawQueryString)`
       : hasExplicitQuerySerialization

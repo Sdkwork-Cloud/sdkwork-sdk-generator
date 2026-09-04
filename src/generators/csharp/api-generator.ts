@@ -150,7 +150,10 @@ interface HeaderParameterBinding extends NamedParameterBinding {
 }
 
 export class ApiGenerator {
+  private vendorPathPrefixes: string[] = [];
+
   generate(ctx: SchemaContext, config: GeneratorConfig): GeneratedFile[] {
+    this.vendorPathPrefixes = ctx.vendorPathPrefixes;
     const files: GeneratedFile[] = [];
     const namespace = getCSharpNamespace(config);
     const tags = Object.keys(ctx.apiGroups);
@@ -338,6 +341,11 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
     params.push(...optionalHeaderBindings.map((binding) => this.renderMethodParameter(binding)));
 
     const normalizedOperationPath = this.normalizeOperationPath(op.path, config.apiPrefix);
+    // Paths whose first segment is a declared vendor prefix (e.g.
+    // `/anthropic/v1/messages`) are registered verbatim on the gateway,
+    // so the path helper must never prepend the API prefix.
+    const firstPathSegment = op.path.split('/').filter(Boolean)[0] ?? '';
+    const pathUsesPrefixHelper = !this.vendorPathPrefixes.includes(firstPathSegment);
     const pathTemplate = normalizedOperationPath.replace(/\{([^}]+)\}/g, (_match, paramName: string) => {
       const param = pathParams.find((candidate) => candidate.rawName === paramName);
       const safeName = param?.safeName || pathParamNames.get(paramName) || toSafeCamelIdentifier(paramName, CSHARP_RESERVED_WORDS);
@@ -346,7 +354,9 @@ ${needsRequestHeaderHelpers ? `\n${this.generateRequestHeaderHelpers()}` : ''}
       return `{SerializePathParameter(${safeName}, new PathParameterSpec(${this.formatCSharpString(paramName)}, ${this.formatCSharpString(style)}, ${explode ? 'true' : 'false'}))}`;
     });
     const pathExpression = pathParams.length > 0 ? `$\"${pathTemplate}\"` : `\"${pathTemplate}\"`;
-    const pathCall = `ApiPaths.${CSHARP_CONFIG.namingConventions.modelName(config.sdkType)}Path(${pathExpression})`;
+    const pathCall = pathUsesPrefixHelper
+      ? `ApiPaths.${CSHARP_CONFIG.namingConventions.modelName(config.sdkType)}Path(${pathExpression})`
+      : pathExpression;
     const requestPathCall = hasRawQueryString
       ? `ApiPaths.AppendQueryString(${pathCall}, rawQueryString)`
       : hasExplicitQuerySerialization
